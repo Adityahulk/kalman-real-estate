@@ -1,0 +1,99 @@
+import { AuditAction, Prisma } from "@prisma/client";
+import { z } from "zod";
+import { RequestContext } from "../api";
+import { writeAuditEvent } from "../audit";
+import { prisma } from "../db";
+
+export const progressSchema = z.object({
+  progressPct: z.number().min(0).max(100),
+  summary: z.string().min(1),
+  photoFileIds: z.array(z.string()).optional(),
+  visibleToOwner: z.boolean().default(false),
+});
+
+export async function updateSiteAssetProgress(context: RequestContext, siteAssetId: string, input: z.infer<typeof progressSchema>) {
+  const [asset, update] = await prisma.$transaction([
+    prisma.siteAsset.update({ where: { id: siteAssetId }, data: { progressPct: input.progressPct, status: input.progressPct >= 100 ? "COMPLETED" : "IN_PROGRESS" } }),
+    prisma.progressUpdate.create({
+      data: {
+        tenantId: context.tenantId,
+        parentType: "SiteAsset",
+        parentId: siteAssetId,
+        progressPct: input.progressPct,
+        summary: input.summary,
+        photoFileIds: input.photoFileIds as Prisma.InputJsonValue,
+        visibleToOwner: input.visibleToOwner,
+        createdById: context.userId === "seed-admin" ? undefined : context.userId,
+      },
+    }),
+  ]);
+  await writeAuditEvent(context, { action: AuditAction.PROGRESS_UPDATE, entityType: "SiteAsset", entityId: siteAssetId, after: update });
+  return { asset, update };
+}
+
+export async function updateChecklistProgress(context: RequestContext, checklistItemId: string, input: z.infer<typeof progressSchema>) {
+  const [item, update] = await prisma.$transaction([
+    prisma.checklistItem.update({
+      where: { id: checklistItemId },
+      data: { progressPct: input.progressPct, status: input.progressPct >= 100 ? "DONE" : "IN_PROGRESS", completedAt: input.progressPct >= 100 ? new Date() : undefined },
+    }),
+    prisma.progressUpdate.create({
+      data: {
+        tenantId: context.tenantId,
+        parentType: "ChecklistItem",
+        parentId: checklistItemId,
+        progressPct: input.progressPct,
+        summary: input.summary,
+        photoFileIds: input.photoFileIds as Prisma.InputJsonValue,
+        visibleToOwner: input.visibleToOwner,
+        createdById: context.userId === "seed-admin" ? undefined : context.userId,
+      },
+    }),
+  ]);
+  await writeAuditEvent(context, { action: AuditAction.PROGRESS_UPDATE, entityType: "ChecklistItem", entityId: checklistItemId, after: update });
+  return { item, update };
+}
+
+export const issueSchema = z.object({
+  parentType: z.string(),
+  parentId: z.string(),
+  title: z.string().min(2),
+  description: z.string().optional(),
+  severity: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]).default("MEDIUM"),
+  assignedToId: z.string().optional(),
+});
+
+export async function createIssue(context: RequestContext, input: z.infer<typeof issueSchema>) {
+  const issue = await prisma.issue.create({
+    data: {
+      tenantId: context.tenantId,
+      ...input,
+      createdById: context.userId === "seed-admin" ? undefined : context.userId,
+    },
+  });
+  await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "Issue", entityId: issue.id, after: issue });
+  return issue;
+}
+
+export const progressPhotoSchema = z.object({
+  fileAssetIds: z.array(z.string()).min(1),
+  summary: z.string().default("Progress photos uploaded."),
+  visibleToOwner: z.boolean().default(false),
+});
+
+export async function addProgressPhotos(context: RequestContext, progressId: string, input: z.infer<typeof progressPhotoSchema>) {
+  const progress = await prisma.progressUpdate.findFirstOrThrow({
+    where: { id: progressId, tenantId: context.tenantId },
+  });
+  const existing = Array.isArray(progress.photoFileIds) ? progress.photoFileIds : [];
+  const updated = await prisma.progressUpdate.update({
+    where: { id: progressId },
+    data: {
+      photoFileIds: [...existing, ...input.fileAssetIds] as Prisma.InputJsonValue,
+      summary: input.summary || progress.summary,
+      visibleToOwner: input.visibleToOwner,
+    },
+  });
+  await writeAuditEvent(context, { action: AuditAction.UPLOAD, entityType: "ProgressUpdate", entityId: progressId, after: updated });
+  return updated;
+}

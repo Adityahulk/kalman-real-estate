@@ -1,0 +1,810 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  PLATFORM_ADMIN
+  BUILDER_OWNER
+  BUILDER_ADMIN
+  SITE_ENGINEER
+  FINANCE_MANAGER
+  MARKETING_HEAD
+  VIDEOGRAPHER
+  EDITOR
+  CONTRACTOR
+  PLOT_OWNER
+  VIEWER
+}
+
+enum UserStatus {
+  INVITED
+  ACTIVE
+  DISABLED
+}
+
+enum OwnerType {
+  INDIVIDUAL
+  COMPANY
+  SHARED
+}
+
+enum PlotStatus {
+  COMPANY_OWNED
+  ALLOTTED
+  TRANSFERRED
+  REGISTRY_IN_PROGRESS
+  REGISTERED
+  HOLD
+}
+
+enum OwnershipKind {
+  COMPANY_INVENTORY
+  ALLOTMENT
+  TRANSFER
+  REGISTRY
+}
+
+enum CadFormat {
+  DWG
+  DXF
+  VECTOR_PDF
+}
+
+enum CadStatus {
+  UPLOADED
+  CONVERTING
+  PARSING
+  EXTRACTING
+  REVIEW_REQUIRED
+  PUBLISHED
+  FAILED
+}
+
+enum CadScope {
+  PROJECT
+  PLOT
+  UNIT
+  FLOOR
+  ROOM
+  SITE_ASSET
+}
+
+enum CadEntityType {
+  PLOT
+  ROAD
+  BOUNDARY
+  UTILITY
+  PARK
+  GATE
+  CLUBHOUSE
+  DRAINAGE
+  ROOM
+  BATHROOM
+  KITCHEN
+  STAIRCASE
+  PARKING
+  GARDEN
+  WALL
+  DOOR
+  WINDOW
+  ELECTRICAL_POINT
+  PLUMBING_LINE
+  STRUCTURE
+  FINISHING_ZONE
+  UNKNOWN
+}
+
+enum DocumentStatus {
+  DRAFT
+  GENERATED
+  UNDER_REVIEW
+  APPROVED
+  REJECTED
+  ISSUED
+}
+
+enum FileVisibility {
+  ADMIN_ONLY
+  TEAM
+  OWNER_VISIBLE
+  SHARED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CHANGES_REQUESTED
+}
+
+enum MarketingTaskStatus {
+  TODO
+  SHOOT_ASSIGNED
+  RAW_UPLOADED
+  EDIT_ASSIGNED
+  DRAFT_UPLOADED
+  CHANGES_REQUESTED
+  APPROVED
+  PUBLISHED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+  ON_HOLD
+}
+
+enum InsightSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOGIN
+  UPLOAD
+  REVIEW
+  PUBLISH
+  APPROVE
+  REJECT
+  TRANSFER
+  ALLOT
+  REGISTRY_UPDATE
+  PROGRESS_UPDATE
+}
+
+model Tenant {
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique
+  region       String?
+  gstin        String?
+  pan          String?
+  contactEmail String?
+  contactPhone String?
+  logoFileId   String?
+  letterhead   Json?
+  crmUrl       String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  users         User[]
+  projects      Project[]
+  owners        Owner[]
+  files         FileAsset[]
+  auditEvents   AuditEvent[]
+}
+
+model User {
+  id           String     @id @default(cuid())
+  tenantId     String?
+  email        String     @unique
+  passwordHash String
+  name         String
+  phone        String?
+  role         Role
+  status       UserStatus @default(INVITED)
+  lastLoginAt  DateTime?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  tenant       Tenant?    @relation(fields: [tenantId], references: [id])
+  createdAuditEvents AuditEvent[] @relation("AuditActor")
+
+  @@index([tenantId, role])
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  tenantId    String
+  name        String
+  city        String
+  address     String?
+  status      String   @default("ACTIVE")
+  budgetInr   Decimal? @db.Decimal(14, 2)
+  spentInr    Decimal? @db.Decimal(14, 2)
+  progressPct Int      @default(0)
+  startedAt   DateTime?
+  handoverAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  phases      Phase[]
+  blocks      Block[]
+  plots       Plot[]
+  cadFiles    CadFile[]
+  siteAssets  SiteAsset[]
+  boqItems    BOQItem[]
+  marketingTasks MarketingTask[]
+
+  @@index([tenantId])
+}
+
+model Phase {
+  id        String   @id @default(cuid())
+  tenantId  String
+  projectId String
+  name      String
+  sequence  Int      @default(0)
+  createdAt DateTime @default(now())
+  project   Project  @relation(fields: [projectId], references: [id])
+
+  @@index([tenantId, projectId])
+}
+
+model Block {
+  id        String   @id @default(cuid())
+  tenantId  String
+  projectId String
+  name      String
+  createdAt DateTime @default(now())
+  project   Project  @relation(fields: [projectId], references: [id])
+  plots     Plot[]
+
+  @@index([tenantId, projectId])
+}
+
+model Owner {
+  id        String    @id @default(cuid())
+  tenantId  String
+  type      OwnerType
+  name      String
+  email     String?
+  phone     String?
+  address   String?
+  kyc       Json?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id])
+  plots     Plot[]    @relation("CurrentPlotOwner")
+  ownershipRecords OwnershipRecord[]
+
+  @@index([tenantId, phone])
+}
+
+model Plot {
+  id             String     @id @default(cuid())
+  tenantId       String
+  projectId      String
+  blockId        String?
+  code           String
+  label          String?
+  areaSqft       Decimal?   @db.Decimal(12, 2)
+  priceInr       Decimal?   @db.Decimal(14, 2)
+  status         PlotStatus @default(COMPANY_OWNED)
+  facing         String?
+  geometry       Json?
+  currentOwnerId String?
+  ownerVisible   Boolean    @default(true)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  project        Project    @relation(fields: [projectId], references: [id])
+  block          Block?     @relation(fields: [blockId], references: [id])
+  currentOwner   Owner?     @relation("CurrentPlotOwner", fields: [currentOwnerId], references: [id])
+  ownershipRecords OwnershipRecord[]
+  registryRecords RegistryRecord[]
+  checklistItems ChecklistItem[]
+
+  @@unique([tenantId, projectId, code])
+  @@index([tenantId, currentOwnerId])
+}
+
+model OwnershipRecord {
+  id          String        @id @default(cuid())
+  tenantId    String
+  plotId      String
+  ownerId     String?
+  kind        OwnershipKind
+  amountInr   Decimal?      @db.Decimal(14, 2)
+  sharePct    Decimal?      @db.Decimal(5, 2)
+  documentId  String?
+  notes       String?
+  effectiveAt DateTime      @default(now())
+  createdById String?
+  createdAt   DateTime      @default(now())
+
+  plot        Plot          @relation(fields: [plotId], references: [id])
+  owner       Owner?        @relation(fields: [ownerId], references: [id])
+
+  @@index([tenantId, plotId, effectiveAt])
+}
+
+model RegistryRecord {
+  id           String   @id @default(cuid())
+  tenantId     String
+  plotId       String
+  status       String
+  registryNo   String?
+  registryDate DateTime?
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  plot         Plot     @relation(fields: [plotId], references: [id])
+
+  @@index([tenantId, plotId])
+}
+
+model CadFile {
+  id            String    @id @default(cuid())
+  tenantId      String
+  projectId     String?
+  parentType    CadScope
+  parentId      String
+  format        CadFormat
+  status        CadStatus @default(UPLOADED)
+  originalName  String
+  storageKey    String
+  version       Int       @default(1)
+  errorMessage  String?
+  processingLog Json?
+  uploadedById  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  project       Project?  @relation(fields: [projectId], references: [id])
+  scenes        CadScene[]
+  versions      CadVersion[]
+  reviewIssues  CadReviewIssue[]
+
+  @@index([tenantId, parentType, parentId])
+}
+
+model CadScene {
+  id         String   @id @default(cuid())
+  tenantId   String
+  cadFileId  String
+  scope      CadScope
+  parentId   String
+  bounds     Json
+  units      String   @default("feet")
+  sceneJson  Json
+  publishedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  cadFile    CadFile  @relation(fields: [cadFileId], references: [id])
+  layers     CadLayer[]
+  entities   CadEntity[]
+
+  @@index([tenantId, scope, parentId])
+}
+
+model CadLayer {
+  id        String   @id @default(cuid())
+  tenantId  String
+  sceneId   String
+  name      String
+  color     String?
+  visible   Boolean  @default(true)
+  purpose   String?
+  metadata  Json?
+  scene     CadScene @relation(fields: [sceneId], references: [id])
+
+  @@index([tenantId, sceneId])
+}
+
+model CadEntity {
+  id           String        @id @default(cuid())
+  tenantId     String
+  sceneId      String
+  layerId      String?
+  type         CadEntityType
+  label        String?
+  confidence   Decimal       @db.Decimal(5, 2)
+  geometry     Json
+  measurements Json?
+  sourceHandle String?
+  sourceLayer  String?
+  status       String        @default("SUGGESTED")
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  scene        CadScene      @relation(fields: [sceneId], references: [id])
+  spatialLinks SpatialLink[]
+
+  @@index([tenantId, sceneId, type])
+}
+
+model CadReviewIssue {
+  id        String   @id @default(cuid())
+  tenantId  String
+  cadFileId String
+  entityId  String?
+  severity  InsightSeverity @default(MEDIUM)
+  code      String
+  message   String
+  resolved  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  cadFile   CadFile  @relation(fields: [cadFileId], references: [id])
+
+  @@index([tenantId, cadFileId, resolved])
+}
+
+model CadVersion {
+  id          String   @id @default(cuid())
+  tenantId    String
+  cadFileId   String
+  version     Int
+  status      CadStatus
+  comparison  Json?
+  publishedAt DateTime?
+  createdAt   DateTime @default(now())
+  cadFile     CadFile  @relation(fields: [cadFileId], references: [id])
+
+  @@unique([cadFileId, version])
+  @@index([tenantId, cadFileId])
+}
+
+model SpatialLink {
+  id             String   @id @default(cuid())
+  tenantId       String
+  cadEntityId    String
+  recordType     String
+  recordId       String
+  linkConfidence Decimal  @db.Decimal(5, 2)
+  createdAt      DateTime @default(now())
+  entity         CadEntity @relation(fields: [cadEntityId], references: [id])
+
+  @@index([tenantId, recordType, recordId])
+}
+
+model FileAsset {
+  id          String         @id @default(cuid())
+  tenantId    String
+  storageKey  String
+  fileName    String
+  mimeType    String
+  sizeBytes   Int
+  visibility  FileVisibility @default(ADMIN_ONLY)
+  ownerType   String?
+  ownerId     String?
+  uploadedById String?
+  createdAt   DateTime       @default(now())
+  tenant      Tenant         @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, ownerType, ownerId])
+}
+
+model DocumentTemplate {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  type      String
+  body      String
+  variables Json?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
+model GeneratedDocument {
+  id          String         @id @default(cuid())
+  tenantId    String
+  templateId  String?
+  type        String
+  status      DocumentStatus @default(DRAFT)
+  recordType  String
+  recordId    String
+  fileAssetId String?
+  number      String?
+  data        Json
+  createdById String?
+  approvedById String?
+  approvedAt  DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@index([tenantId, recordType, recordId])
+}
+
+model SiteAsset {
+  id           String   @id @default(cuid())
+  tenantId     String
+  projectId    String
+  name         String
+  type         String
+  contractorId String?
+  progressPct  Int      @default(0)
+  deadline     DateTime?
+  geometry     Json?
+  status       String   @default("PLANNED")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  project      Project  @relation(fields: [projectId], references: [id])
+
+  @@index([tenantId, projectId, type])
+}
+
+model ChecklistTemplate {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  scope     String
+  items     Json
+  createdAt DateTime @default(now())
+}
+
+model ChecklistItem {
+  id          String   @id @default(cuid())
+  tenantId    String
+  plotId      String?
+  parentType  String
+  parentId    String
+  label       String
+  category    String
+  status      String   @default("PENDING")
+  progressPct Int      @default(0)
+  assignedToId String?
+  dueAt       DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  plot        Plot?    @relation(fields: [plotId], references: [id])
+
+  @@index([tenantId, parentType, parentId])
+}
+
+model ProgressUpdate {
+  id          String   @id @default(cuid())
+  tenantId    String
+  parentType  String
+  parentId    String
+  progressPct Int
+  summary     String
+  photoFileIds Json?
+  visibleToOwner Boolean @default(false)
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, parentType, parentId, createdAt])
+}
+
+model Issue {
+  id          String   @id @default(cuid())
+  tenantId    String
+  parentType  String
+  parentId    String
+  title       String
+  description String?
+  severity    InsightSeverity @default(MEDIUM)
+  status      String   @default("OPEN")
+  assignedToId String?
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([tenantId, parentType, parentId, status])
+}
+
+model MarketingTask {
+  id           String              @id @default(cuid())
+  tenantId     String
+  projectId    String
+  title        String
+  brief        String
+  status       MarketingTaskStatus @default(TODO)
+  dueAt        DateTime?
+  createdById  String?
+  videographerId String?
+  editorId     String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+  project      Project             @relation(fields: [projectId], references: [id])
+  media        MediaAsset[]
+  comments     ReviewComment[]
+
+  @@index([tenantId, projectId, status])
+}
+
+model MediaAsset {
+  id        String   @id @default(cuid())
+  tenantId  String
+  taskId    String
+  fileAssetId String
+  kind      String
+  version   Int      @default(1)
+  uploadedById String?
+  createdAt DateTime @default(now())
+  task      MarketingTask @relation(fields: [taskId], references: [id])
+
+  @@index([tenantId, taskId])
+}
+
+model ReviewComment {
+  id        String   @id @default(cuid())
+  tenantId  String
+  taskId    String
+  body      String
+  timecode  String?
+  status    String   @default("OPEN")
+  createdById String?
+  createdAt DateTime @default(now())
+  task      MarketingTask @relation(fields: [taskId], references: [id])
+
+  @@index([tenantId, taskId])
+}
+
+model Approval {
+  id          String         @id @default(cuid())
+  tenantId    String
+  recordType  String
+  recordId    String
+  status      ApprovalStatus @default(PENDING)
+  notes       String?
+  requestedById String?
+  decidedById String?
+  decidedAt   DateTime?
+  createdAt   DateTime       @default(now())
+
+  @@index([tenantId, recordType, recordId, status])
+}
+
+model Vendor {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  type      String
+  phone     String?
+  email     String?
+  gstin     String?
+  createdAt DateTime @default(now())
+  purchaseOrders PurchaseOrder[]
+  invoices Invoice[]
+
+  @@index([tenantId, type])
+}
+
+model Contractor {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  trade     String
+  phone     String?
+  email     String?
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, trade])
+}
+
+model BOQItem {
+  id          String   @id @default(cuid())
+  tenantId    String
+  projectId   String
+  code        String
+  description String
+  unit        String
+  plannedQty  Decimal  @db.Decimal(14, 3)
+  plannedRateInr Decimal @db.Decimal(14, 2)
+  cadQuantity Decimal? @db.Decimal(14, 3)
+  consumedQty Decimal? @db.Decimal(14, 3)
+  category    String
+  cadEntityId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  project     Project  @relation(fields: [projectId], references: [id])
+
+  @@unique([tenantId, projectId, code])
+}
+
+model PurchaseOrder {
+  id          String   @id @default(cuid())
+  tenantId    String
+  vendorId    String?
+  projectId   String
+  number      String
+  status      String   @default("DRAFT")
+  totalInr    Decimal  @db.Decimal(14, 2)
+  lineItems   Json
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  vendor      Vendor?  @relation(fields: [vendorId], references: [id])
+
+  @@unique([tenantId, number])
+}
+
+model Invoice {
+  id          String        @id @default(cuid())
+  tenantId    String
+  vendorId    String?
+  projectId   String
+  number      String
+  totalInr    Decimal       @db.Decimal(14, 2)
+  paymentStatus PaymentStatus @default(UNPAID)
+  fileAssetId String?
+  dueAt       DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  vendor      Vendor?       @relation(fields: [vendorId], references: [id])
+  payments    Payment[]
+
+  @@unique([tenantId, number])
+}
+
+model Payment {
+  id        String   @id @default(cuid())
+  tenantId  String
+  invoiceId String
+  amountInr Decimal  @db.Decimal(14, 2)
+  paidAt    DateTime
+  mode      String
+  reference String?
+  createdAt DateTime @default(now())
+  invoice   Invoice  @relation(fields: [invoiceId], references: [id])
+
+  @@index([tenantId, invoiceId])
+}
+
+model CostInsight {
+  id          String          @id @default(cuid())
+  tenantId    String
+  projectId   String
+  severity    InsightSeverity
+  title       String
+  explanation String
+  source      Json
+  approved    Boolean         @default(false)
+  createdAt   DateTime        @default(now())
+
+  @@index([tenantId, projectId, severity])
+}
+
+model AuditEvent {
+  id          String      @id @default(cuid())
+  tenantId    String?
+  actorUserId String?
+  action      AuditAction
+  entityType  String
+  entityId    String
+  before      Json?
+  after       Json?
+  ipAddress   String?
+  userAgent   String?
+  createdAt   DateTime    @default(now())
+
+  tenant      Tenant?     @relation(fields: [tenantId], references: [id])
+  actor       User?       @relation("AuditActor", fields: [actorUserId], references: [id])
+
+  @@index([tenantId, entityType, entityId, createdAt])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String?
+  channel   String
+  title     String
+  body      String
+  status    String   @default("PENDING")
+  data      Json?
+  sentAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, userId, status])
+}
+
+model BackgroundJob {
+  id         String   @id @default(cuid())
+  tenantId   String?
+  queue      String
+  name       String
+  payload    Json
+  status     String   @default("QUEUED")
+  attempts   Int      @default(0)
+  error      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([tenantId, queue, status])
+}
