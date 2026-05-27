@@ -1,0 +1,51 @@
+FROM node:22-bookworm-slim
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PYTHON_BIN=/usr/bin/python3
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    python3 \
+    python3-pip \
+    libfuse2 \
+    libglib2.0-0 \
+    libxrender1 \
+    libxext6 \
+    libsm6 \
+    libice6 \
+    libfontconfig1 \
+    libxkbcommon-x11-0 \
+    libxcb-cursor0 \
+    libxcb-util1 \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --break-system-packages --no-cache-dir --upgrade ezdxf PyMuPDF
+
+ARG ODA_APPIMAGE_URL=""
+RUN mkdir -p /opt/oda \
+  && if [ -n "$ODA_APPIMAGE_URL" ]; then \
+    curl -fsSL "$ODA_APPIMAGE_URL" -o /tmp/ODAFileConverter.AppImage; \
+    chmod +x /tmp/ODAFileConverter.AppImage; \
+    cd /opt/oda; \
+    /tmp/ODAFileConverter.AppImage --appimage-extract >/dev/null 2>&1 || true; \
+    if [ -x /opt/oda/squashfs-root/AppRun ]; then \
+      ln -sf /opt/oda/squashfs-root/AppRun /opt/oda/ODAFileConverter; \
+    else \
+      cp /tmp/ODAFileConverter.AppImage /opt/oda/ODAFileConverter; \
+    fi; \
+    chmod +x /opt/oda/ODAFileConverter; \
+  else \
+    echo "ODA_APPIMAGE_URL not provided; DWG conversion will stay disabled until ODA_CONVERTER_BIN points to a mounted/installed converter."; \
+  fi
+
+COPY package.json package-lock.json ./
+RUN npm ci --include=dev
+
+COPY . .
+RUN npx prisma generate
+
+CMD ["npm", "run", "worker:cad"]

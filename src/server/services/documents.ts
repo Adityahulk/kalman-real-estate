@@ -7,6 +7,7 @@ import { enqueueDocumentGeneration } from "../jobs";
 import { putLocalObject } from "../storage";
 import { createGeneratedFileAsset } from "./files";
 import { buildGeneratedDocumentPdf } from "./document-pdf";
+import { createNotification } from "./notifications";
 
 export const generateDocumentSchema = z.object({
   templateId: z.string().optional(),
@@ -58,6 +59,11 @@ export async function generateDocument(context: RequestContext, input: z.infer<t
     data: { fileAssetId: file.id, status: DocumentStatus.GENERATED },
   });
   const queue = await enqueueDocumentGeneration({ documentId: document.id, tenantId: context.tenantId });
+  await createNotification(context, {
+    title: "Document generated",
+    body: `${readyDocument.number ?? readyDocument.type} is ready to review and download.`,
+    data: { documentId: readyDocument.id, fileAssetId: file.id },
+  });
   await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "GeneratedDocument", entityId: document.id, after: document });
   return { document: readyDocument, file, queue };
 }
@@ -77,6 +83,11 @@ export async function approveDocument(context: RequestContext, id: string, input
     },
   });
   await writeAuditEvent(context, { action: input.status === "APPROVED" ? AuditAction.APPROVE : AuditAction.REJECT, entityType: "GeneratedDocument", entityId: id, after: { ...document, notes: input.notes } });
+  await createNotification(context, {
+    title: `Document ${input.status.toLowerCase()}`,
+    body: `${document.number ?? document.type} was marked ${input.status}.`,
+    data: { documentId: id, status: input.status },
+  });
   return document;
 }
 

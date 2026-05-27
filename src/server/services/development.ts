@@ -3,6 +3,7 @@ import { z } from "zod";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
+import { createNotification } from "./notifications";
 
 export const progressSchema = z.object({
   progressPct: z.number().min(0).max(100),
@@ -28,6 +29,11 @@ export async function updateSiteAssetProgress(context: RequestContext, siteAsset
     }),
   ]);
   await writeAuditEvent(context, { action: AuditAction.PROGRESS_UPDATE, entityType: "SiteAsset", entityId: siteAssetId, after: update });
+  await createNotification(context, {
+    title: "Site progress updated",
+    body: `${asset.name} is now ${input.progressPct}% complete.`,
+    data: { siteAssetId, progressUpdateId: update.id },
+  });
   return { asset, update };
 }
 
@@ -51,6 +57,11 @@ export async function updateChecklistProgress(context: RequestContext, checklist
     }),
   ]);
   await writeAuditEvent(context, { action: AuditAction.PROGRESS_UPDATE, entityType: "ChecklistItem", entityId: checklistItemId, after: update });
+  await createNotification(context, {
+    title: "Plot checklist updated",
+    body: `${item.label} is now ${input.progressPct}% complete.`,
+    data: { checklistItemId, progressUpdateId: update.id },
+  });
   return { item, update };
 }
 

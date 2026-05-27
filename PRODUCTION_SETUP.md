@@ -89,12 +89,113 @@ CAD upload creates a persisted `CadFile`, returns a presigned upload URL, and qu
 
 The CAD worker entrypoint is `npm run worker:cad`. It uses the production Python extraction script when available:
 
-- DWG: set `ODA_CONVERTER_BIN` to the ODA File Converter binary.
+- DWG: install ODA File Converter and set `ODA_CONVERTER_BIN` to the converter binary path.
 - DXF: install Python package `ezdxf`.
 - Vector PDF: install Python package `PyMuPDF`.
 
 DXF also has a JS fallback through `dxf-parser`.
 
+Local CAD dependency setup:
+
+```bash
+python3 -m pip install --upgrade ezdxf PyMuPDF
+```
+
+Then point the app and workers at the same Python runtime:
+
+```env
+PYTHON_BIN="/absolute/path/to/python3"
+ODA_CONVERTER_BIN="/absolute/path/to/ODAFileConverter"
+```
+
+On this Mac workspace, `ezdxf` and `PyMuPDF` are installed for:
+
+```env
+PYTHON_BIN="/opt/homebrew/Caskroom/miniforge/base/bin/python3"
+```
+
+ODA File Converter is still a host/vendor install because DWG support depends on the ODA binary. Leave `ODA_CONVERTER_BIN` empty until the converter is installed; DXF and vector PDF processing will still work.
+
+Check the live CAD dependency status from the app:
+
+```bash
+GET /api/v1/cad/health
+```
+
 ## Production Deployment Notes
 
 Use managed Postgres, managed Redis, and S3/R2/MinIO-compatible storage. Set the environment variables from `.env.example`, run migrations in CI/CD, and run separate worker processes for CAD parsing, document generation, AI reports, and notifications.
+
+## Containerized Production Deployment
+
+The deployable production shape is split by workload:
+
+- `web`: Next.js standalone server.
+- `cad-worker`: dedicated CAD processing worker with Python, `ezdxf`, `PyMuPDF`, and optional ODA File Converter.
+- `document-worker`: PDF/document generation worker.
+- `ai-worker`: AI/report queue worker.
+- `postgres` and `redis`: included for single-VM production or staging. On AWS/DigitalOcean managed services, point the same env vars at managed Postgres/Redis instead.
+
+Create a production env file:
+
+```bash
+cp .env.production.example .env.production
+```
+
+Build and run:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production build
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm migrate
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+```
+
+Health checks:
+
+```bash
+curl http://localhost:3000/api/v1/health
+```
+
+CAD dependency health requires login because it exposes internal processing capability:
+
+```bash
+GET /api/v1/cad/health
+```
+
+### ODA In Docker
+
+ODA should be installed only in the `cad-worker` image or mounted into the `cad-worker` container. Do not install it in the web image.
+
+Recommended build flow:
+
+1. Download the official Linux ODA File Converter AppImage from Open Design Alliance.
+2. Store it in a private artifact bucket or CI secret-accessible URL.
+3. Build the CAD worker with:
+
+```bash
+ODA_APPIMAGE_URL="https://private-artifacts.example.com/ODAFileConverter.AppImage" \
+docker compose -f docker-compose.prod.yml --env-file .env.production build cad-worker
+```
+
+4. Set this in `.env.production`:
+
+```env
+ODA_CONVERTER_BIN="/opt/oda/ODAFileConverter"
+PYTHON_BIN="/usr/bin/python3"
+```
+
+If `ODA_APPIMAGE_URL` is empty, the CAD worker still supports DXF and vector PDF through Python, but DWG conversion remains disabled and `/api/v1/cad/health` will report `dwg: false`.
+
+### AWS / DigitalOcean Shape
+
+For AWS:
+
+- Run `web`, `cad-worker`, `document-worker`, and `ai-worker` as separate ECS services.
+- Use RDS Postgres, ElastiCache Redis, and S3.
+- Scale `cad-worker` independently based on queue depth.
+
+For DigitalOcean:
+
+- Run these containers on App Platform workers or a Docker Droplet.
+- Use Managed Postgres, Managed Redis, and Spaces.
+- Scale `cad-worker` separately from `web`.

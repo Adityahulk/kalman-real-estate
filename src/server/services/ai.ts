@@ -4,6 +4,7 @@ import { z } from "zod";
 import { RequestContext } from "../api";
 import { enqueueAiReport } from "../jobs";
 import { prisma } from "../db";
+import { createNotification } from "./notifications";
 
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 
@@ -28,7 +29,7 @@ export async function generateCostInsights(context: RequestContext, input: z.inf
     const parsed = JSON.parse(completion.choices[0]?.message.content ?? "{\"insights\":[]}") as {
       insights?: Array<{ severity?: InsightSeverity; title?: string; explanation?: string; source?: unknown }>;
     };
-    return Promise.all(
+    const created = await Promise.all(
       (parsed.insights ?? []).slice(0, 8).map((insight) =>
         prisma.costInsight.create({
           data: {
@@ -42,6 +43,12 @@ export async function generateCostInsights(context: RequestContext, input: z.inf
         }),
       ),
     );
+    await createNotification(context, {
+      title: "AI cost insights generated",
+      body: `${created.length} AI insights are ready for review.`,
+      data: { projectId: input.projectId, count: created.length },
+    });
+    return created;
   }
 
   const insights = await Promise.all(
@@ -61,6 +68,13 @@ export async function generateCostInsights(context: RequestContext, input: z.inf
       ),
   );
 
+  if (insights.length) {
+    await createNotification(context, {
+      title: "Cost variance alerts generated",
+      body: `${insights.length} BOQ variance insights are ready for approval.`,
+      data: { projectId: input.projectId, count: insights.length },
+    });
+  }
   return insights;
 }
 
@@ -110,4 +124,15 @@ export async function generateOwnerProgressSummary(context: RequestContext, inpu
     checklist,
     recentProgress: progress,
   };
+}
+
+export async function approveCostInsight(context: RequestContext, id: string) {
+  const insight = await prisma.costInsight.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  const approved = await prisma.costInsight.update({ where: { id: insight.id }, data: { approved: true } });
+  await createNotification(context, {
+    title: "AI insight approved",
+    body: approved.title,
+    data: { insightId: id, projectId: approved.projectId },
+  });
+  return approved;
 }

@@ -47,6 +47,7 @@ export default async function CadReviewPage({ params }: { params: { id: string }
           parentType: cadFile.parentType,
           parentId: cadFile.parentId,
           version: cadFile.version,
+          projectId: cadFile.projectId,
         }}
         scene={scene ? {
           id: scene.id,

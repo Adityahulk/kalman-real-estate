@@ -1,6 +1,7 @@
 import { Bot, Sparkles } from "lucide-react";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
+import { AiInsightActions } from "./insight-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,10 @@ export default async function AiPage() {
               <span className="chip bg-slate-100 text-slate-700">{insight.severity}</span>
             </div>
             <p className="mt-3 text-sm leading-6 text-slate-600">{insight.explanation}</p>
-            <div className="mt-4 text-xs text-slate-500">{insight.approved ? "Approved by human reviewer" : "Waiting for human review"}</div>
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <div className="text-xs text-slate-500">{insight.approved ? "Approved by human reviewer" : "Waiting for human review"}</div>
+              <AiInsightActions insightId={insight.id} approved={insight.approved} />
+            </div>
           </article>
         ))}
         {!insights.length ? (

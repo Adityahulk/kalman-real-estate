@@ -3,6 +3,7 @@ import { CheckCircle2, Clock3, FileWarning, Layers3, Map } from "lucide-react";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
 import { CadUploadForm } from "./cad-upload-form";
+import { getCadDependencyHealth } from "@/server/services/cad-health";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +11,7 @@ export default async function CadPage() {
   const session = await getSessionUser();
   if (!session) return null;
 
-  const [projects, cadFiles] = await Promise.all([
+  const [projects, cadFiles, cadHealth] = await Promise.all([
     prisma.project.findMany({ where: { tenantId: session.tenantId }, orderBy: { name: "asc" } }),
     prisma.cadFile.findMany({
       where: { tenantId: session.tenantId },
@@ -18,6 +19,7 @@ export default async function CadPage() {
       take: 20,
       include: { scenes: { take: 1, orderBy: { createdAt: "desc" } }, reviewIssues: { where: { resolved: false } } },
     }),
+    getCadDependencyHealth(),
   ]);
 
   return (
@@ -30,7 +32,18 @@ export default async function CadPage() {
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
-        <CadUploadForm projects={projects.map((project) => ({ id: project.id, name: project.name }))} />
+        <div className="space-y-6">
+          <CadUploadForm projects={projects.map((project) => ({ id: project.id, name: project.name }))} />
+          <section className="card p-5">
+            <h2 className="font-semibold">CAD worker health</h2>
+            <div className="mt-4 grid gap-2 text-sm">
+              <HealthRow label="Python" ok={cadHealth.python.ok} />
+              <HealthRow label="DXF ezdxf" ok={cadHealth.ezdxf.ok} fallback="JS fallback available" />
+              <HealthRow label="DWG ODA converter" ok={cadHealth.oda.ok} />
+              <HealthRow label="Vector PDF PyMuPDF" ok={cadHealth.pymupdf.ok} />
+            </div>
+          </section>
+        </div>
 
         <section className="card overflow-hidden">
           <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
@@ -69,6 +82,17 @@ export default async function CadPage() {
         </section>
       </div>
     </main>
+  );
+}
+
+function HealthRow({ label, ok, fallback }: { label: string; ok: boolean; fallback?: string }) {
+  return (
+    <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+      <span>{label}</span>
+      <span className={`chip ${ok ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}>
+        {ok ? "ready" : fallback ?? "needs setup"}
+      </span>
+    </div>
   );
 }
 

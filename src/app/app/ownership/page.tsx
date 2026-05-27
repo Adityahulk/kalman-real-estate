@@ -1,4 +1,5 @@
 import { History, Landmark, UserRoundCheck } from "lucide-react";
+import Link from "next/link";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
 import { fullInr } from "@/lib/format";
@@ -53,7 +54,7 @@ export default async function OwnershipPage() {
                 <tbody className="divide-y divide-slate-100">
                   {plots.map((plot) => (
                     <tr key={plot.id}>
-                      <td className="px-5 py-3 font-medium">{plot.code}</td>
+                      <td className="px-5 py-3 font-medium"><Link className="hover:underline" href={`/app/ownership/plots/${plot.id}`}>{plot.code}</Link></td>
                       <td className="px-5 py-3"><span className="chip bg-slate-100 text-slate-700">{plot.status.replaceAll("_", " ")}</span></td>
                       <td className="px-5 py-3">{plot.currentOwner?.name ?? "Company"}</td>
                       <td className="px-5 py-3">{plot.areaSqft?.toString() ?? "-"} sq ft</td>

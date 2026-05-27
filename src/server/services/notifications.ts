@@ -13,13 +13,13 @@ export const notificationSchema = z.object({
 
 export async function createNotification(
   context: Pick<RequestContext, "tenantId">,
-  input: z.infer<typeof notificationSchema>,
+  input: Omit<z.infer<typeof notificationSchema>, "channel"> & { channel?: string },
 ) {
   return prisma.notification.create({
     data: {
       tenantId: context.tenantId,
       userId: input.userId,
-      channel: input.channel,
+      channel: input.channel ?? "in_app",
       title: input.title,
       body: input.body,
       data: input.data as Prisma.InputJsonValue,

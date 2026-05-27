@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { FormEvent, MouseEvent, PointerEvent, WheelEvent, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 type Json = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
@@ -72,6 +73,7 @@ type CadFile = {
   parentType: string;
   parentId: string;
   version: number;
+  projectId: string | null;
 };
 
 const typeStyle: Record<string, { stroke: string; fill: string; label: string }> = {
@@ -415,6 +417,13 @@ export function CadWorkspace({
                   Publish
                 </button>
               </div>
+              <Link
+                className="btn-outline w-full"
+                href={`/app/cad?parentType=${childScopeFor(selected.type)}&parentId=${selected.id}${cadFile.projectId ? `&projectId=${cadFile.projectId}` : ""}`}
+              >
+                <Focus size={17} />
+                Upload child CAD for this {selected.type.replaceAll("_", " ").toLowerCase()}
+              </Link>
             </form>
           ) : (
             <div className="mt-6 rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">
@@ -438,6 +447,12 @@ export function CadWorkspace({
       </div>
     </div>
   );
+}
+
+function childScopeFor(type: CadEntityType) {
+  if (type === "PLOT") return "PLOT";
+  if (type === "ROOM" || type === "KITCHEN" || type === "BATHROOM") return "ROOM";
+  return "SITE_ASSET";
 }
 
 function ToolbarButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {

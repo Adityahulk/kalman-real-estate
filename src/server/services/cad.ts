@@ -5,6 +5,7 @@ import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { enqueueCadProcessing } from "../jobs";
 import { createUploadUrl, storageKey } from "../storage";
+import { createNotification } from "./notifications";
 
 export const cadUploadSchema = z.object({
   projectId: z.string().optional(),
@@ -44,6 +45,11 @@ export async function createCadUpload(context: RequestContext, input: z.infer<ty
 
   const upload = await createUploadUrl({ key, contentType: input.contentType });
   const queue = await enqueueCadProcessing({ cadFileId: cadFile.id, tenantId: context.tenantId });
+  await createNotification(context, {
+    title: "CAD upload received",
+    body: `${cadFile.originalName} is queued for CAD extraction.`,
+    data: { cadFileId: cadFile.id, status: cadFile.status },
+  });
   await writeAuditEvent(context, {
     action: AuditAction.UPLOAD,
     entityType: "CadFile",
@@ -219,6 +225,11 @@ export async function publishCad(context: RequestContext, id: string) {
     entityType: "CadFile",
     entityId: id,
     after: { plotCount: result.plots.length, assetCount: result.assets.length },
+  });
+  await createNotification(context, {
+    title: "CAD published",
+    body: `Published ${result.plots.length} plots and ${result.assets.length} site assets from ${file.originalName}.`,
+    data: { cadFileId: id, plotCount: result.plots.length, assetCount: result.assets.length },
   });
 
   return result;

@@ -1,4 +1,17 @@
 import { PrismaClient } from "@prisma/client";
+import { existsSync, readFileSync } from "node:fs";
+
+for (const file of [".env.local", ".env"]) {
+  if (!existsSync(file)) continue;
+  const lines = readFileSync(file, "utf8").split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (!match || process.env[match[1]]) continue;
+    process.env[match[1]] = match[2].replace(/^"|"$/g, "");
+  }
+}
 
 const baseUrl = process.env.SMOKE_BASE_URL ?? "http://localhost:3000";
 const prisma = new PrismaClient();

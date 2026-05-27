@@ -1,0 +1,86 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+      - redis
+      - migrate
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: "no"
+    command: ["npx", "prisma", "migrate", "deploy"]
+    env_file:
+      - .env.production
+    depends_on:
+      - postgres
+
+  cad-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.cad-worker
+      args:
+        ODA_APPIMAGE_URL: ${ODA_APPIMAGE_URL:-}
+    restart: unless-stopped
+    env_file:
+      - .env.production
+    depends_on:
+      - postgres
+      - redis
+    environment:
+      PYTHON_BIN: /usr/bin/python3
+      ODA_CONVERTER_BIN: ${ODA_CONVERTER_BIN:-}
+
+  document-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    command: ["npm", "run", "worker:documents"]
+    env_file:
+      - .env.production
+    depends_on:
+      - postgres
+      - redis
+
+  ai-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    command: ["npm", "run", "worker:ai"]
+    env_file:
+      - .env.production
+    depends_on:
+      - postgres
+      - redis
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kalman_estate}
+      POSTGRES_USER: ${POSTGRES_USER:-kalman}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+  redis_data:

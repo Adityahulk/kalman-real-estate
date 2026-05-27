@@ -3,6 +3,7 @@ import { z } from "zod";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
+import { createNotification } from "./notifications";
 
 export const boqSchema = z.object({
   projectId: z.string(),
@@ -73,6 +74,11 @@ export async function createInvoice(context: RequestContext, input: z.infer<type
     },
   });
   await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "Invoice", entityId: invoice.id, after: invoice });
+  await createNotification(context, {
+    title: "Invoice uploaded",
+    body: `${invoice.number} for ₹${Number(invoice.totalInr).toLocaleString("en-IN")} is pending payment.`,
+    data: { invoiceId: invoice.id, projectId: invoice.projectId },
+  });
   return invoice;
 }
 
@@ -155,5 +161,10 @@ export async function addInvoicePayment(context: RequestContext, invoiceId: stri
     return { payment, invoice: updatedInvoice };
   });
   await writeAuditEvent(context, { action: AuditAction.UPDATE, entityType: "Invoice", entityId: invoiceId, after: result });
+  await createNotification(context, {
+    title: "Invoice payment recorded",
+    body: `Payment of ₹${input.amountInr.toLocaleString("en-IN")} recorded for ${invoice.number}.`,
+    data: { invoiceId, paymentId: result.payment.id },
+  });
   return result;
 }

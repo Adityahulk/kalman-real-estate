@@ -3,6 +3,7 @@ import { z } from "zod";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
+import { createNotification } from "./notifications";
 
 export const marketingTaskSchema = z.object({
   projectId: z.string(),
@@ -28,6 +29,11 @@ export async function createMarketingTask(context: RequestContext, input: z.infe
     },
   });
   await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "MarketingTask", entityId: task.id, after: task });
+  await createNotification(context, {
+    title: "Marketing task created",
+    body: task.title,
+    data: { taskId: task.id, projectId: task.projectId },
+  });
   return task;
 }
 
@@ -53,6 +59,11 @@ export async function addMarketingMedia(context: RequestContext, taskId: string,
     data: { status: input.kind === "RAW" ? "RAW_UPLOADED" : input.kind === "DRAFT" ? "DRAFT_UPLOADED" : "APPROVED" },
   });
   await writeAuditEvent(context, { action: AuditAction.UPLOAD, entityType: "MarketingTask", entityId: taskId, after: media });
+  await createNotification(context, {
+    title: `${input.kind} media uploaded`,
+    body: `Media version ${media.version} is attached to the marketing task.`,
+    data: { taskId, mediaAssetId: media.id },
+  });
   return media;
 }
 

@@ -37,9 +37,19 @@ export default async function OwnerPlotPage({ params }: { params: { id: string }
           <div className="h-[420px] bg-slate-950 p-6">
             <svg viewBox="0 0 800 500" className="h-full w-full">
               <rect width="800" height="500" fill="#020617" />
-              <rect x="190" y="90" width="420" height="270" rx="6" fill="#f4c54222" stroke="#f4c542" strokeWidth="3" />
+              <pattern id="owner-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+                <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(148,163,184,0.14)" strokeWidth="1" />
+              </pattern>
+              <rect width="800" height="500" fill="url(#owner-grid)" />
+              <rect x="190" y="90" width="420" height="270" rx="6" fill="#f4c54222" stroke="#f4c542" strokeWidth="3" filter="url(#owner-glow)" />
+              <defs>
+                <filter id="owner-glow" x="-40%" y="-40%" width="180%" height="180%">
+                  <feDropShadow dx="0" dy="0" stdDeviation="5" floodColor="#f4c542" floodOpacity="0.65" />
+                </filter>
+              </defs>
               <text x="225" y="145" fill="#f8fafc" fontSize="28">{plot.code}</text>
               <text x="225" y="185" fill="#cbd5e1" fontSize="16">{plot.areaSqft?.toString() ?? "-"} sq ft</text>
+              <text x="225" y="225" fill="#f4c542" fontSize="15">Owner-visible live CAD boundary</text>
             </svg>
           </div>
         </div>

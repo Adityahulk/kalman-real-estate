@@ -11,6 +11,7 @@ import {
   Layers3,
   LogOut,
   Map,
+  Bell,
   Users,
 } from "lucide-react";
 import { getSessionUser } from "@/server/session";
@@ -25,6 +26,7 @@ const nav = [
   { href: "/app/finance", label: "Cost + BOQ", icon: ChartNoAxesCombined },
   { href: "/app/documents", label: "Documents", icon: FileStack },
   { href: "/app/ai", label: "AI Insights", icon: Bot },
+  { href: "/app/notifications", label: "Notifications", icon: Bell },
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {

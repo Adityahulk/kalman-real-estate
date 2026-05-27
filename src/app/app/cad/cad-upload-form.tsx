@@ -1,15 +1,17 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { CadFormat, CadScope } from "@prisma/client";
 import { Loader2, Upload } from "lucide-react";
 
 type ProjectOption = { id: string; name: string };
 
 export function CadUploadForm({ projects }: { projects: ProjectOption[] }) {
-  const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
-  const [parentType, setParentType] = useState<CadScope>("PROJECT");
-  const [parentId, setParentId] = useState(projects[0]?.id ?? "");
+  const searchParams = useSearchParams();
+  const [projectId, setProjectId] = useState(searchParams.get("projectId") ?? projects[0]?.id ?? "");
+  const [parentType, setParentType] = useState<CadScope>((searchParams.get("parentType") as CadScope | null) ?? "PROJECT");
+  const [parentId, setParentId] = useState(searchParams.get("parentId") ?? projects[0]?.id ?? "");
   const [format, setFormat] = useState<CadFormat>("DXF");
   const [originalName, setOriginalName] = useState("master-plan.dxf");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
