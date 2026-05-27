@@ -13,6 +13,7 @@ export const progressSchema = z.object({
 });
 
 export async function updateSiteAssetProgress(context: RequestContext, siteAssetId: string, input: z.infer<typeof progressSchema>) {
+  await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId } });
   const [asset, update] = await prisma.$transaction([
     prisma.siteAsset.update({ where: { id: siteAssetId }, data: { progressPct: input.progressPct, status: input.progressPct >= 100 ? "COMPLETED" : "IN_PROGRESS" } }),
     prisma.progressUpdate.create({
@@ -24,7 +25,7 @@ export async function updateSiteAssetProgress(context: RequestContext, siteAsset
         summary: input.summary,
         photoFileIds: input.photoFileIds as Prisma.InputJsonValue,
         visibleToOwner: input.visibleToOwner,
-        createdById: context.userId === "seed-admin" ? undefined : context.userId,
+        createdById: context.userId,
       },
     }),
   ]);
@@ -38,6 +39,7 @@ export async function updateSiteAssetProgress(context: RequestContext, siteAsset
 }
 
 export async function updateChecklistProgress(context: RequestContext, checklistItemId: string, input: z.infer<typeof progressSchema>) {
+  await prisma.checklistItem.findFirstOrThrow({ where: { id: checklistItemId, tenantId: context.tenantId } });
   const [item, update] = await prisma.$transaction([
     prisma.checklistItem.update({
       where: { id: checklistItemId },
@@ -52,7 +54,7 @@ export async function updateChecklistProgress(context: RequestContext, checklist
         summary: input.summary,
         photoFileIds: input.photoFileIds as Prisma.InputJsonValue,
         visibleToOwner: input.visibleToOwner,
-        createdById: context.userId === "seed-admin" ? undefined : context.userId,
+        createdById: context.userId,
       },
     }),
   ]);
@@ -75,11 +77,12 @@ export const issueSchema = z.object({
 });
 
 export async function createIssue(context: RequestContext, input: z.infer<typeof issueSchema>) {
+  await assertParentInTenant(context, input.parentType, input.parentId);
   const issue = await prisma.issue.create({
     data: {
       tenantId: context.tenantId,
       ...input,
-      createdById: context.userId === "seed-admin" ? undefined : context.userId,
+      createdById: context.userId,
     },
   });
   await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "Issue", entityId: issue.id, after: issue });
@@ -107,4 +110,20 @@ export async function addProgressPhotos(context: RequestContext, progressId: str
   });
   await writeAuditEvent(context, { action: AuditAction.UPLOAD, entityType: "ProgressUpdate", entityId: progressId, after: updated });
   return updated;
+}
+
+async function assertParentInTenant(context: RequestContext, parentType: string, parentId: string) {
+  if (parentType === "Plot") {
+    await prisma.plot.findFirstOrThrow({ where: { id: parentId, tenantId: context.tenantId } });
+    return;
+  }
+  if (parentType === "SiteAsset") {
+    await prisma.siteAsset.findFirstOrThrow({ where: { id: parentId, tenantId: context.tenantId } });
+    return;
+  }
+  if (parentType === "ChecklistItem") {
+    await prisma.checklistItem.findFirstOrThrow({ where: { id: parentId, tenantId: context.tenantId } });
+    return;
+  }
+  throw new Error("Unsupported issue parent type");
 }

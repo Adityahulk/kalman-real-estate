@@ -4,7 +4,7 @@ import { createFileUpload, fileUploadSchema } from "@/server/services/files";
 
 export async function POST(request: NextRequest) {
   try {
-    const context = await getRequestContext(request, "documents.generate");
+    const context = await getRequestContext(request, "files.upload");
     return created(await createFileUpload(context, await parseJson(request, fileUploadSchema)));
   } catch (error) {
     return apiError(error);

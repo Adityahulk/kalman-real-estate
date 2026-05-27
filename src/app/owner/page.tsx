@@ -9,6 +9,7 @@ export const dynamic = "force-dynamic";
 export default async function OwnerPortalPage() {
   const session = await getSessionUser();
   if (!session) return null;
+  if (session.role !== "PLOT_OWNER") return null;
 
   const user = await prisma.user.findUnique({ where: { id: session.id } });
   const owner = await prisma.owner.findFirst({

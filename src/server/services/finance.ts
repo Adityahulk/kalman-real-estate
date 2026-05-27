@@ -19,6 +19,8 @@ export const boqSchema = z.object({
 });
 
 export async function createBoqItem(context: RequestContext, input: z.infer<typeof boqSchema>) {
+  await prisma.project.findFirstOrThrow({ where: { id: input.projectId, tenantId: context.tenantId } });
+  if (input.cadEntityId) await prisma.cadEntity.findFirstOrThrow({ where: { id: input.cadEntityId, tenantId: context.tenantId } });
   const item = await prisma.bOQItem.create({
     data: { tenantId: context.tenantId, ...input },
   });
@@ -36,6 +38,8 @@ export const purchaseOrderSchema = z.object({
 });
 
 export async function createPurchaseOrder(context: RequestContext, input: z.infer<typeof purchaseOrderSchema>) {
+  await prisma.project.findFirstOrThrow({ where: { id: input.projectId, tenantId: context.tenantId } });
+  if (input.vendorId) await prisma.vendor.findFirstOrThrow({ where: { id: input.vendorId, tenantId: context.tenantId } });
   const order = await prisma.purchaseOrder.create({
     data: {
       tenantId: context.tenantId,
@@ -45,7 +49,7 @@ export async function createPurchaseOrder(context: RequestContext, input: z.infe
       status: input.status,
       totalInr: input.totalInr,
       lineItems: input.lineItems as Prisma.InputJsonValue,
-      createdById: context.userId === "seed-admin" ? undefined : context.userId,
+      createdById: context.userId,
     },
   });
   await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "PurchaseOrder", entityId: order.id, after: order });
@@ -62,6 +66,9 @@ export const invoiceSchema = z.object({
 });
 
 export async function createInvoice(context: RequestContext, input: z.infer<typeof invoiceSchema>) {
+  await prisma.project.findFirstOrThrow({ where: { id: input.projectId, tenantId: context.tenantId } });
+  if (input.vendorId) await prisma.vendor.findFirstOrThrow({ where: { id: input.vendorId, tenantId: context.tenantId } });
+  if (input.fileAssetId) await prisma.fileAsset.findFirstOrThrow({ where: { id: input.fileAssetId, tenantId: context.tenantId } });
   const invoice = await prisma.invoice.create({
     data: {
       tenantId: context.tenantId,

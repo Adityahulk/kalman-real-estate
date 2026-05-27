@@ -40,6 +40,7 @@ export const allotPlotSchema = z.object({
 export async function allotPlot(context: RequestContext, plotId: string, input: z.infer<typeof allotPlotSchema>) {
   const result = await prisma.$transaction(async (tx) => {
     const before = await tx.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId } });
+    await tx.owner.findFirstOrThrow({ where: { id: input.ownerId, tenantId: context.tenantId } });
     const plot = await tx.plot.update({
       where: { id: plotId },
       data: { currentOwnerId: input.ownerId, status: PlotStatus.ALLOTTED },
@@ -54,7 +55,7 @@ export async function allotPlot(context: RequestContext, plotId: string, input: 
         sharePct: input.sharePct,
         documentId: input.documentId,
         notes: input.notes,
-        createdById: context.userId === "seed-admin" ? undefined : context.userId,
+        createdById: context.userId,
       },
     });
     return { before, plot, record };
@@ -73,6 +74,7 @@ export const transferPlotSchema = z.object({
 export async function transferPlot(context: RequestContext, plotId: string, input: z.infer<typeof transferPlotSchema>) {
   const result = await prisma.$transaction(async (tx) => {
     const before = await tx.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId } });
+    await tx.owner.findFirstOrThrow({ where: { id: input.buyerOwnerId, tenantId: context.tenantId } });
     const plot = await tx.plot.update({
       where: { id: plotId },
       data: { currentOwnerId: input.buyerOwnerId, status: PlotStatus.TRANSFERRED },
@@ -86,7 +88,7 @@ export async function transferPlot(context: RequestContext, plotId: string, inpu
         amountInr: input.amountInr,
         documentId: input.documentId,
         notes: input.notes,
-        createdById: context.userId === "seed-admin" ? undefined : context.userId,
+        createdById: context.userId,
       },
     });
     return { before, plot, record };
@@ -103,6 +105,7 @@ export const registrySchema = z.object({
 });
 
 export async function updateRegistry(context: RequestContext, plotId: string, input: z.infer<typeof registrySchema>) {
+  await prisma.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId } });
   const registry = await prisma.registryRecord.create({
     data: {
       tenantId: context.tenantId,

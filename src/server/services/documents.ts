@@ -29,7 +29,7 @@ export async function generateDocument(context: RequestContext, input: z.infer<t
       data: input.data as Prisma.InputJsonValue,
       status: DocumentStatus.GENERATED,
       number: `${input.type.toUpperCase()}-${new Date().getFullYear()}-${String(count + 1).padStart(5, "0")}`,
-      createdById: context.userId === "seed-admin" ? undefined : context.userId,
+      createdById: context.userId,
     },
   });
   const tenant = await prisma.tenant.findUnique({ where: { id: context.tenantId } });
@@ -75,10 +75,10 @@ export const approveDocumentSchema = z.object({
 
 export async function approveDocument(context: RequestContext, id: string, input: z.infer<typeof approveDocumentSchema>) {
   const document = await prisma.generatedDocument.update({
-    where: { id },
+    where: { id, tenantId: context.tenantId },
     data: {
       status: input.status,
-      approvedById: context.userId === "seed-admin" ? undefined : context.userId,
+      approvedById: context.userId,
       approvedAt: input.status === "APPROVED" || input.status === "ISSUED" ? new Date() : undefined,
     },
   });
@@ -92,7 +92,35 @@ export async function approveDocument(context: RequestContext, id: string, input
 }
 
 export async function getDocumentDownload(context: RequestContext, id: string) {
-  return prisma.generatedDocument.findFirstOrThrow({
+  const document = await prisma.generatedDocument.findFirstOrThrow({
     where: { id, tenantId: context.tenantId },
   });
+  if (context.role === "PLOT_OWNER") {
+    if (document.recordType !== "Plot") throwForbidden("Document is not visible to this owner");
+    if (document.status !== "APPROVED" && document.status !== "ISSUED") throwForbidden("Document is not approved for owner download");
+    const user = await prisma.user.findUnique({ where: { id: context.userId } });
+    const owner = await prisma.owner.findFirst({
+      where: {
+        tenantId: context.tenantId,
+        OR: [
+          user?.email ? { email: user.email } : undefined,
+          user?.phone ? { phone: user.phone } : undefined,
+        ].filter(Boolean) as Array<{ email: string } | { phone: string }>,
+      },
+    });
+    const plot = owner
+      ? await prisma.plot.findFirst({
+          where: { id: document.recordId, tenantId: context.tenantId, currentOwnerId: owner.id, ownerVisible: true },
+          select: { id: true },
+        })
+      : null;
+    if (!plot) throwForbidden("Document does not belong to this owner");
+  }
+  return document;
+}
+
+function throwForbidden(message: string): never {
+  const error = new Error(message);
+  error.name = "ForbiddenError";
+  throw error;
 }

@@ -8,9 +8,22 @@ export const dynamic = "force-dynamic";
 export default async function OwnerPlotPage({ params }: { params: { id: string } }) {
   const session = await getSessionUser();
   if (!session) return null;
+  if (session.role !== "PLOT_OWNER") notFound();
+
+  const user = await prisma.user.findUnique({ where: { id: session.id } });
+  const owner = await prisma.owner.findFirst({
+    where: {
+      tenantId: session.tenantId,
+      OR: [
+        user?.email ? { email: user.email } : undefined,
+        user?.phone ? { phone: user.phone } : undefined,
+      ].filter(Boolean) as Array<{ email: string } | { phone: string }>,
+    },
+  });
+  if (!owner) notFound();
 
   const plot = await prisma.plot.findFirst({
-    where: { id: params.id, tenantId: session.tenantId, ownerVisible: true },
+    where: { id: params.id, tenantId: session.tenantId, currentOwnerId: owner.id, ownerVisible: true },
     include: {
       currentOwner: true,
       checklistItems: { orderBy: { category: "asc" } },
@@ -20,7 +33,7 @@ export default async function OwnerPlotPage({ params }: { params: { id: string }
   if (!plot) notFound();
 
   const documents = await prisma.generatedDocument.findMany({
-    where: { tenantId: session.tenantId, recordType: "Plot", recordId: plot.id, status: { in: ["APPROVED", "ISSUED", "GENERATED"] } },
+    where: { tenantId: session.tenantId, recordType: "Plot", recordId: plot.id, status: { in: ["APPROVED", "ISSUED"] } },
     orderBy: { createdAt: "desc" },
   });
 

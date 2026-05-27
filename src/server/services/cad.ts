@@ -37,7 +37,7 @@ export async function createCadUpload(context: RequestContext, input: z.infer<ty
       format: input.format,
       originalName: input.originalName,
       storageKey: key,
-      uploadedById: context.userId === "seed-admin" ? undefined : context.userId,
+      uploadedById: context.userId,
       version: version + 1,
       status: CadStatus.UPLOADED,
     },

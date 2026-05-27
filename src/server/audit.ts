@@ -15,7 +15,7 @@ export async function writeAuditEvent(
   return prisma.auditEvent.create({
     data: {
       tenantId: context.tenantId,
-      actorUserId: context.userId === "seed-admin" ? undefined : context.userId,
+      actorUserId: context.userId,
       action: input.action,
       entityType: input.entityType,
       entityId: input.entityId,

@@ -25,7 +25,7 @@ export async function createFileUpload(context: RequestContext, input: z.infer<t
       visibility: input.visibility,
       ownerType: input.ownerType,
       ownerId: input.ownerId,
-      uploadedById: context.userId === "seed-admin" ? undefined : context.userId,
+      uploadedById: context.userId,
     },
   });
 
@@ -55,7 +55,7 @@ export async function createGeneratedFileAsset(
       visibility: input.visibility ?? FileVisibility.ADMIN_ONLY,
       ownerType: input.ownerType,
       ownerId: input.ownerId,
-      uploadedById: context.userId === "seed-admin" ? undefined : context.userId,
+      uploadedById: context.userId,
     },
   });
 }
@@ -65,9 +65,71 @@ export async function getFileForDownload(context: RequestContext, id: string): P
     where: { id, tenantId: context.tenantId },
   });
 
-  if (context.role === "PLOT_OWNER" && file.visibility !== "OWNER_VISIBLE" && file.visibility !== "SHARED") {
-    throw new Error("File is not visible to this owner");
+  if (context.role === "PLOT_OWNER") {
+    if (file.visibility !== "OWNER_VISIBLE" && file.visibility !== "SHARED") {
+      throwForbidden("File is not visible to this owner");
+    }
+
+    const owner = await ownerForUser(context);
+    const canAccess = owner ? await ownerCanAccessFile(owner.id, file) : false;
+    if (!canAccess) {
+      throwForbidden("File does not belong to this owner or is not approved for owner download");
+    }
   }
 
   return file;
+}
+
+async function ownerForUser(context: RequestContext) {
+  const user = await prisma.user.findUnique({ where: { id: context.userId } });
+  if (!user) return null;
+  return prisma.owner.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      OR: [
+        user.email ? { email: user.email } : undefined,
+        user.phone ? { phone: user.phone } : undefined,
+      ].filter(Boolean) as Array<{ email: string } | { phone: string }>,
+    },
+  });
+}
+
+async function ownerCanAccessFile(ownerId: string, file: FileAsset) {
+  if (!file.ownerType || !file.ownerId) return file.visibility === "SHARED";
+
+  if (file.ownerType === "Plot") {
+    const document = await prisma.generatedDocument.findFirst({
+      where: { tenantId: file.tenantId, fileAssetId: file.id },
+      select: { status: true },
+    });
+    if (document && document.status !== "APPROVED" && document.status !== "ISSUED") return false;
+
+    const plot = await prisma.plot.findFirst({
+      where: { id: file.ownerId, tenantId: file.tenantId, currentOwnerId: ownerId, ownerVisible: true },
+      select: { id: true },
+    });
+    return Boolean(plot);
+  }
+
+  if (file.ownerType === "ProgressUpdate") {
+    const progress = await prisma.progressUpdate.findFirst({
+      where: { id: file.ownerId, tenantId: file.tenantId, visibleToOwner: true },
+      select: { parentType: true, parentId: true },
+    });
+    if (!progress || progress.parentType !== "Plot") return false;
+
+    const plot = await prisma.plot.findFirst({
+      where: { id: progress.parentId, tenantId: file.tenantId, currentOwnerId: ownerId, ownerVisible: true },
+      select: { id: true },
+    });
+    return Boolean(plot);
+  }
+
+  return file.visibility === "SHARED";
+}
+
+function throwForbidden(message: string): never {
+  const error = new Error(message);
+  error.name = "ForbiddenError";
+  throw error;
 }

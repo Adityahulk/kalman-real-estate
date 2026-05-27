@@ -39,6 +39,9 @@ assert(cookie, "session cookie missing");
 const me = await request("/api/v1/auth/me", { headers: { cookie } });
 assert(me.json.data?.tenant?.name === "Saldha Land Developers", "tenant session failed");
 
+const unauthPlatform = await request("/api/v1/platform/overview");
+assert(unauthPlatform.response.status === 401, "protected API allowed unauthenticated access");
+
 const plot = await prisma.plot.findFirstOrThrow({ where: { code: "A-101" } });
 const doc = await request("/api/v1/documents/generate", {
   method: "POST",
@@ -58,6 +61,29 @@ const download = await fetch(`${baseUrl}/api/v1/files/${doc.json.data.document.f
 });
 assert(download.status === 200, "document download failed");
 assert(download.headers.get("content-type")?.includes("pdf"), "download is not a PDF");
+
+const ownerLogin = await request("/api/v1/auth/login", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ email: "amandeep@example.com", password: "Kalman@12345" }),
+});
+const ownerCookie = ownerLogin.cookie?.split(";")[0];
+assert(ownerCookie, "owner session cookie missing");
+const blockedOwnerDownload = await fetch(`${baseUrl}/api/v1/files/${doc.json.data.document.fileAssetId}/download`, {
+  headers: { cookie: ownerCookie },
+});
+assert(blockedOwnerDownload.status === 403, "owner downloaded unapproved document");
+
+const approve = await request(`/api/v1/documents/${doc.json.data.document.id}/approve`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ status: "APPROVED", notes: "Smoke test approval" }),
+});
+assert(approve.response.status === 200, "document approval failed");
+const approvedOwnerDownload = await fetch(`${baseUrl}/api/v1/files/${doc.json.data.document.fileAssetId}/download`, {
+  headers: { cookie: ownerCookie },
+});
+assert(approvedOwnerDownload.status === 200, "owner could not download approved document");
 
 const vendor = await request("/api/v1/finance/vendors", {
   method: "POST",

@@ -15,6 +15,7 @@ export const marketingTaskSchema = z.object({
 });
 
 export async function createMarketingTask(context: RequestContext, input: z.infer<typeof marketingTaskSchema>) {
+  await prisma.project.findFirstOrThrow({ where: { id: input.projectId, tenantId: context.tenantId } });
   const task = await prisma.marketingTask.create({
     data: {
       tenantId: context.tenantId,
@@ -24,7 +25,7 @@ export async function createMarketingTask(context: RequestContext, input: z.infe
       dueAt: input.dueAt ? new Date(input.dueAt) : undefined,
       videographerId: input.videographerId,
       editorId: input.editorId,
-      createdById: context.userId === "seed-admin" ? undefined : context.userId,
+      createdById: context.userId,
       status: input.videographerId ? MarketingTaskStatus.SHOOT_ASSIGNED : MarketingTaskStatus.TODO,
     },
   });
@@ -43,6 +44,8 @@ export const mediaSchema = z.object({
 });
 
 export async function addMarketingMedia(context: RequestContext, taskId: string, input: z.infer<typeof mediaSchema>) {
+  await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId } });
+  await prisma.fileAsset.findFirstOrThrow({ where: { id: input.fileAssetId, tenantId: context.tenantId } });
   const version = await prisma.mediaAsset.count({ where: { tenantId: context.tenantId, taskId, kind: input.kind } });
   const media = await prisma.mediaAsset.create({
     data: {
@@ -51,7 +54,7 @@ export async function addMarketingMedia(context: RequestContext, taskId: string,
       fileAssetId: input.fileAssetId,
       kind: input.kind,
       version: version + 1,
-      uploadedById: context.userId === "seed-admin" ? undefined : context.userId,
+      uploadedById: context.userId,
     },
   });
   await prisma.marketingTask.update({
@@ -73,13 +76,14 @@ export const commentSchema = z.object({
 });
 
 export async function addMarketingComment(context: RequestContext, taskId: string, input: z.infer<typeof commentSchema>) {
+  await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId } });
   const comment = await prisma.reviewComment.create({
     data: {
       tenantId: context.tenantId,
       taskId,
       body: input.body,
       timecode: input.timecode,
-      createdById: context.userId === "seed-admin" ? undefined : context.userId,
+      createdById: context.userId,
     },
   });
   await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "ReviewComment", entityId: comment.id, after: comment });
@@ -92,6 +96,7 @@ export const marketingApprovalSchema = z.object({
 });
 
 export async function approveMarketingTask(context: RequestContext, taskId: string, input: z.infer<typeof marketingApprovalSchema>) {
+  await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId } });
   const task = await prisma.marketingTask.update({
     where: { id: taskId },
     data: { status: input.status === "APPROVED" ? "APPROVED" : "CHANGES_REQUESTED" },
@@ -103,7 +108,7 @@ export async function approveMarketingTask(context: RequestContext, taskId: stri
       recordId: taskId,
       status: input.status,
       notes: input.notes,
-      decidedById: context.userId === "seed-admin" ? undefined : context.userId,
+      decidedById: context.userId,
       decidedAt: new Date(),
     },
   });

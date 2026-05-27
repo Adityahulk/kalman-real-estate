@@ -13,6 +13,7 @@ export type Permission =
   | "documents.generate"
   | "documents.approve"
   | "documents.view"
+  | "files.upload"
   | "development.manage"
   | "development.view"
   | "marketing.manage"
@@ -36,6 +37,7 @@ const permissionsByRole: Record<Role, Permission[]> = {
     "documents.generate",
     "documents.approve",
     "documents.view",
+    "files.upload",
     "development.manage",
     "development.view",
     "marketing.manage",
@@ -58,6 +60,7 @@ const permissionsByRole: Record<Role, Permission[]> = {
     "documents.generate",
     "documents.approve",
     "documents.view",
+    "files.upload",
     "development.manage",
     "development.view",
     "marketing.manage",
@@ -77,18 +80,19 @@ const permissionsByRole: Record<Role, Permission[]> = {
     "documents.generate",
     "documents.approve",
     "documents.view",
+    "files.upload",
     "development.manage",
     "development.view",
     "marketing.manage",
     "finance.view",
     "ai.generate",
   ],
-  SITE_ENGINEER: ["cad.view", "development.manage", "development.view", "documents.view"],
-  FINANCE_MANAGER: ["finance.manage", "finance.view", "documents.view", "ai.generate"],
-  MARKETING_HEAD: ["marketing.manage", "marketing.execute", "documents.view"],
-  VIDEOGRAPHER: ["marketing.execute"],
-  EDITOR: ["marketing.execute"],
-  CONTRACTOR: ["development.manage", "development.view"],
+  SITE_ENGINEER: ["cad.view", "development.manage", "development.view", "documents.view", "files.upload"],
+  FINANCE_MANAGER: ["finance.manage", "finance.view", "documents.view", "files.upload", "ai.generate"],
+  MARKETING_HEAD: ["marketing.manage", "marketing.execute", "documents.view", "files.upload"],
+  VIDEOGRAPHER: ["marketing.execute", "files.upload"],
+  EDITOR: ["marketing.execute", "files.upload"],
+  CONTRACTOR: ["development.manage", "development.view", "files.upload"],
   PLOT_OWNER: ["cad.view", "documents.view", "development.view", "owner.portal"],
   VIEWER: ["cad.view", "ownership.view", "documents.view", "development.view", "finance.view"],
 };
