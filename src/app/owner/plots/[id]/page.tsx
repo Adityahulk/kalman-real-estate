@@ -32,10 +32,25 @@ export default async function OwnerPlotPage({ params }: { params: { id: string }
   });
   if (!plot) notFound();
 
-  const documents = await prisma.generatedDocument.findMany({
-    where: { tenantId: session.tenantId, recordType: "Plot", recordId: plot.id, status: { in: ["APPROVED", "ISSUED"] } },
-    orderBy: { createdAt: "desc" },
-  });
+  const [documents, uploadedDocuments] = await Promise.all([
+    prisma.generatedDocument.findMany({
+      where: { tenantId: session.tenantId, recordType: "Plot", recordId: plot.id, status: { in: ["APPROVED", "ISSUED"] } },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.fileAsset.findMany({
+      where: {
+        tenantId: session.tenantId,
+        ownerType: "Plot",
+        ownerId: plot.id,
+        visibility: { in: ["OWNER_VISIBLE", "SHARED"] },
+        OR: [
+          { documentType: null },
+          { documentType: { notIn: ["PAN_CARD", "AADHAAR_CARD", "KYC"] } },
+        ],
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+  ]);
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-6">
@@ -87,7 +102,13 @@ export default async function OwnerPlotPage({ params }: { params: { id: string }
                   {document.fileAssetId ? <a className="text-navy-800 underline" href={`/api/v1/files/${document.fileAssetId}/download`}>Download</a> : null}
                 </div>
               ))}
-              {!documents.length ? <div className="text-sm text-slate-500">No owner-visible documents yet.</div> : null}
+              {uploadedDocuments.map((file) => (
+                <div key={file.id} className="flex items-center justify-between rounded-lg bg-slate-50 p-3 text-sm">
+                  <span>{file.documentType?.replaceAll("_", " ") ?? file.fileName}</span>
+                  <a className="text-navy-800 underline" href={`/api/v1/files/${file.id}/download`}>Download</a>
+                </div>
+              ))}
+              {!documents.length && !uploadedDocuments.length ? <div className="text-sm text-slate-500">No owner-visible documents yet.</div> : null}
             </div>
           </div>
         </div>

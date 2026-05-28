@@ -115,6 +115,20 @@ enum FileVisibility {
   SHARED
 }
 
+enum RealEstateDocumentType {
+  ALLOTMENT_LETTER
+  TRANSFER_LETTER
+  PAN_CARD
+  AADHAAR_CARD
+  REGISTRY_RECEIPT
+  REGISTRY_DEED
+  PAYMENT_RECEIPT
+  KYC
+  AGREEMENT
+  NOC
+  OTHER
+}
+
 enum ApprovalStatus {
   PENDING
   APPROVED
@@ -468,6 +482,10 @@ model FileAsset {
   mimeType    String
   sizeBytes   Int
   visibility  FileVisibility @default(ADMIN_ONLY)
+  documentType RealEstateDocumentType?
+  documentNo   String?
+  documentDate DateTime?
+  notes        String?
   ownerType   String?
   ownerId     String?
   uploadedById String?

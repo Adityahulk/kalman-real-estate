@@ -17,6 +17,7 @@ export const cadUploadSchema = z.object({
 });
 
 export async function createCadUpload(context: RequestContext, input: z.infer<typeof cadUploadSchema>) {
+  await assertCadParentInTenant(context, input);
   const version = await prisma.cadFile.count({
     where: { tenantId: context.tenantId, parentType: input.parentType, parentId: input.parentId },
   });
@@ -140,6 +141,7 @@ export async function publishCad(context: RequestContext, id: string) {
     where: { id, tenantId: context.tenantId },
     include: { scenes: { include: { entities: true }, orderBy: { createdAt: "desc" }, take: 1 } },
   });
+  if (file.status === CadStatus.PUBLISHED) throwBadRequest("This CAD version is already published");
   const scene = file.scenes[0];
   if (!scene) throw new Error("CAD scene is not ready for publish");
 
@@ -148,6 +150,7 @@ export async function publishCad(context: RequestContext, id: string) {
   const result = await prisma.$transaction(async (tx) => {
     const plots = [];
     const assets = [];
+    const checklistItems = [];
 
     for (const entity of confirmedEntities) {
       if (entity.type === "PLOT" && file.projectId) {
@@ -202,6 +205,30 @@ export async function publishCad(context: RequestContext, id: string) {
           },
         });
         assets.push(asset);
+      } else if (file.parentType === "PLOT") {
+        const plot = await tx.plot.findFirstOrThrow({ where: { id: file.parentId, tenantId: context.tenantId } });
+        const item = await tx.checklistItem.create({
+          data: {
+            tenantId: context.tenantId,
+            plotId: plot.id,
+            parentType: entity.type,
+            parentId: entity.id,
+            label: entity.label ?? entity.type.replaceAll("_", " "),
+            category: checklistCategoryFor(entity.type),
+            status: "PENDING",
+            progressPct: 0,
+          },
+        });
+        await tx.spatialLink.create({
+          data: {
+            tenantId: context.tenantId,
+            cadEntityId: entity.id,
+            recordType: "ChecklistItem",
+            recordId: item.id,
+            linkConfidence: entity.confidence,
+          },
+        });
+        checklistItems.push(item);
       }
     }
 
@@ -213,26 +240,53 @@ export async function publishCad(context: RequestContext, id: string) {
         version: file.version,
         status: CadStatus.PUBLISHED,
         publishedAt: new Date(),
-        comparison: { createdPlots: plots.length, createdSiteAssets: assets.length },
+        comparison: { createdPlots: plots.length, createdSiteAssets: assets.length, createdChecklistItems: checklistItems.length },
       },
     });
 
-    return { plots, assets };
+    return { plots, assets, checklistItems };
   });
 
   await writeAuditEvent(context, {
     action: AuditAction.PUBLISH,
     entityType: "CadFile",
     entityId: id,
-    after: { plotCount: result.plots.length, assetCount: result.assets.length },
+    after: { plotCount: result.plots.length, assetCount: result.assets.length, checklistItemCount: result.checklistItems.length },
   });
   await createNotification(context, {
     title: "CAD published",
-    body: `Published ${result.plots.length} plots and ${result.assets.length} site assets from ${file.originalName}.`,
-    data: { cadFileId: id, plotCount: result.plots.length, assetCount: result.assets.length },
+    body: `Published ${result.plots.length} plots, ${result.assets.length} site assets, and ${result.checklistItems.length} plot zones from ${file.originalName}.`,
+    data: { cadFileId: id, plotCount: result.plots.length, assetCount: result.assets.length, checklistItemCount: result.checklistItems.length },
   });
 
   return result;
+}
+
+async function assertCadParentInTenant(context: RequestContext, input: z.infer<typeof cadUploadSchema>) {
+  if (input.projectId) {
+    await prisma.project.findFirstOrThrow({ where: { id: input.projectId, tenantId: context.tenantId } });
+  }
+  if (input.parentType === "PROJECT") {
+    await prisma.project.findFirstOrThrow({ where: { id: input.parentId, tenantId: context.tenantId } });
+    return;
+  }
+  if (input.parentType === "PLOT") {
+    await prisma.plot.findFirstOrThrow({ where: { id: input.parentId, tenantId: context.tenantId } });
+    return;
+  }
+  if (input.parentType === "SITE_ASSET") {
+    await prisma.siteAsset.findFirstOrThrow({ where: { id: input.parentId, tenantId: context.tenantId } });
+  }
+}
+
+function checklistCategoryFor(type: CadEntityType) {
+  if (type === "BATHROOM" || type === "PLUMBING_LINE") return "Plumbing";
+  if (type === "KITCHEN") return "Kitchen";
+  if (type === "ELECTRICAL_POINT") return "Electrical";
+  if (type === "GARDEN") return "Landscape";
+  if (type === "WALL" || type === "STRUCTURE" || type === "STAIRCASE") return "Structure";
+  if (type === "FINISHING_ZONE" || type === "DOOR" || type === "WINDOW") return "Finishing";
+  return "Construction";
 }
 
 export async function getCadVersions(context: RequestContext, id: string) {
@@ -266,4 +320,10 @@ function readMeasurement(measurements: Prisma.JsonValue | null, key: string) {
   const value = (measurements as Record<string, unknown>)[key];
   if (typeof value !== "number") return undefined;
   return value;
+}
+
+function throwBadRequest(message: string): never {
+  const error = new Error(message);
+  error.name = "BadRequestError";
+  throw error;
 }

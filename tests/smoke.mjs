@@ -1,5 +1,7 @@
 import { PrismaClient } from "@prisma/client";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 
 for (const file of [".env.local", ".env"]) {
   if (!existsSync(file)) continue;
@@ -43,6 +45,10 @@ const unauthPlatform = await request("/api/v1/platform/overview");
 assert(unauthPlatform.response.status === 401, "protected API allowed unauthenticated access");
 
 const plot = await prisma.plot.findFirstOrThrow({ where: { code: "A-101" } });
+const project = await prisma.project.findFirstOrThrow({ where: { id: plot.projectId } });
+const tenantId = project.tenantId;
+const stamp = `${Date.now()}-${randomUUID().slice(0, 8)}`;
+
 const doc = await request("/api/v1/documents/generate", {
   method: "POST",
   headers: { "content-type": "application/json", cookie },
@@ -55,6 +61,8 @@ const doc = await request("/api/v1/documents/generate", {
 });
 assert(doc.response.status === 201, "document generation failed");
 assert(doc.json.data?.document?.fileAssetId, "document PDF file missing");
+const generatedLetterFile = await prisma.fileAsset.findUniqueOrThrow({ where: { id: doc.json.data.document.fileAssetId } });
+assert(generatedLetterFile.documentType === "ALLOTMENT_LETTER", "generated allotment letter was not typed");
 
 const download = await fetch(`${baseUrl}/api/v1/files/${doc.json.data.document.fileAssetId}/download`, {
   headers: { cookie },
@@ -85,12 +93,318 @@ const approvedOwnerDownload = await fetch(`${baseUrl}/api/v1/files/${doc.json.da
 });
 assert(approvedOwnerDownload.status === 200, "owner could not download approved document");
 
+const localPdfBytes = Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF");
+function writeLocalSmokeFile(storageKey) {
+  const path = join(process.cwd(), "storage", storageKey.replace(/^local\//, ""));
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, localPdfBytes);
+}
+
+const owner = await prisma.owner.findFirstOrThrow({ where: { tenantId, email: "amandeep@example.com" } });
+const registryDocKey = `local/smoke/registry-${stamp}.pdf`;
+writeLocalSmokeFile(registryDocKey);
+const registryDoc = await prisma.fileAsset.create({
+  data: {
+    tenantId,
+    storageKey: registryDocKey,
+    fileName: `registry-${stamp}.pdf`,
+    mimeType: "application/pdf",
+    sizeBytes: localPdfBytes.length,
+    visibility: "OWNER_VISIBLE",
+    documentType: "REGISTRY_RECEIPT",
+    documentNo: `REGDOC-${stamp}`,
+    ownerType: "Plot",
+    ownerId: plot.id,
+    uploadedById: me.json.data.id,
+  },
+});
+const ownerRegistryDownload = await fetch(`${baseUrl}/api/v1/files/${registryDoc.id}/download`, {
+  headers: { cookie: ownerCookie },
+});
+assert(ownerRegistryDownload.status === 200, "owner could not download owner-visible registry receipt");
+
+const panKey = `local/smoke/pan-${stamp}.pdf`;
+writeLocalSmokeFile(panKey);
+const panDoc = await prisma.fileAsset.create({
+  data: {
+    tenantId,
+    storageKey: panKey,
+    fileName: `pan-${stamp}.pdf`,
+    mimeType: "application/pdf",
+    sizeBytes: localPdfBytes.length,
+    visibility: "TEAM",
+    documentType: "PAN_CARD",
+    documentNo: `PAN-${stamp}`,
+    ownerType: "Owner",
+    ownerId: owner.id,
+    uploadedById: me.json.data.id,
+  },
+});
+const adminPanDownload = await fetch(`${baseUrl}/api/v1/files/${panDoc.id}/download`, {
+  headers: { cookie },
+});
+assert(adminPanDownload.status === 200, "admin could not download owner PAN document");
+const ownerPanDownload = await fetch(`${baseUrl}/api/v1/files/${panDoc.id}/download`, {
+  headers: { cookie: ownerCookie },
+});
+assert(ownerPanDownload.status === 403, "owner could download internal PAN document");
+
 const vendor = await request("/api/v1/finance/vendors", {
   method: "POST",
   headers: { "content-type": "application/json", cookie },
   body: JSON.stringify({ name: `Smoke Vendor ${Date.now()}`, type: "Material" }),
 });
 assert(vendor.response.status === 201, "vendor creation failed");
+
+const smokePlot = await prisma.plot.create({
+  data: {
+    tenantId,
+    projectId: project.id,
+    code: `SM-${stamp}`,
+    label: `Smoke ${stamp}`,
+    areaSqft: 1200,
+    priceInr: 2500000,
+    status: "COMPANY_OWNED",
+  },
+});
+
+const newOwner = await request("/api/v1/ownership/owners", {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ type: "INDIVIDUAL", name: `Smoke Buyer ${stamp}`, email: `buyer-${stamp}@example.com` }),
+});
+assert(newOwner.response.status === 201, "owner creation failed");
+
+const allot = await request(`/api/v1/ownership/plots/${smokePlot.id}/allot`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ ownerId: newOwner.json.data.id, amountInr: 2500000, sharePct: 100 }),
+});
+assert(allot.response.status === 200, "plot allotment failed");
+
+const buyer = await request("/api/v1/ownership/owners", {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ type: "INDIVIDUAL", name: `Smoke Transferee ${stamp}`, email: `transferee-${stamp}@example.com` }),
+});
+assert(buyer.response.status === 201, "transfer buyer creation failed");
+
+const transfer = await request(`/api/v1/ownership/plots/${smokePlot.id}/transfer`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ buyerOwnerId: buyer.json.data.id, amountInr: 2700000 }),
+});
+assert(transfer.response.status === 200, "plot transfer failed");
+
+const registry = await request(`/api/v1/ownership/plots/${smokePlot.id}/registry`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ status: "REGISTERED", registryNo: `REG-${stamp}` }),
+});
+assert(registry.response.status === 200, "registry update failed");
+
+const audit = await request(`/api/v1/ownership/plots/${smokePlot.id}/audit`, { headers: { cookie } });
+assert(audit.response.status === 200 && audit.json.data.ownership.length >= 2, "plot audit history failed");
+
+const siteAsset = await prisma.siteAsset.create({
+  data: { tenantId, projectId: project.id, name: `Smoke Road ${stamp}`, type: "ROAD", status: "PLANNED" },
+});
+const siteProgress = await request(`/api/v1/development/site-assets/${siteAsset.id}/progress`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ progressPct: 55, summary: "Smoke progress update", visibleToOwner: false }),
+});
+assert(siteProgress.response.status === 200, "site progress update failed");
+
+const progressPhoto = await prisma.fileAsset.create({
+  data: {
+    tenantId,
+    storageKey: `local/smoke/${stamp}.jpg`,
+    fileName: `smoke-${stamp}.jpg`,
+    mimeType: "image/jpeg",
+    sizeBytes: 1,
+    visibility: "OWNER_VISIBLE",
+    ownerType: "ProgressUpdate",
+    ownerId: siteProgress.json.data.update.id,
+  },
+});
+const attachPhoto = await request(`/api/v1/development/progress/${siteProgress.json.data.update.id}/photos`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ fileAssetIds: [progressPhoto.id], visibleToOwner: true }),
+});
+assert(attachPhoto.response.status === 200, "progress photo attach failed");
+
+const issue = await request("/api/v1/development/issues", {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ parentType: "SiteAsset", parentId: siteAsset.id, title: `Smoke issue ${stamp}`, severity: "MEDIUM" }),
+});
+assert(issue.response.status === 201, "issue creation failed");
+
+const marketingTask = await request("/api/v1/marketing/tasks", {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ projectId: project.id, title: `Smoke campaign ${stamp}`, brief: "Smoke marketing brief" }),
+});
+assert(marketingTask.response.status === 201, "marketing task creation failed");
+const mediaFile = await prisma.fileAsset.create({
+  data: {
+    tenantId,
+    storageKey: `local/smoke/${stamp}.mp4`,
+    fileName: `smoke-${stamp}.mp4`,
+    mimeType: "video/mp4",
+    sizeBytes: 1,
+    visibility: "TEAM",
+    ownerType: "MarketingTask",
+    ownerId: marketingTask.json.data.id,
+  },
+});
+const media = await request(`/api/v1/marketing/tasks/${marketingTask.json.data.id}/media`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ fileAssetId: mediaFile.id, kind: "FINAL" }),
+});
+assert(media.response.status === 201, "marketing media attach failed");
+const marketingStatus = await prisma.marketingTask.findUniqueOrThrow({ where: { id: marketingTask.json.data.id } });
+assert(marketingStatus.status === "DRAFT_UPLOADED", "final media bypassed marketing approval");
+const marketingApprove = await request(`/api/v1/marketing/tasks/${marketingTask.json.data.id}/approve`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ status: "APPROVED", notes: "Smoke approval" }),
+});
+assert(marketingApprove.response.status === 200, "marketing approval failed");
+
+const po = await request("/api/v1/finance/purchase-orders", {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ projectId: project.id, vendorId: vendor.json.data.id, number: `PO-${stamp}`, totalInr: 10000, lineItems: [{ item: "cement", qty: 10 }] }),
+});
+assert(po.response.status === 201, "purchase order creation failed");
+
+const invoice = await request("/api/v1/finance/invoices", {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ projectId: project.id, vendorId: vendor.json.data.id, number: `INV-${stamp}`, totalInr: 10000 }),
+});
+assert(invoice.response.status === 201, "invoice creation failed");
+const payment = await request(`/api/v1/finance/invoices/${invoice.json.data.id}/payments`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ amountInr: 4000, mode: "BANK", reference: `PAY-${stamp}` }),
+});
+assert(payment.response.status === 200, "invoice payment failed");
+const overpay = await request(`/api/v1/finance/invoices/${invoice.json.data.id}/payments`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ amountInr: 7000, mode: "BANK", reference: `OVER-${stamp}` }),
+});
+assert(overpay.response.status === 400, "invoice overpayment was allowed");
+
+const cadFile = await prisma.cadFile.create({
+  data: {
+    tenantId,
+    projectId: project.id,
+    parentType: "PROJECT",
+    parentId: project.id,
+    format: "DXF",
+    status: "REVIEW_REQUIRED",
+    originalName: `smoke-${stamp}.dxf`,
+    storageKey: `local/smoke/${stamp}.dxf`,
+    version: 1,
+    uploadedById: me.json.data.id,
+  },
+});
+const scene = await prisma.cadScene.create({
+  data: {
+    tenantId,
+    cadFileId: cadFile.id,
+    scope: "PROJECT",
+    parentId: project.id,
+    bounds: { minX: 0, minY: 0, maxX: 100, maxY: 100 },
+    sceneJson: { source: "smoke" },
+  },
+});
+await prisma.cadEntity.createMany({
+  data: [
+    {
+      tenantId,
+      sceneId: scene.id,
+      type: "PLOT",
+      label: `CAD-${stamp}`,
+      confidence: 0.96,
+      geometry: { type: "polygon", points: [[0, 0], [20, 0], [20, 20], [0, 20]], closed: true },
+      measurements: { areaSqft: 400 },
+      status: "CONFIRMED",
+    },
+    {
+      tenantId,
+      sceneId: scene.id,
+      type: "ROAD",
+      label: `Road-${stamp}`,
+      confidence: 0.9,
+      geometry: { type: "line", points: [[0, 30], [80, 30]] },
+      measurements: { length: 80 },
+      status: "CONFIRMED",
+    },
+  ],
+});
+const cadPublish = await request(`/api/v1/cad/${cadFile.id}/publish`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({}),
+});
+assert(cadPublish.response.status === 200, "site CAD publish failed");
+assert(cadPublish.json.data.plots.length === 1 && cadPublish.json.data.assets.length === 1, "site CAD did not create plot and asset");
+const republish = await request(`/api/v1/cad/${cadFile.id}/publish`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({}),
+});
+assert(republish.response.status === 400, "CAD republish was allowed");
+
+const childCad = await prisma.cadFile.create({
+  data: {
+    tenantId,
+    parentType: "PLOT",
+    parentId: plot.id,
+    format: "DXF",
+    status: "REVIEW_REQUIRED",
+    originalName: `plot-${stamp}.dxf`,
+    storageKey: `local/smoke/plot-${stamp}.dxf`,
+    version: 1,
+    uploadedById: me.json.data.id,
+  },
+});
+const childScene = await prisma.cadScene.create({
+  data: {
+    tenantId,
+    cadFileId: childCad.id,
+    scope: "PLOT",
+    parentId: plot.id,
+    bounds: { minX: 0, minY: 0, maxX: 50, maxY: 50 },
+    sceneJson: { source: "smoke-child" },
+  },
+});
+await prisma.cadEntity.create({
+  data: {
+    tenantId,
+    sceneId: childScene.id,
+    type: "BATHROOM",
+    label: `Bathroom ${stamp}`,
+    confidence: 0.91,
+    geometry: { type: "polygon", points: [[0, 0], [8, 0], [8, 6], [0, 6]], closed: true },
+    measurements: { areaSqft: 48 },
+    status: "CONFIRMED",
+  },
+});
+const childPublish = await request(`/api/v1/cad/${childCad.id}/publish`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({}),
+});
+assert(childPublish.response.status === 200, "plot CAD publish failed");
+assert(childPublish.json.data.checklistItems.length === 1, "plot CAD did not create checklist zone");
 
 const notifications = await request("/api/v1/notifications", { headers: { cookie } });
 assert(notifications.response.status === 200, "notification list failed");

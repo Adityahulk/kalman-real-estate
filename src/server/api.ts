@@ -74,6 +74,10 @@ export function apiError(error: unknown) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 401 });
   }
 
+  if (error instanceof Error && error.name === "BadRequestError") {
+    return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+  }
+
   const message = error instanceof Error ? error.message : "Unexpected server error";
   return NextResponse.json({ ok: false, error: message }, { status: 500 });
 }

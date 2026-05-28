@@ -4,7 +4,7 @@ import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
 import { enqueueDocumentGeneration } from "../jobs";
-import { putLocalObject } from "../storage";
+import { generatedDocumentStorageKey, putGeneratedObject } from "../storage";
 import { createGeneratedFileAsset } from "./files";
 import { buildGeneratedDocumentPdf } from "./document-pdf";
 import { createNotification } from "./notifications";
@@ -43,14 +43,15 @@ export async function generateDocument(context: RequestContext, input: z.infer<t
       "Review and approve this document before issuing it to the owner or external party.",
     ],
   });
-  const key = `local/generated/${context.tenantId}/${document.id}.pdf`;
-  await putLocalObject(key, pdf);
+  const key = generatedDocumentStorageKey(context.tenantId, document.id);
+  await putGeneratedObject(key, pdf, "application/pdf");
   const file = await createGeneratedFileAsset(context, {
     storageKey: key,
     fileName: `${document.number ?? document.id}.pdf`,
     mimeType: "application/pdf",
     sizeBytes: pdf.length,
     visibility: FileVisibility.OWNER_VISIBLE,
+    documentType: input.type.toLowerCase().includes("transfer") ? "TRANSFER_LETTER" : "ALLOTMENT_LETTER",
     ownerType: input.recordType,
     ownerId: input.recordId,
   });

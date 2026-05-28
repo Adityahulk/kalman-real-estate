@@ -1,7 +1,7 @@
 import { FileVisibility, PrismaClient } from "@prisma/client";
 import { Worker } from "bullmq";
 import IORedis from "ioredis";
-import { putLocalObject } from "@/server/storage";
+import { generatedDocumentStorageKey, putGeneratedObject } from "@/server/storage";
 import { buildGeneratedDocumentPdf } from "@/server/services/document-pdf";
 
 const prisma = new PrismaClient();
@@ -37,8 +37,8 @@ async function processDocument(job: DocumentJob) {
     body,
   });
 
-  const key = `local/generated/${job.tenantId}/${document.id}.pdf`;
-  await putLocalObject(key, pdf);
+  const key = generatedDocumentStorageKey(job.tenantId, document.id);
+  await putGeneratedObject(key, pdf, "application/pdf");
 
   const file = await prisma.fileAsset.create({
     data: {
@@ -48,6 +48,7 @@ async function processDocument(job: DocumentJob) {
       mimeType: "application/pdf",
       sizeBytes: pdf.length,
       visibility: FileVisibility.OWNER_VISIBLE,
+      documentType: document.type.toLowerCase().includes("transfer") ? "TRANSFER_LETTER" : "ALLOTMENT_LETTER",
       ownerType: document.recordType,
       ownerId: document.recordId,
       uploadedById: document.createdById,

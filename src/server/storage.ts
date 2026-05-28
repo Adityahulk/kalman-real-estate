@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const endpoint = process.env.S3_ENDPOINT;
@@ -44,6 +44,41 @@ export async function createUploadUrl(input: {
   });
 }
 
+export async function createDownloadUrl(input: {
+  key: string;
+  fileName?: string;
+  expiresInSeconds?: number;
+}) {
+  const bucket = process.env.S3_BUCKET;
+  if (!bucket) {
+    throw new Error("S3_BUCKET is not configured");
+  }
+
+  const command = new GetObjectCommand({
+    Bucket: bucket,
+    Key: input.key,
+    ResponseContentDisposition: input.fileName ? `attachment; filename="${input.fileName}"` : undefined,
+  });
+
+  return getSignedUrl(objectStorage, command, {
+    expiresIn: input.expiresInSeconds ?? 300,
+  });
+}
+
+export async function putObject(key: string, bytes: Buffer, contentType: string) {
+  const bucket = process.env.S3_BUCKET;
+  if (!bucket) {
+    throw new Error("S3_BUCKET is not configured");
+  }
+
+  await objectStorage.send(new PutObjectCommand({
+    Bucket: bucket,
+    Key: key,
+    Body: bytes,
+    ContentType: contentType,
+  }));
+}
+
 export function isLocalStorageKey(key: string) {
   return key.startsWith("local/");
 }
@@ -61,4 +96,19 @@ export async function putLocalObject(key: string, bytes: Buffer) {
 
 export async function getLocalObject(key: string) {
   return readFile(localStoragePath(key));
+}
+
+export function generatedDocumentStorageKey(tenantId: string, documentId: string) {
+  if (process.env.FILE_STORAGE_DRIVER === "local" || process.env.NODE_ENV !== "production") {
+    return `local/generated/${tenantId}/${documentId}.pdf`;
+  }
+  return storageKey([tenantId, "generated", `${documentId}.pdf`]);
+}
+
+export async function putGeneratedObject(key: string, bytes: Buffer, contentType: string) {
+  if (isLocalStorageKey(key)) {
+    await putLocalObject(key, bytes);
+    return;
+  }
+  await putObject(key, bytes, contentType);
 }

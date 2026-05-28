@@ -14,6 +14,7 @@ export const progressSchema = z.object({
 
 export async function updateSiteAssetProgress(context: RequestContext, siteAssetId: string, input: z.infer<typeof progressSchema>) {
   await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId } });
+  if (input.photoFileIds?.length) await assertFilesInTenant(context, input.photoFileIds);
   const [asset, update] = await prisma.$transaction([
     prisma.siteAsset.update({ where: { id: siteAssetId }, data: { progressPct: input.progressPct, status: input.progressPct >= 100 ? "COMPLETED" : "IN_PROGRESS" } }),
     prisma.progressUpdate.create({
@@ -40,6 +41,7 @@ export async function updateSiteAssetProgress(context: RequestContext, siteAsset
 
 export async function updateChecklistProgress(context: RequestContext, checklistItemId: string, input: z.infer<typeof progressSchema>) {
   await prisma.checklistItem.findFirstOrThrow({ where: { id: checklistItemId, tenantId: context.tenantId } });
+  if (input.photoFileIds?.length) await assertFilesInTenant(context, input.photoFileIds);
   const [item, update] = await prisma.$transaction([
     prisma.checklistItem.update({
       where: { id: checklistItemId },
@@ -99,6 +101,7 @@ export async function addProgressPhotos(context: RequestContext, progressId: str
   const progress = await prisma.progressUpdate.findFirstOrThrow({
     where: { id: progressId, tenantId: context.tenantId },
   });
+  await assertFilesInTenant(context, input.fileAssetIds);
   const existing = Array.isArray(progress.photoFileIds) ? progress.photoFileIds : [];
   const updated = await prisma.progressUpdate.update({
     where: { id: progressId },
@@ -110,6 +113,22 @@ export async function addProgressPhotos(context: RequestContext, progressId: str
   });
   await writeAuditEvent(context, { action: AuditAction.UPLOAD, entityType: "ProgressUpdate", entityId: progressId, after: updated });
   return updated;
+}
+
+async function assertFilesInTenant(context: RequestContext, fileAssetIds: string[]) {
+  const files = await prisma.fileAsset.findMany({
+    where: { id: { in: fileAssetIds }, tenantId: context.tenantId },
+    select: { id: true },
+  });
+  if (files.length !== new Set(fileAssetIds).size) {
+    throwBadRequest("One or more files are invalid for this tenant");
+  }
+}
+
+function throwBadRequest(message: string): never {
+  const error = new Error(message);
+  error.name = "BadRequestError";
+  throw error;
 }
 
 async function assertParentInTenant(context: RequestContext, parentType: string, parentId: string) {

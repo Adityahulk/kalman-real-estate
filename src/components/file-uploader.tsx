@@ -15,6 +15,7 @@ export function FileUploader({
   visibility = "TEAM",
   ownerType,
   ownerId,
+  metadata,
   accept,
   onUploaded,
 }: {
@@ -22,6 +23,7 @@ export function FileUploader({
   visibility?: FileVisibility;
   ownerType?: string;
   ownerId?: string;
+  metadata?: Record<string, unknown>;
   accept?: string;
   onUploaded?: (file: UploadedFile) => void;
 }) {
@@ -47,6 +49,7 @@ export function FileUploader({
           visibility,
           ownerType,
           ownerId,
+          ...(metadata ?? {}),
         }),
       });
       const meta = await metaResponse.json();

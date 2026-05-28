@@ -1,4 +1,4 @@
-import { FileAsset, FileVisibility } from "@prisma/client";
+import { FileAsset, FileVisibility, RealEstateDocumentType } from "@prisma/client";
 import { z } from "zod";
 import { RequestContext } from "../api";
 import { prisma } from "../db";
@@ -9,11 +9,16 @@ export const fileUploadSchema = z.object({
   mimeType: z.string().min(1),
   sizeBytes: z.number().int().nonnegative(),
   visibility: z.nativeEnum(FileVisibility).default(FileVisibility.ADMIN_ONLY),
+  documentType: z.nativeEnum(RealEstateDocumentType).optional(),
+  documentNo: z.string().optional(),
+  documentDate: z.string().datetime().optional(),
+  notes: z.string().optional(),
   ownerType: z.string().optional(),
   ownerId: z.string().optional(),
 });
 
 export async function createFileUpload(context: RequestContext, input: z.infer<typeof fileUploadSchema>) {
+  await assertOwnerRecord(context, input.ownerType, input.ownerId);
   const key = storageKey([context.tenantId, "files", `${Date.now()}-${input.fileName}`]);
   const file = await prisma.fileAsset.create({
     data: {
@@ -23,6 +28,10 @@ export async function createFileUpload(context: RequestContext, input: z.infer<t
       mimeType: input.mimeType,
       sizeBytes: input.sizeBytes,
       visibility: input.visibility,
+      documentType: input.documentType,
+      documentNo: input.documentNo,
+      documentDate: input.documentDate ? new Date(input.documentDate) : undefined,
+      notes: input.notes,
       ownerType: input.ownerType,
       ownerId: input.ownerId,
       uploadedById: context.userId,
@@ -41,6 +50,10 @@ export async function createGeneratedFileAsset(
     mimeType: string;
     sizeBytes: number;
     visibility?: FileVisibility;
+    documentType?: RealEstateDocumentType;
+    documentNo?: string;
+    documentDate?: Date;
+    notes?: string;
     ownerType?: string;
     ownerId?: string;
   },
@@ -53,11 +66,39 @@ export async function createGeneratedFileAsset(
       mimeType: input.mimeType,
       sizeBytes: input.sizeBytes,
       visibility: input.visibility ?? FileVisibility.ADMIN_ONLY,
+      documentType: input.documentType,
+      documentNo: input.documentNo,
+      documentDate: input.documentDate,
+      notes: input.notes,
       ownerType: input.ownerType,
       ownerId: input.ownerId,
       uploadedById: context.userId,
     },
   });
+}
+
+async function assertOwnerRecord(context: RequestContext, ownerType?: string, ownerId?: string) {
+  if (!ownerType || !ownerId) return;
+  if (ownerType === "Plot") {
+    await prisma.plot.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
+    return;
+  }
+  if (ownerType === "Owner") {
+    await prisma.owner.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
+    return;
+  }
+  if (ownerType === "RegistryRecord") {
+    await prisma.registryRecord.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
+    return;
+  }
+  if (ownerType === "ProgressUpdate") {
+    await prisma.progressUpdate.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
+    return;
+  }
+  if (ownerType === "MarketingTask") {
+    await prisma.marketingTask.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
+    return;
+  }
 }
 
 export async function getFileForDownload(context: RequestContext, id: string): Promise<FileAsset> {

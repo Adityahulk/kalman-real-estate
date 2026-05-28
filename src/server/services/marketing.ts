@@ -59,7 +59,7 @@ export async function addMarketingMedia(context: RequestContext, taskId: string,
   });
   await prisma.marketingTask.update({
     where: { id: taskId },
-    data: { status: input.kind === "RAW" ? "RAW_UPLOADED" : input.kind === "DRAFT" ? "DRAFT_UPLOADED" : "APPROVED" },
+    data: { status: input.kind === "RAW" ? "RAW_UPLOADED" : "DRAFT_UPLOADED" },
   });
   await writeAuditEvent(context, { action: AuditAction.UPLOAD, entityType: "MarketingTask", entityId: taskId, after: media });
   await createNotification(context, {

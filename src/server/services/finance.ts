@@ -151,6 +151,10 @@ export const paymentSchema = z.object({
 
 export async function addInvoicePayment(context: RequestContext, invoiceId: string, input: z.infer<typeof paymentSchema>) {
   const invoice = await prisma.invoice.findFirstOrThrow({ where: { id: invoiceId, tenantId: context.tenantId }, include: { payments: true } });
+  const alreadyPaid = invoice.payments.reduce((sum, item) => sum + Number(item.amountInr), 0);
+  if (alreadyPaid + input.amountInr > Number(invoice.totalInr)) {
+    throwBadRequest("Payment exceeds invoice total");
+  }
   const result = await prisma.$transaction(async (tx) => {
     const payment = await tx.payment.create({
       data: {
@@ -162,7 +166,7 @@ export async function addInvoicePayment(context: RequestContext, invoiceId: stri
         reference: input.reference,
       },
     });
-    const paidTotal = invoice.payments.reduce((sum, item) => sum + Number(item.amountInr), 0) + input.amountInr;
+    const paidTotal = alreadyPaid + input.amountInr;
     const status = paidTotal >= Number(invoice.totalInr) ? "PAID" : paidTotal > 0 ? "PARTIAL" : "UNPAID";
     const updatedInvoice = await tx.invoice.update({ where: { id: invoiceId }, data: { paymentStatus: status } });
     return { payment, invoice: updatedInvoice };
@@ -174,4 +178,10 @@ export async function addInvoicePayment(context: RequestContext, invoiceId: stri
     data: { invoiceId, paymentId: result.payment.id },
   });
   return result;
+}
+
+function throwBadRequest(message: string): never {
+  const error = new Error(message);
+  error.name = "BadRequestError";
+  throw error;
 }
