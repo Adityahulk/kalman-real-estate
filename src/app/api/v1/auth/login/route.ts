@@ -14,10 +14,15 @@ export async function POST(request: NextRequest) {
     const input = await parseJson(request, schema);
     const result = await login(input.email, input.password);
     const response = NextResponse.json({ ok: true, data: result }, { status: 201 });
+    const forwardedProto = request.headers.get("x-forwarded-proto");
+    const isHttps = forwardedProto === "https" || request.nextUrl.protocol === "https:";
+    const secureCookie = process.env.SESSION_COOKIE_SECURE
+      ? process.env.SESSION_COOKIE_SECURE === "true"
+      : isHttps;
     response.cookies.set("kalman_session", result.token, {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: secureCookie,
       path: "/",
       maxAge: 60 * 60 * 12,
     });
