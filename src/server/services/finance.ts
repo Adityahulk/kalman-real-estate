@@ -68,7 +68,7 @@ export const invoiceSchema = z.object({
 export async function createInvoice(context: RequestContext, input: z.infer<typeof invoiceSchema>) {
   await prisma.project.findFirstOrThrow({ where: { id: input.projectId, tenantId: context.tenantId } });
   if (input.vendorId) await prisma.vendor.findFirstOrThrow({ where: { id: input.vendorId, tenantId: context.tenantId } });
-  if (input.fileAssetId) await prisma.fileAsset.findFirstOrThrow({ where: { id: input.fileAssetId, tenantId: context.tenantId } });
+  if (input.fileAssetId) await prisma.fileAsset.findFirstOrThrow({ where: { id: input.fileAssetId, tenantId: context.tenantId, deletedAt: null } });
   const invoice = await prisma.invoice.create({
     data: {
       tenantId: context.tenantId,

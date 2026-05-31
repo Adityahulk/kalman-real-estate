@@ -45,7 +45,7 @@ export const mediaSchema = z.object({
 
 export async function addMarketingMedia(context: RequestContext, taskId: string, input: z.infer<typeof mediaSchema>) {
   await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId } });
-  await prisma.fileAsset.findFirstOrThrow({ where: { id: input.fileAssetId, tenantId: context.tenantId } });
+  await prisma.fileAsset.findFirstOrThrow({ where: { id: input.fileAssetId, tenantId: context.tenantId, deletedAt: null } });
   const version = await prisma.mediaAsset.count({ where: { tenantId: context.tenantId, taskId, kind: input.kind } });
   const media = await prisma.mediaAsset.create({
     data: {

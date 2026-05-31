@@ -4,7 +4,7 @@ import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const endpoint = process.env.S3_ENDPOINT;
-const localStorageRoot = join(process.cwd(), "storage");
+const localStorageRoot = process.env.LOCAL_STORAGE_ROOT ?? join(process.cwd(), "storage");
 
 export const objectStorage = new S3Client({
   endpoint,

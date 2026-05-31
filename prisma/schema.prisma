@@ -490,10 +490,14 @@ model FileAsset {
   ownerType   String?
   ownerId     String?
   uploadedById String?
+  deletedAt   DateTime?
+  deletedById String?
+  deleteReason String?
   createdAt   DateTime       @default(now())
   tenant      Tenant         @relation(fields: [tenantId], references: [id])
 
   @@index([tenantId, ownerType, ownerId])
+  @@index([tenantId, deletedAt])
 }
 
 model DocumentTemplate {

@@ -42,6 +42,7 @@ export default async function OwnerPlotPage({ params }: { params: { id: string }
         tenantId: session.tenantId,
         ownerType: "Plot",
         ownerId: plot.id,
+        deletedAt: null,
         visibility: { in: ["OWNER_VISIBLE", "SHARED"] },
         OR: [
           { documentType: null },

@@ -67,6 +67,7 @@ export async function allotPlot(context: RequestContext, plotId: string, input: 
 export const transferPlotSchema = z.object({
   buyerOwnerId: z.string(),
   amountInr: z.number().nonnegative().optional(),
+  sharePct: z.number().min(0).max(100).optional(),
   documentId: z.string().optional(),
   notes: z.string().optional(),
 });
@@ -86,6 +87,7 @@ export async function transferPlot(context: RequestContext, plotId: string, inpu
         ownerId: input.buyerOwnerId,
         kind: OwnershipKind.TRANSFER,
         amountInr: input.amountInr,
+        sharePct: input.sharePct,
         documentId: input.documentId,
         notes: input.notes,
         createdById: context.userId,
@@ -106,18 +108,27 @@ export const registrySchema = z.object({
 
 export async function updateRegistry(context: RequestContext, plotId: string, input: z.infer<typeof registrySchema>) {
   await prisma.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId } });
-  const registry = await prisma.registryRecord.create({
-    data: {
-      tenantId: context.tenantId,
-      plotId,
-      status: input.status,
-      registryNo: input.registryNo,
-      registryDate: input.registryDate ? new Date(input.registryDate) : undefined,
-      notes: input.notes,
-    },
+  const result = await prisma.$transaction(async (tx) => {
+    const registry = await tx.registryRecord.create({
+      data: {
+        tenantId: context.tenantId,
+        plotId,
+        status: input.status,
+        registryNo: input.registryNo,
+        registryDate: input.registryDate ? new Date(input.registryDate) : undefined,
+        notes: input.notes,
+      },
+    });
+    const normalized = input.status.toUpperCase().replaceAll(" ", "_");
+    const plot = normalized === "COMPLETED" || normalized === "REGISTERED"
+      ? await tx.plot.update({ where: { id: plotId }, data: { status: PlotStatus.REGISTERED } })
+      : normalized.includes("PROGRESS") || normalized === "SUBMITTED"
+        ? await tx.plot.update({ where: { id: plotId }, data: { status: PlotStatus.REGISTRY_IN_PROGRESS } })
+        : null;
+    return { registry, plot };
   });
-  await writeAuditEvent(context, { action: AuditAction.REGISTRY_UPDATE, entityType: "Plot", entityId: plotId, after: registry as unknown as Prisma.InputJsonValue });
-  return registry;
+  await writeAuditEvent(context, { action: AuditAction.REGISTRY_UPDATE, entityType: "Plot", entityId: plotId, after: result.registry as unknown as Prisma.InputJsonValue });
+  return result.registry;
 }
 
 export async function getPlotAudit(context: RequestContext, plotId: string) {

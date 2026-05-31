@@ -117,7 +117,7 @@ export async function addProgressPhotos(context: RequestContext, progressId: str
 
 async function assertFilesInTenant(context: RequestContext, fileAssetIds: string[]) {
   const files = await prisma.fileAsset.findMany({
-    where: { id: { in: fileAssetIds }, tenantId: context.tenantId },
+    where: { id: { in: fileAssetIds }, tenantId: context.tenantId, deletedAt: null },
     select: { id: true },
   });
   if (files.length !== new Set(fileAssetIds).size) {

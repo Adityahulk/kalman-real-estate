@@ -122,6 +122,20 @@ const ownerRegistryDownload = await fetch(`${baseUrl}/api/v1/files/${registryDoc
   headers: { cookie: ownerCookie },
 });
 assert(ownerRegistryDownload.status === 200, "owner could not download owner-visible registry receipt");
+const deleteRegistryDoc = await request(`/api/v1/files/${registryDoc.id}`, {
+  method: "DELETE",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ reason: "Smoke test deletion" }),
+});
+assert(deleteRegistryDoc.response.status === 200, "document delete failed");
+const deletedRegistryDownload = await fetch(`${baseUrl}/api/v1/files/${registryDoc.id}/download`, {
+  headers: { cookie: ownerCookie },
+});
+assert(deletedRegistryDownload.status === 404, "deleted document was still downloadable");
+const deleteAudit = await prisma.auditEvent.findFirst({
+  where: { tenantId, entityType: "FileAsset", entityId: registryDoc.id, action: "DELETE" },
+});
+assert(deleteAudit, "document delete audit event missing");
 
 const panKey = `local/smoke/pan-${stamp}.pdf`;
 writeLocalSmokeFile(panKey);
@@ -156,17 +170,30 @@ const vendor = await request("/api/v1/finance/vendors", {
 });
 assert(vendor.response.status === 201, "vendor creation failed");
 
-const smokePlot = await prisma.plot.create({
-  data: {
-    tenantId,
-    projectId: project.id,
+const manualPlot = await request(`/api/v1/projects/${project.id}/plots`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({
     code: `SM-${stamp}`,
     label: `Smoke ${stamp}`,
     areaSqft: 1200,
     priceInr: 2500000,
-    status: "COMPANY_OWNED",
-  },
+    notes: "Smoke manual non-CAD plot",
+  }),
 });
+assert(manualPlot.response.status === 201, "manual plot creation failed");
+const smokePlot = manualPlot.json.data.plot;
+const inventoryRecord = await prisma.ownershipRecord.findFirst({
+  where: { tenantId, plotId: smokePlot.id, kind: "COMPANY_INVENTORY" },
+});
+assert(inventoryRecord, "manual plot did not create company inventory history");
+
+const manualZone = await request(`/api/v1/plots/${smokePlot.id}/checklist-items`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ label: `Smoke bathroom ${stamp}`, category: "Plumbing", progressPct: 10 }),
+});
+assert(manualZone.response.status === 201, "manual plot subpart creation failed");
 
 const newOwner = await request("/api/v1/ownership/owners", {
   method: "POST",
@@ -206,9 +233,13 @@ assert(registry.response.status === 200, "registry update failed");
 const audit = await request(`/api/v1/ownership/plots/${smokePlot.id}/audit`, { headers: { cookie } });
 assert(audit.response.status === 200 && audit.json.data.ownership.length >= 2, "plot audit history failed");
 
-const siteAsset = await prisma.siteAsset.create({
-  data: { tenantId, projectId: project.id, name: `Smoke Road ${stamp}`, type: "ROAD", status: "PLANNED" },
+const manualSiteAsset = await request(`/api/v1/projects/${project.id}/site-assets`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ name: `Smoke Road ${stamp}`, type: "ROAD", status: "PLANNED" }),
 });
+assert(manualSiteAsset.response.status === 201, "manual site asset creation failed");
+const siteAsset = manualSiteAsset.json.data;
 const siteProgress = await request(`/api/v1/development/site-assets/${siteAsset.id}/progress`, {
   method: "POST",
   headers: { "content-type": "application/json", cookie },

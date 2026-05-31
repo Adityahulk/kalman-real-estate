@@ -315,6 +315,44 @@ export async function retryCadProcessing(context: RequestContext, id: string) {
   return { cadFile: updated, queue };
 }
 
+export async function getCadEntityBusinessLink(context: RequestContext, entityId: string) {
+  const entity = await prisma.cadEntity.findFirstOrThrow({
+    where: { id: entityId, tenantId: context.tenantId },
+    include: {
+      scene: { include: { cadFile: true } },
+      spatialLinks: { orderBy: { createdAt: "desc" } },
+    },
+  });
+  const link = entity.spatialLinks[0] ?? null;
+  if (!link) return { entity, link: null, record: null };
+
+  if (link.recordType === "Plot") {
+    const plot = await prisma.plot.findFirst({
+      where: { id: link.recordId, tenantId: context.tenantId },
+      include: { currentOwner: true, registryRecords: { orderBy: { createdAt: "desc" }, take: 1 } },
+    });
+    const documentCount = await prisma.fileAsset.count({ where: { tenantId: context.tenantId, ownerType: "Plot", ownerId: link.recordId } });
+    return { entity, link, record: plot ? { ...plot, documentCount } : null };
+  }
+
+  if (link.recordType === "SiteAsset") {
+    const asset = await prisma.siteAsset.findFirst({
+      where: { id: link.recordId, tenantId: context.tenantId },
+    });
+    return { entity, link, record: asset };
+  }
+
+  if (link.recordType === "ChecklistItem") {
+    const item = await prisma.checklistItem.findFirst({
+      where: { id: link.recordId, tenantId: context.tenantId },
+      include: { plot: true },
+    });
+    return { entity, link, record: item };
+  }
+
+  return { entity, link, record: null };
+}
+
 function readMeasurement(measurements: Prisma.JsonValue | null, key: string) {
   if (!measurements || typeof measurements !== "object" || Array.isArray(measurements)) return undefined;
   const value = (measurements as Record<string, unknown>)[key];

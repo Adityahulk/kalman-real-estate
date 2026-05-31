@@ -1,6 +1,7 @@
-import { FileAsset, FileVisibility, RealEstateDocumentType } from "@prisma/client";
+import { AuditAction, FileAsset, FileVisibility, Prisma, RealEstateDocumentType } from "@prisma/client";
 import { z } from "zod";
 import { RequestContext } from "../api";
+import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
 import { createUploadUrl, storageKey } from "../storage";
 
@@ -15,6 +16,10 @@ export const fileUploadSchema = z.object({
   notes: z.string().optional(),
   ownerType: z.string().optional(),
   ownerId: z.string().optional(),
+});
+
+export const deleteFileSchema = z.object({
+  reason: z.string().optional(),
 });
 
 export async function createFileUpload(context: RequestContext, input: z.infer<typeof fileUploadSchema>) {
@@ -39,6 +44,12 @@ export async function createFileUpload(context: RequestContext, input: z.infer<t
   });
 
   const upload = await createUploadUrl({ key, contentType: input.mimeType });
+  await writeAuditEvent(context, {
+    action: AuditAction.UPLOAD,
+    entityType: "FileAsset",
+    entityId: file.id,
+    after: file as unknown as Prisma.InputJsonValue,
+  });
   return { file, upload };
 }
 
@@ -102,9 +113,10 @@ async function assertOwnerRecord(context: RequestContext, ownerType?: string, ow
 }
 
 export async function getFileForDownload(context: RequestContext, id: string): Promise<FileAsset> {
-  const file = await prisma.fileAsset.findFirstOrThrow({
-    where: { id, tenantId: context.tenantId },
+  const file = await prisma.fileAsset.findFirst({
+    where: { id, tenantId: context.tenantId, deletedAt: null },
   });
+  if (!file) throwNotFound("File was not found or has been deleted");
 
   if (context.role === "PLOT_OWNER") {
     if (file.visibility !== "OWNER_VISIBLE" && file.visibility !== "SHARED") {
@@ -117,6 +129,46 @@ export async function getFileForDownload(context: RequestContext, id: string): P
       throwForbidden("File does not belong to this owner or is not approved for owner download");
     }
   }
+
+  return file;
+}
+
+export async function deleteFileAsset(context: RequestContext, id: string, input: z.infer<typeof deleteFileSchema>) {
+  const before = await prisma.fileAsset.findFirstOrThrow({
+    where: { id, tenantId: context.tenantId, deletedAt: null },
+  });
+
+  const file = await prisma.fileAsset.update({
+    where: { id },
+    data: {
+      deletedAt: new Date(),
+      deletedById: context.userId,
+      deleteReason: input.reason,
+    },
+  });
+  await prisma.generatedDocument.updateMany({
+    where: { tenantId: context.tenantId, fileAssetId: id },
+    data: { fileAssetId: null },
+  });
+
+  await writeAuditEvent(context, {
+    action: AuditAction.DELETE,
+    entityType: "FileAsset",
+    entityId: id,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: {
+      deletedAt: file.deletedAt?.toISOString(),
+      deletedById: context.userId,
+      deleteReason: input.reason,
+      fileName: before.fileName,
+      documentType: before.documentType,
+      documentNo: before.documentNo,
+      documentDate: before.documentDate?.toISOString(),
+      ownerType: before.ownerType,
+      ownerId: before.ownerId,
+      visibility: before.visibility,
+    },
+  });
 
   return file;
 }
@@ -172,5 +224,11 @@ async function ownerCanAccessFile(ownerId: string, file: FileAsset) {
 function throwForbidden(message: string): never {
   const error = new Error(message);
   error.name = "ForbiddenError";
+  throw error;
+}
+
+function throwNotFound(message: string): never {
+  const error = new Error(message);
+  error.name = "NotFoundError";
   throw error;
 }

@@ -18,7 +18,7 @@ import {
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { FormEvent, MouseEvent, PointerEvent, WheelEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, MouseEvent, PointerEvent, WheelEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -42,6 +42,12 @@ type Entity = {
   measurements: Json;
   status: string;
   sourceLayer: string | null;
+  spatialLinks: Array<{
+    id: string;
+    recordType: string;
+    recordId: string;
+    linkConfidence: string | number;
+  }>;
 };
 
 type Issue = {
@@ -74,6 +80,12 @@ type CadFile = {
   parentId: string;
   version: number;
   projectId: string | null;
+  errorMessage: string | null;
+};
+
+type BusinessLink = {
+  link: { recordType: string; recordId: string } | null;
+  record: Record<string, unknown> | null;
 };
 
 const typeStyle: Record<string, { stroke: string; fill: string; label: string }> = {
@@ -115,6 +127,7 @@ export function CadWorkspace({
   const [mode, setMode] = useState<"review" | "live" | "compare">("review");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [businessLink, setBusinessLink] = useState<BusinessLink | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   const visibleEntities = useMemo(() => {
@@ -129,6 +142,30 @@ export function CadWorkspace({
 
   const selected = scene?.entities.find((entity) => entity.id === selectedId) ?? visibleEntities[0] ?? null;
   const selectedIssues = selected ? issues.filter((issue) => issue.entityId === selected.id) : [];
+
+  useEffect(() => {
+    if (!selected) {
+      setBusinessLink(null);
+      return;
+    }
+    const hasLink = selected.spatialLinks.length > 0;
+    if (!hasLink) {
+      setBusinessLink(null);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/v1/cad/entities/${selected.id}/link`)
+      .then((response) => response.json())
+      .then((body) => {
+        if (!cancelled) setBusinessLink(body.ok ? body.data : null);
+      })
+      .catch(() => {
+        if (!cancelled) setBusinessLink(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
 
   function toggleLayer(id: string) {
     setHiddenLayers((current) => {
@@ -200,10 +237,40 @@ export function CadWorkspace({
     router.refresh();
   }
 
+  async function retry() {
+    setLoading(true);
+    const response = await fetch(`/api/v1/cad/${cadFile.id}/process/retry`, { method: "POST" });
+    const body = await response.json();
+    setLoading(false);
+    setMessage(response.ok ? "CAD processing has been queued again." : body.error ?? "Retry failed");
+    router.refresh();
+  }
+
   if (!scene) {
     return (
-      <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500">
-        Scene not ready. Upload the CAD file to object storage and run `npm run worker:cad`.
+      <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-card">
+        <div className="mx-auto max-w-2xl text-center">
+          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
+            {cadFile.status === "FAILED" ? <AlertTriangle size={22} /> : <Loader2 className="animate-spin" size={22} />}
+          </div>
+          <h2 className="mt-4 text-xl font-semibold">{statusTitle(cadFile.status)}</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{statusHelp(cadFile.status)}</p>
+          {cadFile.errorMessage ? <div className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{cadFile.errorMessage}</div> : null}
+          <div className="mt-6 grid gap-2 text-left text-sm md:grid-cols-5">
+            {["UPLOADED", "CONVERTING", "PARSING", "EXTRACTING", "REVIEW_REQUIRED"].map((status) => (
+              <div key={status} className={`rounded-lg border px-3 py-2 ${cadStatusRank(cadFile.status) >= cadStatusRank(status) ? "border-gold-300 bg-gold-50 text-navy-950" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
+                {status.replaceAll("_", " ")}
+              </div>
+            ))}
+          </div>
+          {message ? <div className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
+          {cadFile.status === "FAILED" || cadFile.status === "UPLOADED" ? (
+            <button className="btn-primary mt-6" onClick={retry} disabled={loading}>
+              {loading ? <Loader2 className="animate-spin" size={17} /> : <RotateCcw size={17} />}
+              Retry processing
+            </button>
+          ) : null}
+        </div>
       </div>
     );
   }
@@ -407,6 +474,8 @@ export function CadWorkspace({
 
               {message ? <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
 
+              <BusinessRecordPanel cadFile={cadFile} selected={selected} businessLink={businessLink} />
+
               <div className="grid grid-cols-2 gap-3">
                 <button className="btn-primary" disabled={loading}>
                   {loading ? <Loader2 className="animate-spin" size={17} /> : <Check size={17} />}
@@ -419,7 +488,7 @@ export function CadWorkspace({
               </div>
               <Link
                 className="btn-outline w-full"
-                href={`/app/cad?parentType=${childScopeFor(selected.type)}&parentId=${selected.id}${cadFile.projectId ? `&projectId=${cadFile.projectId}` : ""}`}
+                href={childCadHref(cadFile, selected, businessLink)}
               >
                 <Focus size={17} />
                 Upload child CAD for this {selected.type.replaceAll("_", " ").toLowerCase()}
@@ -453,6 +522,75 @@ function childScopeFor(type: CadEntityType) {
   if (type === "PLOT") return "PLOT";
   if (type === "ROOM" || type === "KITCHEN" || type === "BATHROOM") return "ROOM";
   return "SITE_ASSET";
+}
+
+function childCadHref(cadFile: CadFile, selected: Entity, businessLink: BusinessLink | null) {
+  const linked = businessLink?.link;
+  if (linked?.recordType === "Plot" && cadFile.projectId) return `/app/projects/${cadFile.projectId}/plots/${linked.recordId}?tab=child-cad`;
+  const parentType = linked?.recordType === "Plot" ? "PLOT" : linked?.recordType === "SiteAsset" ? "SITE_ASSET" : childScopeFor(selected.type);
+  const parentId = linked?.recordId ?? selected.id;
+  return cadFile.projectId
+    ? `/app/projects/${cadFile.projectId}/cad?parentType=${parentType}&parentId=${parentId}`
+    : `/app/cad?parentType=${parentType}&parentId=${parentId}`;
+}
+
+function BusinessRecordPanel({ cadFile, selected, businessLink }: { cadFile: CadFile; selected: Entity; businessLink: BusinessLink | null }) {
+  const link = businessLink?.link ?? selected.spatialLinks[0] ?? null;
+  if (!link) {
+    return (
+      <div className="rounded-lg border border-dashed border-slate-200 p-3 text-sm text-slate-500">
+        This entity is not published into a live business record yet.
+      </div>
+    );
+  }
+
+  const record = businessLink?.record ?? {};
+  const href =
+    link.recordType === "Plot" && cadFile.projectId
+      ? `/app/projects/${cadFile.projectId}/plots/${link.recordId}`
+      : link.recordType === "SiteAsset" && cadFile.projectId
+        ? `/app/projects/${cadFile.projectId}/development`
+        : link.recordType === "ChecklistItem" && cadFile.projectId && typeof record.plotId === "string"
+          ? `/app/projects/${cadFile.projectId}/plots/${record.plotId}?tab=development`
+          : null;
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+      <div className="text-xs uppercase tracking-wide text-slate-500">Live record</div>
+      <div className="mt-1 font-medium">{link.recordType}</div>
+      {link.recordType === "Plot" ? (
+        <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600">
+          <Info label="Plot" value={String(record.code ?? record.label ?? link.recordId)} />
+          <Info label="Status" value={String(record.status ?? "-")} />
+          <Info label="Owner" value={String((record.currentOwner as Record<string, unknown> | undefined)?.name ?? "Company")} />
+          <Info label="Documents" value={String(record.documentCount ?? 0)} />
+        </div>
+      ) : null}
+      {href ? <Link className="btn-primary mt-3 h-9 w-full px-3 text-xs" href={href}>Open {link.recordType.toLowerCase()} workspace</Link> : null}
+    </div>
+  );
+}
+
+function statusTitle(status: string) {
+  if (status === "FAILED") return "CAD processing failed";
+  if (status === "UPLOADED") return "CAD uploaded and queued";
+  if (status === "CONVERTING") return "Converting CAD";
+  if (status === "PARSING") return "Parsing CAD geometry";
+  if (status === "EXTRACTING") return "Extracting plots and site assets";
+  return "Preparing CAD scene";
+}
+
+function statusHelp(status: string) {
+  if (status === "FAILED") return "The original file is saved. Fix the issue below and retry processing.";
+  if (status === "UPLOADED") return "The file is stored and waiting for the CAD worker. This screen will show the map once extraction finishes.";
+  if (status === "CONVERTING") return "The CAD worker is preparing the file for geometry extraction.";
+  if (status === "PARSING") return "Layers, polylines, labels, and dimensions are being parsed.";
+  if (status === "EXTRACTING") return "The system is classifying plots, roads, boundaries, utilities, and labels.";
+  return "The visualization is being prepared.";
+}
+
+function cadStatusRank(status: string) {
+  return ["UPLOADED", "CONVERTING", "PARSING", "EXTRACTING", "REVIEW_REQUIRED", "PUBLISHED"].indexOf(status);
 }
 
 function ToolbarButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {

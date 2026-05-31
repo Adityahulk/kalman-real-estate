@@ -2,6 +2,7 @@ import { FileCheck2, FileText } from "lucide-react";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
 import { DocumentApprovalButtons, GenerateDocumentForm } from "./document-actions";
+import { DeleteFileButton } from "@/components/delete-file-button";
 
 export const dynamic = "force-dynamic";
 
@@ -49,6 +50,9 @@ export default async function DocumentsPage() {
                   <span className="chip bg-slate-100 text-slate-700">{document.status.replaceAll("_", " ")}</span>
                   {document.fileAssetId ? (
                     <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`}>Download</a>
+                  ) : null}
+                  {document.fileAssetId ? (
+                    <DeleteFileButton fileId={document.fileAssetId} fileName={document.number ?? document.type} />
                   ) : null}
                   <DocumentApprovalButtons documentId={document.id} />
                 </div>

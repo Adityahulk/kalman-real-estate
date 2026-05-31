@@ -15,7 +15,7 @@ export default async function CadReviewPage({ params }: { params: { id: string }
       scenes: {
         orderBy: { createdAt: "desc" },
         take: 1,
-        include: { layers: true, entities: { orderBy: { createdAt: "asc" } } },
+        include: { layers: true, entities: { orderBy: { createdAt: "asc" }, include: { spatialLinks: true } } },
       },
       reviewIssues: { where: { resolved: false }, orderBy: { createdAt: "desc" } },
       versions: { orderBy: { version: "desc" } },
@@ -48,6 +48,7 @@ export default async function CadReviewPage({ params }: { params: { id: string }
           parentId: cadFile.parentId,
           version: cadFile.version,
           projectId: cadFile.projectId,
+          errorMessage: cadFile.errorMessage,
         }}
         scene={scene ? {
           id: scene.id,
@@ -63,6 +64,12 @@ export default async function CadReviewPage({ params }: { params: { id: string }
             measurements: entity.measurements,
             status: entity.status,
             sourceLayer: entity.sourceLayer,
+            spatialLinks: entity.spatialLinks.map((link) => ({
+              id: link.id,
+              recordType: link.recordType,
+              recordId: link.recordId,
+              linkConfidence: link.linkConfidence.toString(),
+            })),
           })),
         } : null}
         issues={cadFile.reviewIssues}

@@ -78,6 +78,10 @@ export function apiError(error: unknown) {
     return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
   }
 
+  if (error instanceof Error && error.name === "NotFoundError") {
+    return NextResponse.json({ ok: false, error: error.message }, { status: 404 });
+  }
+
   const message = error instanceof Error ? error.message : "Unexpected server error";
   return NextResponse.json({ ok: false, error: message }, { status: 500 });
 }
