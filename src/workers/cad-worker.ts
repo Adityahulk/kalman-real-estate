@@ -9,7 +9,7 @@ import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { CadEntityType, CadStatus, PrismaClient } from "@prisma/client";
 import { Worker } from "bullmq";
 import IORedis from "ioredis";
-import { objectStorage } from "@/server/storage";
+import { getLocalObject, isLocalStorageKey, objectStorage } from "@/server/storage";
 
 const require = createRequire(import.meta.url);
 const DxfParser = require("dxf-parser");
@@ -127,6 +127,10 @@ function calculateBounds(entities: DxfEntity[]) {
 }
 
 async function getObjectBuffer(key: string) {
+  if (isLocalStorageKey(key)) {
+    return getLocalObject(key);
+  }
+
   const bucket = process.env.S3_BUCKET;
   if (!bucket) throw new Error("S3_BUCKET is not configured");
   const result = await objectStorage.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
@@ -195,6 +199,7 @@ async function processCad(job: CadJob) {
   const layerByName = new Map(layers.map((layer) => [layer.name, layer.id]));
 
   let warningCount = 0;
+  const entitiesForWarnings: Array<{ id: string; label?: string | null; type: CadEntityType; geometry?: object; sourceLayer?: string | null }> = [];
   for (const entity of rawEntities) {
     const type = entity.type as CadEntityType;
     const confidence = entity.confidence ?? 0.35;
@@ -213,6 +218,13 @@ async function processCad(job: CadJob) {
         status: entity.status ?? (confidence >= 0.7 ? "CONFIRMED" : "SUGGESTED"),
       },
     });
+    entitiesForWarnings.push({
+      id: cadEntity.id,
+      label: cadEntity.label,
+      type,
+      geometry: cadEntity.geometry as object,
+      sourceLayer: cadEntity.sourceLayer,
+    });
 
     if (type === CadEntityType.UNKNOWN) {
       warningCount += 1;
@@ -227,6 +239,48 @@ async function processCad(job: CadJob) {
         },
       });
     }
+
+    if (isOpenPolyline(cadEntity.geometry)) {
+      warningCount += 1;
+      await prisma.cadReviewIssue.create({
+        data: {
+          tenantId: job.tenantId,
+          cadFileId: cadFile.id,
+          entityId: cadEntity.id,
+          severity: "LOW",
+          code: "UNCLOSED_POLYLINE",
+          message: "Polyline is open. Confirm before using it as a live plot or construction zone.",
+        },
+      });
+    }
+
+    if (type === CadEntityType.PLOT && isMissingUsefulLabel(cadEntity.label, cadEntity.sourceLayer)) {
+      warningCount += 1;
+      await prisma.cadReviewIssue.create({
+        data: {
+          tenantId: job.tenantId,
+          cadFileId: cadFile.id,
+          entityId: cadEntity.id,
+          severity: "MEDIUM",
+          code: "MISSING_PLOT_LABEL",
+          message: "Plot boundary has no clear plot number. Add or correct the label before publishing.",
+        },
+      });
+    }
+  }
+
+  for (const duplicate of duplicateLabels(entitiesForWarnings)) {
+    warningCount += 1;
+    await prisma.cadReviewIssue.create({
+      data: {
+        tenantId: job.tenantId,
+        cadFileId: cadFile.id,
+        entityId: duplicate.id,
+        severity: "MEDIUM",
+        code: "DUPLICATE_LABEL",
+        message: `Duplicate CAD label "${duplicate.label}" detected. Confirm this is not the same plot/asset repeated.`,
+      },
+    });
   }
 
   await prisma.cadFile.update({
@@ -293,9 +347,46 @@ function calculateExtractedBounds(entities: ExtractedEntity[]) {
 new Worker<CadJob>(
   "cad.process",
   async (job) => {
-    await processCad(job.data);
+    try {
+      await processCad(job.data);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "CAD processing failed";
+      await prisma.cadFile.updateMany({
+        where: { id: job.data.cadFileId, tenantId: job.data.tenantId },
+        data: {
+          status: CadStatus.FAILED,
+          errorMessage: message,
+          processingLog: { failedAt: new Date().toISOString(), error: message },
+        },
+      });
+      throw error;
+    }
   },
   { connection: connection as never, concurrency: 2 },
 );
 
 console.log("CAD worker listening on cad.process");
+
+function isOpenPolyline(geometry: unknown) {
+  if (!geometry || typeof geometry !== "object" || Array.isArray(geometry)) return false;
+  const value = geometry as Record<string, unknown>;
+  return value.type === "polyline" && value.closed !== true && Array.isArray(value.points) && value.points.length > 2;
+}
+
+function isMissingUsefulLabel(label?: string | null, sourceLayer?: string | null) {
+  if (!label) return true;
+  const normalized = label.trim().toLowerCase();
+  if (!normalized) return true;
+  return Boolean(sourceLayer && normalized === sourceLayer.trim().toLowerCase());
+}
+
+function duplicateLabels(entities: Array<{ id: string; label?: string | null; type: CadEntityType }>) {
+  const seen = new Map<string, Array<{ id: string; label: string }>>();
+  for (const entity of entities) {
+    const label = entity.label?.trim();
+    if (!label || entity.type === CadEntityType.UNKNOWN) continue;
+    const key = `${entity.type}:${label.toLowerCase()}`;
+    seen.set(key, [...(seen.get(key) ?? []), { id: entity.id, label }]);
+  }
+  return [...seen.values()].filter((items) => items.length > 1).flat();
+}

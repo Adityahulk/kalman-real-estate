@@ -49,6 +49,32 @@ const project = await prisma.project.findFirstOrThrow({ where: { id: plot.projec
 const tenantId = project.tenantId;
 const stamp = `${Date.now()}-${randomUUID().slice(0, 8)}`;
 
+const cadUploadFlow = await request("/api/v1/cad/upload", {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({
+    projectId: project.id,
+    parentType: "PROJECT",
+    parentId: project.id,
+    format: "DXF",
+    originalName: `upload-flow-${stamp}.dxf`,
+    contentType: "application/dxf",
+  }),
+});
+assert(cadUploadFlow.response.status === 201, "CAD upload record creation failed");
+const cadUploadUrl = new URL(cadUploadFlow.json.data.upload, baseUrl);
+const cadPut = await fetch(cadUploadUrl, {
+  method: "PUT",
+  headers: { cookie, "content-type": "application/dxf" },
+  body: "0\nEOF\n",
+});
+assert(cadPut.status === 200, "CAD binary upload failed");
+const cadQueue = await request(`/api/v1/cad/${cadUploadFlow.json.data.cadFile.id}/process`, {
+  method: "POST",
+  headers: { cookie },
+});
+assert(cadQueue.response.status === 200, "CAD process queue failed");
+
 const doc = await request("/api/v1/documents/generate", {
   method: "POST",
   headers: { "content-type": "application/json", cookie },
@@ -387,6 +413,10 @@ const cadPublish = await request(`/api/v1/cad/${cadFile.id}/publish`, {
 });
 assert(cadPublish.response.status === 200, "site CAD publish failed");
 assert(cadPublish.json.data.plots.length === 1 && cadPublish.json.data.assets.length === 1, "site CAD did not create plot and asset");
+const cadInventoryRecord = await prisma.ownershipRecord.findFirst({
+  where: { tenantId, plotId: cadPublish.json.data.plots[0].id, kind: "COMPANY_INVENTORY" },
+});
+assert(cadInventoryRecord, "CAD-published plot did not create company inventory history");
 const republish = await request(`/api/v1/cad/${cadFile.id}/publish`, {
   method: "POST",
   headers: { "content-type": "application/json", cookie },
@@ -397,6 +427,7 @@ assert(republish.response.status === 400, "CAD republish was allowed");
 const childCad = await prisma.cadFile.create({
   data: {
     tenantId,
+    projectId: project.id,
     parentType: "PLOT",
     parentId: plot.id,
     format: "DXF",

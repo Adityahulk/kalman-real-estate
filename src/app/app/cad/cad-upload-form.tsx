@@ -35,12 +35,18 @@ export function CadUploadForm({
   const [originalName, setOriginalName] = useState("master-plan.dxf");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [message, setMessage] = useState("");
+  const [stage, setStage] = useState<"idle" | "preparing" | "uploading" | "queueing" | "done">("idle");
   const [loading, setLoading] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!selectedFile) {
+      setMessage("Choose a DXF or vector PDF file first.");
+      return;
+    }
     setLoading(true);
     setMessage("");
+    setStage("preparing");
 
     const response = await fetch("/api/v1/cad/upload", {
       method: "POST",
@@ -55,26 +61,40 @@ export function CadUploadForm({
       }),
     });
     const payload = await response.json();
-    setLoading(false);
 
     if (!response.ok) {
+      setLoading(false);
+      setStage("idle");
       setMessage(payload.error ?? "CAD upload setup failed");
       return;
     }
 
-    if (selectedFile) {
-      const putResponse = await fetch(payload.data.upload, {
-        method: "PUT",
-        headers: { "content-type": selectedFile.type || "application/octet-stream" },
-        body: selectedFile,
-      });
-      if (!putResponse.ok) {
-        setMessage("CAD record created, but object storage upload failed. Check S3/MinIO.");
-        return;
-      }
+    setStage("uploading");
+    const putResponse = await fetch(payload.data.upload, {
+      method: "PUT",
+      headers: { "content-type": selectedFile.type || "application/octet-stream" },
+      body: selectedFile,
+    });
+    if (!putResponse.ok) {
+      setLoading(false);
+      setStage("idle");
+      setMessage("CAD record created, but file upload failed. Check storage configuration and retry.");
+      return;
     }
 
-    setMessage(`${selectedFile ? "Uploaded" : "Upload prepared"} for ${payload.data.cadFile.originalName}. Processing has been queued.`);
+    setStage("queueing");
+    const queueResponse = await fetch(`/api/v1/cad/${payload.data.cadFile.id}/process`, { method: "POST" });
+    const queuePayload = await queueResponse.json();
+    if (!queueResponse.ok) {
+      setLoading(false);
+      setStage("idle");
+      setMessage(queuePayload.error ?? "File uploaded, but processing could not be queued.");
+      return;
+    }
+
+    setLoading(false);
+    setStage("done");
+    setMessage(`Uploaded ${payload.data.cadFile.originalName}. CAD processing has been queued.`);
     if (redirectToReview) router.push(`/app/cad/${payload.data.cadFile.id}`);
     router.refresh();
   }
@@ -83,11 +103,16 @@ export function CadUploadForm({
     const file = event.target.files?.[0] ?? null;
     setSelectedFile(file);
     if (file) {
-      setOriginalName(file.name);
       const lower = file.name.toLowerCase();
+      if (!lower.endsWith(".dxf") && !lower.endsWith(".pdf")) {
+        setSelectedFile(null);
+        setMessage("Please upload DXF for CAD extraction. Vector PDF is supported as a secondary option. DWG is disabled in this deployment.");
+        return;
+      }
+      setOriginalName(file.name);
       if (lower.endsWith(".pdf")) setFormat("VECTOR_PDF");
-      else if (lower.endsWith(".dwg")) setFormat("DWG");
       else setFormat("DXF");
+      setMessage("");
     }
   }
 
@@ -129,7 +154,7 @@ export function CadUploadForm({
             <label>
               <span className="label">Format</span>
               <select className="input" value={format} onChange={(event) => setFormat(event.target.value as CadFormat)}>
-                {Object.values(CadFormat).map((item) => (
+                {[CadFormat.DXF, CadFormat.VECTOR_PDF].map((item) => (
                   <option key={item} value={item}>{item.replaceAll("_", " ")}</option>
                 ))}
               </select>
@@ -142,13 +167,25 @@ export function CadUploadForm({
         ) : null}
         <label className="md:col-span-2">
           <span className="label">CAD file</span>
-          <input className="input" type="file" accept=".dxf,.pdf,.dwg" onChange={chooseFile} />
+          <input className="input" type="file" accept=".dxf,.pdf" onChange={chooseFile} />
+          {selectedFile ? (
+            <span className="mt-2 block text-xs text-slate-500">
+              {selectedFile.name} · {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB
+            </span>
+          ) : null}
         </label>
       </div>
 
+      {loading ? (
+        <div className="mt-4 rounded-lg bg-gold-50 px-3 py-2 text-sm text-navy-900">
+          {stage === "preparing" ? "Preparing CAD record..." : null}
+          {stage === "uploading" ? "Uploading CAD file..." : null}
+          {stage === "queueing" ? "Queueing extraction worker..." : null}
+        </div>
+      ) : null}
       {message ? <div className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
 
-      <button className="btn-primary mt-5 w-full" disabled={loading || !projects.length}>
+      <button className="btn-primary mt-5 w-full" disabled={loading || !projects.length || !selectedFile}>
         {loading ? <Loader2 className="animate-spin" size={17} /> : <Upload size={17} />}
         {selectedFile ? "Upload and process CAD" : "Choose CAD file first"}
       </button>

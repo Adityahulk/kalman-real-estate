@@ -45,12 +45,6 @@ export async function createCadUpload(context: RequestContext, input: z.infer<ty
   });
 
   const upload = await createUploadUrl({ key, contentType: input.contentType });
-  const queue = await enqueueCadProcessing({ cadFileId: cadFile.id, tenantId: context.tenantId });
-  await createNotification(context, {
-    title: "CAD upload received",
-    body: `${cadFile.originalName} is queued for CAD extraction.`,
-    data: { cadFileId: cadFile.id, status: cadFile.status },
-  });
   await writeAuditEvent(context, {
     action: AuditAction.UPLOAD,
     entityType: "CadFile",
@@ -58,7 +52,11 @@ export async function createCadUpload(context: RequestContext, input: z.infer<ty
     after: cadFile as unknown as Prisma.InputJsonValue,
   });
 
-  return { cadFile, upload, queue };
+  return {
+    cadFile,
+    upload,
+    queue: { queued: false, reason: "waiting_for_file_upload" },
+  };
 }
 
 export async function getCadStatus(context: RequestContext, id: string) {
@@ -153,59 +151,7 @@ export async function publishCad(context: RequestContext, id: string) {
     const checklistItems = [];
 
     for (const entity of confirmedEntities) {
-      if (entity.type === "PLOT" && file.projectId) {
-        const plot = await tx.plot.upsert({
-          where: {
-            tenantId_projectId_code: {
-              tenantId: context.tenantId,
-              projectId: file.projectId,
-              code: entity.label ?? entity.id,
-            },
-          },
-          update: {
-            geometry: entity.geometry as Prisma.InputJsonValue,
-            areaSqft: readMeasurement(entity.measurements, "areaSqft"),
-          },
-          create: {
-            tenantId: context.tenantId,
-            projectId: file.projectId,
-            code: entity.label ?? entity.id,
-            label: entity.label,
-            geometry: entity.geometry as Prisma.InputJsonValue,
-            areaSqft: readMeasurement(entity.measurements, "areaSqft"),
-          },
-        });
-        await tx.spatialLink.create({
-          data: {
-            tenantId: context.tenantId,
-            cadEntityId: entity.id,
-            recordType: "Plot",
-            recordId: plot.id,
-            linkConfidence: entity.confidence,
-          },
-        });
-        plots.push(plot);
-      } else if (file.projectId) {
-        const asset = await tx.siteAsset.create({
-          data: {
-            tenantId: context.tenantId,
-            projectId: file.projectId,
-            name: entity.label ?? entity.type,
-            type: entity.type,
-            geometry: entity.geometry as Prisma.InputJsonValue,
-          },
-        });
-        await tx.spatialLink.create({
-          data: {
-            tenantId: context.tenantId,
-            cadEntityId: entity.id,
-            recordType: "SiteAsset",
-            recordId: asset.id,
-            linkConfidence: entity.confidence,
-          },
-        });
-        assets.push(asset);
-      } else if (file.parentType === "PLOT") {
+      if (file.parentType === "PLOT") {
         const plot = await tx.plot.findFirstOrThrow({ where: { id: file.parentId, tenantId: context.tenantId } });
         const item = await tx.checklistItem.create({
           data: {
@@ -229,6 +175,76 @@ export async function publishCad(context: RequestContext, id: string) {
           },
         });
         checklistItems.push(item);
+      } else if (file.parentType === "PROJECT" && entity.type === "PLOT" && file.projectId) {
+        const plot = await tx.plot.upsert({
+          where: {
+            tenantId_projectId_code: {
+              tenantId: context.tenantId,
+              projectId: file.projectId,
+              code: entity.label ?? entity.id,
+            },
+          },
+          update: {
+            geometry: entity.geometry as Prisma.InputJsonValue,
+            areaSqft: readMeasurement(entity.measurements, "areaSqft"),
+          },
+          create: {
+            tenantId: context.tenantId,
+            projectId: file.projectId,
+            code: entity.label ?? entity.id,
+            label: entity.label,
+            geometry: entity.geometry as Prisma.InputJsonValue,
+            areaSqft: readMeasurement(entity.measurements, "areaSqft"),
+          },
+        });
+        const existingOwnership = await tx.ownershipRecord.findFirst({
+          where: { tenantId: context.tenantId, plotId: plot.id },
+          select: { id: true },
+        });
+        if (!existingOwnership) {
+          await tx.ownershipRecord.create({
+            data: {
+              tenantId: context.tenantId,
+              plotId: plot.id,
+              ownerId: null,
+              kind: "COMPANY_INVENTORY",
+              amountInr: plot.priceInr,
+              sharePct: 100,
+              notes: "Company inventory created from CAD publish.",
+              createdById: context.userId,
+            },
+          });
+        }
+        await tx.spatialLink.create({
+          data: {
+            tenantId: context.tenantId,
+            cadEntityId: entity.id,
+            recordType: "Plot",
+            recordId: plot.id,
+            linkConfidence: entity.confidence,
+          },
+        });
+        plots.push(plot);
+      } else if (file.parentType === "PROJECT" && file.projectId) {
+        const asset = await tx.siteAsset.create({
+          data: {
+            tenantId: context.tenantId,
+            projectId: file.projectId,
+            name: entity.label ?? entity.type,
+            type: entity.type,
+            geometry: entity.geometry as Prisma.InputJsonValue,
+          },
+        });
+        await tx.spatialLink.create({
+          data: {
+            tenantId: context.tenantId,
+            cadEntityId: entity.id,
+            recordType: "SiteAsset",
+            recordId: asset.id,
+            linkConfidence: entity.confidence,
+          },
+        });
+        assets.push(asset);
       }
     }
 
@@ -297,9 +313,14 @@ export async function getCadVersions(context: RequestContext, id: string) {
 }
 
 export async function retryCadProcessing(context: RequestContext, id: string) {
+  return startCadProcessing(context, id, true);
+}
+
+export async function startCadProcessing(context: RequestContext, id: string, retried = false) {
   const cadFile = await prisma.cadFile.findFirstOrThrow({
     where: { id, tenantId: context.tenantId },
   });
+  if (cadFile.status === CadStatus.PUBLISHED) throwBadRequest("Published CAD versions are immutable and cannot be processed again");
 
   const updated = await prisma.cadFile.update({
     where: { id },
@@ -310,7 +331,12 @@ export async function retryCadProcessing(context: RequestContext, id: string) {
     action: AuditAction.UPDATE,
     entityType: "CadFile",
     entityId: id,
-    after: { retried: true, queue },
+    after: { processingQueued: true, retried, queue },
+  });
+  await createNotification(context, {
+    title: retried ? "CAD processing retried" : "CAD processing queued",
+    body: `${cadFile.originalName} is queued for CAD extraction.`,
+    data: { cadFileId: id, status: updated.status, queue },
   });
   return { cadFile: updated, queue };
 }

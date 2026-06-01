@@ -128,6 +128,10 @@ export function CadWorkspace({
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [businessLink, setBusinessLink] = useState<BusinessLink | null>(null);
+  const [statusSnapshot, setStatusSnapshot] = useState({
+    status: cadFile.status,
+    errorMessage: cadFile.errorMessage,
+  });
   const svgRef = useRef<SVGSVGElement | null>(null);
 
   const visibleEntities = useMemo(() => {
@@ -135,13 +139,40 @@ export function CadWorkspace({
     const normalizedQuery = query.trim().toLowerCase();
     return scene.entities.filter((entity) => {
       if (entity.layerId && hiddenLayers.has(entity.layerId)) return false;
+      if (mode === "live" && cadFile.status === "PUBLISHED" && !entity.spatialLinks.length) return false;
+      if (mode === "review" && entity.status === "REJECTED") return false;
       if (!normalizedQuery) return true;
       return `${entity.label ?? ""} ${entity.type} ${entity.sourceLayer ?? ""}`.toLowerCase().includes(normalizedQuery);
     });
-  }, [hiddenLayers, query, scene]);
+  }, [cadFile.status, hiddenLayers, mode, query, scene]);
 
   const selected = scene?.entities.find((entity) => entity.id === selectedId) ?? visibleEntities[0] ?? null;
   const selectedIssues = selected ? issues.filter((issue) => issue.entityId === selected.id) : [];
+  const confirmedCount = scene?.entities.filter((entity) => entity.status === "CONFIRMED").length ?? 0;
+  const effectiveStatus = statusSnapshot.status;
+
+  useEffect(() => {
+    setStatusSnapshot({ status: cadFile.status, errorMessage: cadFile.errorMessage });
+  }, [cadFile.errorMessage, cadFile.id, cadFile.status]);
+
+  useEffect(() => {
+    if (scene || ["FAILED", "REVIEW_REQUIRED", "PUBLISHED"].includes(effectiveStatus)) return;
+    const timer = window.setInterval(() => {
+      fetch(`/api/v1/cad/${cadFile.id}/status`)
+        .then((response) => response.json())
+        .then((body) => {
+          if (!body.ok) return;
+          const next = {
+            status: String(body.data.status),
+            errorMessage: body.data.errorMessage as string | null,
+          };
+          setStatusSnapshot(next);
+          if (["FAILED", "REVIEW_REQUIRED", "PUBLISHED"].includes(next.status)) router.refresh();
+        })
+        .catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [cadFile.id, effectiveStatus, router, scene]);
 
   useEffect(() => {
     if (!selected) {
@@ -233,7 +264,11 @@ export function CadWorkspace({
     const response = await fetch(`/api/v1/cad/${cadFile.id}/publish`, { method: "POST" });
     const body = await response.json();
     setLoading(false);
-    setMessage(response.ok ? `Published ${body.data.plots.length} plots and ${body.data.assets.length} assets.` : body.error ?? "Publish failed");
+    setMessage(
+      response.ok
+        ? `Published ${body.data.plots.length} plots, ${body.data.assets.length} assets, and ${body.data.checklistItems.length} zones.`
+        : body.error ?? "Publish failed",
+    );
     router.refresh();
   }
 
@@ -251,20 +286,20 @@ export function CadWorkspace({
       <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-card">
         <div className="mx-auto max-w-2xl text-center">
           <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
-            {cadFile.status === "FAILED" ? <AlertTriangle size={22} /> : <Loader2 className="animate-spin" size={22} />}
+            {effectiveStatus === "FAILED" ? <AlertTriangle size={22} /> : <Loader2 className="animate-spin" size={22} />}
           </div>
-          <h2 className="mt-4 text-xl font-semibold">{statusTitle(cadFile.status)}</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">{statusHelp(cadFile.status)}</p>
-          {cadFile.errorMessage ? <div className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{cadFile.errorMessage}</div> : null}
+          <h2 className="mt-4 text-xl font-semibold">{statusTitle(effectiveStatus)}</h2>
+          <p className="mt-2 text-sm leading-6 text-slate-600">{statusHelp(effectiveStatus)}</p>
+          {statusSnapshot.errorMessage ? <div className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{statusSnapshot.errorMessage}</div> : null}
           <div className="mt-6 grid gap-2 text-left text-sm md:grid-cols-5">
             {["UPLOADED", "CONVERTING", "PARSING", "EXTRACTING", "REVIEW_REQUIRED"].map((status) => (
-              <div key={status} className={`rounded-lg border px-3 py-2 ${cadStatusRank(cadFile.status) >= cadStatusRank(status) ? "border-gold-300 bg-gold-50 text-navy-950" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
+              <div key={status} className={`rounded-lg border px-3 py-2 ${cadStatusRank(effectiveStatus) >= cadStatusRank(status) ? "border-gold-300 bg-gold-50 text-navy-950" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
                 {status.replaceAll("_", " ")}
               </div>
             ))}
           </div>
           {message ? <div className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
-          {cadFile.status === "FAILED" || cadFile.status === "UPLOADED" ? (
+          {effectiveStatus === "FAILED" || effectiveStatus === "UPLOADED" ? (
             <button className="btn-primary mt-6" onClick={retry} disabled={loading}>
               {loading ? <Loader2 className="animate-spin" size={17} /> : <RotateCcw size={17} />}
               Retry processing
@@ -427,7 +462,7 @@ export function CadWorkspace({
           </div>
 
           {selected ? (
-            <form onSubmit={saveSelected} className="mt-5 space-y-4">
+            <form key={selected.id} onSubmit={saveSelected} className="mt-5 space-y-4">
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <div className="grid grid-cols-2 gap-3 text-sm">
                   <Info label="Type" value={selected.type.replaceAll("_", " ")} />
@@ -481,9 +516,9 @@ export function CadWorkspace({
                   {loading ? <Loader2 className="animate-spin" size={17} /> : <Check size={17} />}
                   Save
                 </button>
-                <button type="button" className="btn-gold" onClick={publish} disabled={loading}>
+                <button type="button" className="btn-gold" onClick={publish} disabled={loading || cadFile.status === "PUBLISHED" || confirmedCount === 0}>
                   <Send size={17} />
-                  Publish
+                  {cadFile.status === "PUBLISHED" ? "Published" : "Publish"}
                 </button>
               </div>
               <Link
@@ -616,7 +651,7 @@ function EntityShape({
 }) {
   const style = typeStyle[entity.type] ?? typeStyle.UNKNOWN;
   const geometry = entity.geometry && typeof entity.geometry === "object" ? entity.geometry as Record<string, unknown> : {};
-  const points = extractPoints(geometry);
+  const points = expandRectPoints(geometry, extractPoints(geometry));
   const mapped = points.map(([x, y]) => [x - viewport.minX, viewport.maxY - y] as [number, number]);
   const strokeDasharray = Number(entity.confidence) < 0.55 || entity.status === "SUGGESTED" ? "8 6" : undefined;
   const opacity = entity.status === "REJECTED" ? 0.28 : 1;
@@ -626,22 +661,25 @@ function EntityShape({
   if (!mapped.length) return null;
 
   const textPoint = mapped[0];
-  const isClosed = geometry.closed === true || geometry.type === "rect" || mapped.length > 2;
+  const isPointOnly = geometry.type === "text" || mapped.length === 1;
+  const isClosed = geometry.closed === true || geometry.type === "rect" || geometry.type === "polygon";
   const path = isClosed
     ? `M ${mapped.map((point) => point.join(" ")).join(" L ")} Z`
     : `M ${mapped.map((point) => point.join(" ")).join(" L ")}`;
 
   return (
     <g data-entity={entity.id} onClick={onClick} className="cursor-pointer" opacity={opacity} filter={filter}>
-      <path
-        d={path}
-        fill={isClosed ? style.fill : "none"}
-        stroke={selected ? "#f8fafc" : style.stroke}
-        strokeWidth={strokeWidth}
-        strokeDasharray={strokeDasharray}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      {!isPointOnly ? (
+        <path
+          d={path}
+          fill={isClosed ? style.fill : "none"}
+          stroke={selected ? "#f8fafc" : style.stroke}
+          strokeWidth={strokeWidth}
+          strokeDasharray={strokeDasharray}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ) : null}
       {!minimap && (
         <>
           <circle cx={textPoint[0]} cy={textPoint[1]} r={selected ? 4 : 2.5} fill={selected ? "#f8fafc" : style.stroke} />
@@ -685,6 +723,17 @@ function extractPoints(geometry: Record<string, unknown>): [number, number][] {
     return [[rawPoint[0], rawPoint[1]]];
   }
   return [];
+}
+
+function expandRectPoints(geometry: Record<string, unknown>, points: [number, number][]) {
+  if (geometry.type !== "rect" || points.length !== 2) return points;
+  const [a, b] = points;
+  return [
+    [a[0], a[1]],
+    [b[0], a[1]],
+    [b[0], b[1]],
+    [a[0], b[1]],
+  ] as [number, number][];
 }
 
 function makeViewport(scene: Scene | null) {

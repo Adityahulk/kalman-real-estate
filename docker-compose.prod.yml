@@ -8,6 +8,8 @@ services:
       - .env.production
     ports:
       - "127.0.0.1:3000:3000"
+    volumes:
+      - storage_data:/app/storage
     depends_on:
       postgres:
         condition: service_healthy
@@ -43,6 +45,8 @@ services:
     environment:
       PYTHON_BIN: /usr/bin/python3
       ODA_CONVERTER_BIN: ${ODA_CONVERTER_BIN:-}
+    volumes:
+      - storage_data:/app/storage
 
   document-worker:
     build:
@@ -55,6 +59,8 @@ services:
     depends_on:
       - postgres
       - redis
+    volumes:
+      - storage_data:/app/storage
 
   ai-worker:
     build:
@@ -93,3 +99,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  storage_data:

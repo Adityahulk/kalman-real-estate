@@ -28,6 +28,10 @@ export async function createUploadUrl(input: {
   contentType: string;
   expiresInSeconds?: number;
 }) {
+  if (process.env.FILE_STORAGE_DRIVER === "local") {
+    return `/api/v1/storage/upload?key=${encodeURIComponent(input.key)}`;
+  }
+
   const bucket = process.env.S3_BUCKET;
   if (!bucket) {
     throw new Error("S3_BUCKET is not configured");
@@ -80,7 +84,7 @@ export async function putObject(key: string, bytes: Buffer, contentType: string)
 }
 
 export function isLocalStorageKey(key: string) {
-  return key.startsWith("local/");
+  return process.env.FILE_STORAGE_DRIVER === "local" || key.startsWith("local/");
 }
 
 export function localStoragePath(key: string) {
