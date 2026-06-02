@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { FileWarning, Landmark, Search, UserRoundCheck } from "lucide-react";
+import { FileText, FileWarning, GitBranch, Landmark, Search, UserRoundCheck } from "lucide-react";
 import { PlotStatus } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
 import { fullInr } from "@/lib/format";
-import { ManualPlotForm } from "../../manual-entry-actions";
+import { AddPlotPanel, QuickAllotmentLink } from "../../simplified-workflow-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +52,14 @@ export default async function ProjectOwnershipPage({
     _count: true,
   });
   const fileCountByPlot = new Map(plotFiles.map((file) => [file.ownerId, file._count]));
+  const generatedLetters = await prisma.generatedDocument.findMany({
+    where: { tenantId: session.tenantId, recordType: "Plot", recordId: { in: plots.map((plot) => plot.id) } },
+    orderBy: { createdAt: "desc" },
+  });
+  const letterByPlot = new Map<string, typeof generatedLetters[number]>();
+  for (const letter of generatedLetters) {
+    if (!letterByPlot.has(letter.recordId)) letterByPlot.set(letter.recordId, letter);
+  }
   const filteredPlots = plots.filter((plot) => {
     const hasDocs = (fileCountByPlot.get(plot.id) ?? 0) > 0;
     const registryStatus = plot.registryRecords[0]?.status ?? "Not started";
@@ -70,9 +78,13 @@ export default async function ProjectOwnershipPage({
             Search plots, check owner details, registry state, document gaps, and open the plot workspace for actions.
           </p>
         </div>
-        <Link className="btn-primary" href={`/app/projects/${project.id}/cad`}>
-          Open CAD map
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link className="btn-primary" href={`/app/projects/${project.id}/cad`}>
+            Open CAD map
+          </Link>
+          <AddPlotPanel compact projectId={project.id} />
+          <QuickAllotmentLink projectId={project.id} />
+        </div>
       </div>
 
       <form className="mt-6 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-[1fr_180px_180px_160px_160px_auto]">
@@ -112,16 +124,17 @@ export default async function ProjectOwnershipPage({
       </form>
 
       <section className="mt-6 grid gap-6 xl:grid-cols-[380px_1fr]">
-        <ManualPlotForm projectId={project.id} />
+        <AddPlotPanel projectId={project.id} />
         <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <h2 className="font-semibold">CAD or manual, same ownership ledger</h2>
+          <h2 className="font-semibold">Plot registry is the ownership workbench</h2>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            Use CAD when you have a DXF layout. Use manual entry when the builder only has plot numbers, area, and owner records.
-            Both paths create the same plot workspace with documents, registry, transfers, progress, and audit history.
+            Use CAD when you have a DXF layout, or add plots manually when the builder has only plot numbers and owner records.
+            Every row opens the same plot workspace for ownership, documents, registry, letters, and history.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Link className="btn-primary" href={`/app/projects/${project.id}/cad`}>Upload CAD</Link>
-            <span className="chip bg-slate-100 text-slate-700">Manual hierarchy supported</span>
+            <QuickAllotmentLink projectId={project.id} />
+            <span className="chip bg-slate-100 text-slate-700">CAD and manual plots use the same workflow</span>
           </div>
         </div>
       </section>
@@ -142,11 +155,13 @@ export default async function ProjectOwnershipPage({
                 <th className="px-5 py-3">Registry</th>
                 <th className="px-5 py-3">Documents</th>
                 <th className="px-5 py-3">Value</th>
+                <th className="px-5 py-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredPlots.map((plot) => {
                 const documentCount = fileCountByPlot.get(plot.id) ?? 0;
+                const letter = letterByPlot.get(plot.id);
                 return (
                   <tr key={plot.id} className="hover:bg-slate-50">
                     <td className="px-5 py-3 font-medium">
@@ -169,6 +184,19 @@ export default async function ProjectOwnershipPage({
                       )}
                     </td>
                     <td className="px-5 py-3">{fullInr(Number(plot.ownershipRecords[0]?.amountInr ?? plot.priceInr ?? 0))}</td>
+                    <td className="px-5 py-3">
+                      <div className="flex min-w-[300px] flex-wrap gap-2">
+                        <Link className="btn-primary h-8 px-3 text-xs" href={`/app/projects/${project.id}/plots/${plot.id}`}>Open</Link>
+                        <Link className="btn-outline h-8 px-3 text-xs" href={`/app/projects/${project.id}/plots/${plot.id}?tab=documents`}>
+                          <FileText size={14} />
+                          {letter?.fileAssetId ? "Download Letter" : "Generate Letter"}
+                        </Link>
+                        <Link className="btn-outline h-8 px-3 text-xs" href={`/app/projects/${project.id}/plots/${plot.id}?tab=ownership#ownership-action`}>
+                          <GitBranch size={14} />
+                          {plot.currentOwnerId ? "Change Owner" : "Add Owner"}
+                        </Link>
+                      </div>
+                    </td>
                   </tr>
                 );
               })}

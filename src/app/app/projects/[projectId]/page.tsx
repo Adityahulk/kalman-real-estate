@@ -6,17 +6,22 @@ import {
   Building2,
   CheckCircle2,
   Clock3,
+  FileDown,
   FileWarning,
   GitBranch,
   Landmark,
   Map,
+  Megaphone,
   Route,
+  Upload,
   Users,
 } from "lucide-react";
 import type React from "react";
 import { getSessionUser } from "@/server/session";
 import { getProjectWorkspace } from "@/server/services/projects";
 import { fullInr } from "@/lib/format";
+import { FileUploader } from "@/components/file-uploader";
+import { AddPlotPanel, QuickAllotmentLink, WhatsAppShareLink } from "../simplified-workflow-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +33,8 @@ export default async function ProjectWorkspacePage({ params }: { params: { proje
   const plotCounts = Object.fromEntries(workspace.plotStatus.map((item) => [item.status, item._count]));
   const assetCounts = Object.fromEntries(workspace.assetStatus.map((item) => [item.status, item._count]));
   const cadCounts = Object.fromEntries(workspace.cadStatus.map((item) => [item.status, item._count]));
+  const totalPlots = Object.values(plotCounts).reduce((sum, count) => sum + Number(count), 0);
+  const shareText = `${project.name}, ${project.city}. Total plots: ${totalPlots}. Company-held plots: ${plotCounts.COMPANY_OWNED ?? 0}.`;
 
   return (
     <main className="px-4 py-6 lg:px-8">
@@ -47,10 +54,17 @@ export default async function ProjectWorkspacePage({ params }: { params: { proje
             <Map size={17} />
             Open CAD map
           </Link>
+          <AddPlotPanel compact projectId={project.id} />
+          <QuickAllotmentLink projectId={project.id} />
           <Link className="btn-outline" href={`/app/projects/${project.id}/ownership`}>
             <Users size={17} />
             Ownership ledger
           </Link>
+          <a className="btn-outline" href={`/api/v1/projects/${project.id}/report`}>
+            <FileDown size={17} />
+            Download Report
+          </a>
+          <WhatsAppShareLink text={shareText} />
         </div>
       </div>
 
@@ -64,6 +78,38 @@ export default async function ProjectWorkspacePage({ params }: { params: { proje
 
       <section className="mt-6 grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <div className="space-y-6">
+          <div className="card overflow-hidden">
+            <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-4">
+              <Building2 size={18} />
+              <h2 className="font-semibold">Site details</h2>
+            </div>
+            <div className="grid gap-5 p-5 lg:grid-cols-[1fr_320px]">
+              <div className="grid gap-4 md:grid-cols-2">
+                <Info label="Project name" value={project.name} />
+                <Info label="City / location" value={project.city} />
+                <Info label="Address" value={project.address ?? "No address saved"} wide />
+                <Info label="CAD file" value={latestCad?.originalName ?? "No CAD uploaded"} />
+                <Info label="CAD status" value={latestCad?.status.replaceAll("_", " ") ?? "Not uploaded"} />
+              </div>
+              <div className="space-y-3">
+                <Link className="btn-primary w-full justify-center" href={`/app/projects/${project.id}/cad`}>
+                  <Upload size={17} />
+                  Upload / Change CAD
+                </Link>
+                <FileUploader
+                  label="Upload brochure or marketing image"
+                  ownerType="Project"
+                  ownerId={project.id}
+                  visibility="SHARED"
+                  accept="application/pdf,image/*"
+                />
+                <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
+                  WhatsApp text: {shareText}
+                </div>
+              </div>
+            </div>
+          </div>
+
           <div className="card overflow-hidden">
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
               <div className="flex items-center gap-2">
@@ -105,8 +151,18 @@ export default async function ProjectWorkspacePage({ params }: { params: { proje
             </Link>
             <Link href={`/app/projects/${project.id}/ownership`} className="rounded-xl border border-slate-200 bg-white p-5 shadow-card transition hover:-translate-y-0.5 hover:shadow-lg">
               <Landmark className="text-navy-800" size={22} />
-              <h2 className="mt-3 font-semibold">Manual non-CAD setup</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-600">Manually add plots, areas, parts, and subparts with the same ownership, documents, registry, and audit history.</p>
+              <h2 className="mt-3 font-semibold">Plot registry</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-600">Search plots, add manual plots, allot owners, generate letters, and manage documents.</p>
+            </Link>
+            <Link href={`/app/marketing`} className="rounded-xl border border-slate-200 bg-white p-5 shadow-card transition hover:-translate-y-0.5 hover:shadow-lg">
+              <Megaphone className="text-navy-800" size={22} />
+              <h2 className="mt-3 font-semibold">Marketing and media</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-600">Assign shoots, upload videos, review edits, and keep brochure assets near the project.</p>
+            </Link>
+            <Link href={`/app/finance`} className="rounded-xl border border-slate-200 bg-white p-5 shadow-card transition hover:-translate-y-0.5 hover:shadow-lg">
+              <BadgeIndianRupee className="text-navy-800" size={22} />
+              <h2 className="mt-3 font-semibold">Cost and BOQ</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-600">Budgets, vendors, invoices, payments, and CAD-linked quantity variance stay available.</p>
             </Link>
           </div>
 
@@ -182,6 +238,15 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
     <div className="card p-4">
       <h2 className="mb-3 font-semibold">{title}</h2>
       <div className="space-y-2">{children}</div>
+    </div>
+  );
+}
+
+function Info({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
+  return (
+    <div className={wide ? "md:col-span-2" : ""}>
+      <div className="text-xs uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-1 text-sm font-medium text-navy-950">{value}</div>
     </div>
   );
 }

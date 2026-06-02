@@ -98,6 +98,10 @@ async function assertOwnerRecord(context: RequestContext, ownerType?: string, ow
     await prisma.owner.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
     return;
   }
+  if (ownerType === "Project") {
+    await prisma.project.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
+    return;
+  }
   if (ownerType === "RegistryRecord") {
     await prisma.registryRecord.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
     return;

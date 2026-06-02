@@ -68,6 +68,7 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
           { entityType: "GeneratedDocument", entityId: { in: [] } },
         ],
       },
+      include: { actor: { select: { name: true, email: true } } },
       orderBy: { createdAt: "desc" },
       take: 60,
     }),
@@ -98,6 +99,7 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
   const documentAudit = documentIds.length
     ? await prisma.auditEvent.findMany({
         where: { tenantId: context.tenantId, entityType: "GeneratedDocument", entityId: { in: documentIds } },
+        include: { actor: { select: { name: true, email: true } } },
         orderBy: { createdAt: "desc" },
         take: 40,
       })
@@ -105,6 +107,7 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
   const fileAudit = fileIds.length
     ? await prisma.auditEvent.findMany({
         where: { tenantId: context.tenantId, entityType: "FileAsset", entityId: { in: fileIds } },
+        include: { actor: { select: { name: true, email: true } } },
         orderBy: { createdAt: "desc" },
         take: 40,
       })
@@ -151,8 +154,8 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
       id: `audit-${event.id}`,
       at: event.createdAt,
       type: "AUDIT",
-      title: `${event.action} · ${event.entityType}`,
-      detail: event.entityId,
+      title: `${event.action} · ${event.entityType}${event.actor ? ` · ${event.actor.name}` : ""}`,
+      detail: [event.entityId, event.actor?.email ? `Actor: ${event.actor.email}` : null].filter(Boolean).join(" · "),
     })),
   ].sort((a, b) => b.at.getTime() - a.at.getTime());
 

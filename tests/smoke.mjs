@@ -49,6 +49,11 @@ const project = await prisma.project.findFirstOrThrow({ where: { id: plot.projec
 const tenantId = project.tenantId;
 const stamp = `${Date.now()}-${randomUUID().slice(0, 8)}`;
 
+const projectReport = await fetch(`${baseUrl}/api/v1/projects/${project.id}/report`, { headers: { cookie } });
+assert(projectReport.status === 200, "project report download failed");
+const projectReportText = await projectReport.text();
+assert(projectReportText.includes("Plot Number") && projectReportText.includes("Owner Name / Company Status"), "project report is missing ownership columns");
+
 const cadUploadFlow = await request("/api/v1/cad/upload", {
   method: "POST",
   headers: { "content-type": "application/json", cookie },

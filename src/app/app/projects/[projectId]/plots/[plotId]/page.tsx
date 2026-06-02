@@ -5,6 +5,7 @@ import {
   FileText,
   GitBranch,
   History,
+  Image,
   Landmark,
   Map,
   Upload,
@@ -17,13 +18,14 @@ import { getPlotWorkspace } from "@/server/services/plot-workspace";
 import { prisma } from "@/server/db";
 import { fullInr } from "@/lib/format";
 import { DeleteFileButton } from "@/components/delete-file-button";
+import { FileUploader } from "@/components/file-uploader";
 import { CadUploadForm } from "../../../../cad/cad-upload-form";
 import { DocumentApprovalButtons } from "../../../../documents/document-actions";
 import { ManualPlotZoneForm } from "../../../manual-entry-actions";
+import { GuidedOwnershipPanel, SmartLetterCard } from "../../../simplified-workflow-actions";
 import {
   GeneratePlotDocumentPanel,
   OwnershipDocumentUpload,
-  PlotAllotmentForm,
   PlotChecklistProgressForm,
   PlotRegistryForm,
   PlotTransferForm,
@@ -31,7 +33,9 @@ import {
 
 export const dynamic = "force-dynamic";
 
-const tabs = ["overview", "ownership", "documents", "registry", "transfers", "development", "audit", "child-cad"] as const;
+const primaryTabs = ["overview", "ownership", "documents", "history"] as const;
+const advancedTabs = ["registry", "transfers", "development", "child-cad"] as const;
+const tabs = [...primaryTabs, ...advancedTabs] as const;
 
 export default async function ProjectPlotWorkspacePage({
   params,
@@ -46,7 +50,8 @@ export default async function ProjectPlotWorkspacePage({
   if (workspace.plot.projectId !== params.projectId) notFound();
   const owners = await prisma.owner.findMany({ where: { tenantId: session.tenantId }, orderBy: { name: "asc" } });
   const plot = workspace.plot;
-  const activeTab = tabs.includes(searchParams.tab as typeof tabs[number]) ? searchParams.tab as typeof tabs[number] : "overview";
+  const requestedTab = searchParams.tab === "audit" ? "history" : searchParams.tab;
+  const activeTab = tabs.includes(requestedTab as typeof tabs[number]) ? requestedTab as typeof tabs[number] : "overview";
   const latestRegistry = plot.registryRecords[0];
   const latestOwnership = plot.ownershipRecords[0];
   const cadFileId = workspace.spatialLinks[0]?.entity.scene.cadFileId;
@@ -79,8 +84,8 @@ export default async function ProjectPlotWorkspacePage({
         </div>
       </div>
 
-      <div className="mt-4 flex gap-2 overflow-x-auto pb-2">
-        {tabs.map((tab) => (
+      <div className="mt-4 flex flex-wrap gap-2 pb-2">
+        {primaryTabs.map((tab) => (
           <Link
             key={tab}
             className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium ${
@@ -91,6 +96,19 @@ export default async function ProjectPlotWorkspacePage({
             {tab.replaceAll("-", " ")}
           </Link>
         ))}
+        <div className="ml-0 flex flex-wrap gap-2 border-l-0 pl-0 xl:ml-2 xl:border-l xl:border-slate-200 xl:pl-3">
+          {advancedTabs.map((tab) => (
+            <Link
+              key={tab}
+              className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium ${
+                activeTab === tab ? "bg-navy-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+              href={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=${tab}`}
+            >
+              {tab.replaceAll("-", " ")}
+            </Link>
+          ))}
+        </div>
       </div>
 
       {activeTab === "overview" ? (
@@ -103,20 +121,42 @@ export default async function ProjectPlotWorkspacePage({
               <Metric icon={BadgeIndianRupee} label="Last value" value={fullInr(Number(latestOwnership?.amountInr ?? plot.priceInr ?? 0))} />
             </div>
             <div className="card p-5">
-              <div className="mb-4 flex items-center gap-2">
-                <Map size={18} />
-                <h2 className="font-semibold">Plot CAD preview</h2>
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Map size={18} />
+                  <h2 className="font-semibold">Plot CAD preview</h2>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {cadFileId ? <Link className="btn-outline h-9 px-3 text-xs" href={`/app/cad/${cadFileId}`}>Open full CAD</Link> : null}
+                  <Link className="btn-outline h-9 px-3 text-xs" href={`?tab=child-cad`}>Upload plot CAD</Link>
+                </div>
               </div>
               <PlotGeometryPreview geometry={plot.geometry} label={plot.code} />
-              <div className="mt-4 flex flex-wrap gap-2">
-                {cadFileId ? <Link className="btn-outline h-9 px-3 text-xs" href={`/app/cad/${cadFileId}`}>Open full CAD</Link> : null}
-                <Link className="btn-outline h-9 px-3 text-xs" href={`?tab=child-cad`}>Upload plot CAD</Link>
-              </div>
             </div>
-            <Timeline items={workspace.timeline.slice(0, 8)} />
+            <div className="card p-5">
+              <div className="mb-4 flex items-center gap-2">
+                <Image size={18} />
+                <h2 className="font-semibold">Plot media / structure photos</h2>
+              </div>
+              <FileUploader label="Upload plot image or house photo" ownerType="Plot" ownerId={plot.id} visibility="OWNER_VISIBLE" accept="image/*" />
+            </div>
+            <Timeline title="Recent plot history" items={workspace.timeline.slice(0, 8)} />
           </div>
           <aside className="space-y-6">
-            <GeneratePlotDocumentPanel plotId={plot.id} plotCode={plot.code} ownerName={plot.currentOwner?.name ?? "Company"} />
+            <SmartLetterCard
+              plotId={plot.id}
+              plotCode={plot.code}
+              ownerName={plot.currentOwner?.name ?? "Company"}
+              letters={workspace.generatedDocuments.map((document) => ({
+                id: document.id,
+                type: document.type,
+                status: document.status,
+                number: document.number,
+                fileAssetId: document.fileAssetId,
+                createdAt: document.createdAt,
+              }))}
+            />
+            <GuidedOwnershipPanel plotId={plot.id} plotStatus={plot.status} owners={owners} />
             <OwnershipDocumentUpload ownerType="Plot" ownerId={plot.id} defaultVisibility="OWNER_VISIBLE" defaultDocumentType="REGISTRY_RECEIPT" title="Quick plot document upload" />
           </aside>
         </section>
@@ -133,7 +173,9 @@ export default async function ProjectPlotWorkspacePage({
             </div>
           </div>
           <aside className="space-y-6">
-            <PlotAllotmentForm plotId={plot.id} owners={owners} />
+            <div id="ownership-action">
+              <GuidedOwnershipPanel plotId={plot.id} plotStatus={plot.status} owners={owners} />
+            </div>
             {plot.currentOwnerId ? (
               <OwnershipDocumentUpload ownerType="Owner" ownerId={plot.currentOwnerId} defaultVisibility="TEAM" defaultDocumentType="PAN_CARD" title="Upload owner PAN / Aadhaar / KYC" />
             ) : null}
@@ -266,9 +308,9 @@ export default async function ProjectPlotWorkspacePage({
         </section>
       ) : null}
 
-      {activeTab === "audit" ? (
+      {activeTab === "history" ? (
         <section className="mt-4">
-          <Timeline items={workspace.timeline} />
+          <Timeline title="Plot history" items={workspace.timeline} />
         </section>
       ) : null}
 
@@ -385,12 +427,12 @@ function DocumentGrid({ files, empty }: { files: Awaited<ReturnType<typeof getPl
   );
 }
 
-function Timeline({ items }: { items: Awaited<ReturnType<typeof getPlotWorkspace>>["timeline"] }) {
+function Timeline({ title = "Audit timeline", items }: { title?: string; items: Awaited<ReturnType<typeof getPlotWorkspace>>["timeline"] }) {
   return (
     <div className="card p-5">
       <div className="mb-4 flex items-center gap-2">
         <History size={18} />
-        <h2 className="font-semibold">Audit timeline</h2>
+        <h2 className="font-semibold">{title}</h2>
       </div>
       <div className="space-y-3">
         {items.map((item) => (

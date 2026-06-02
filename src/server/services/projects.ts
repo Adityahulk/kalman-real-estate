@@ -153,6 +153,59 @@ export async function getProjectWorkspace(context: RequestContext, projectId: st
   };
 }
 
+export async function getProjectReportCsv(context: RequestContext, projectId: string) {
+  const project = await prisma.project.findFirstOrThrow({
+    where: { id: projectId, tenantId: context.tenantId },
+  });
+  const plots = await prisma.plot.findMany({
+    where: { tenantId: context.tenantId, projectId },
+    include: {
+      currentOwner: true,
+      ownershipRecords: {
+        include: { owner: true },
+        orderBy: { effectiveAt: "asc" },
+      },
+      registryRecords: { orderBy: { createdAt: "desc" }, take: 1 },
+    },
+    orderBy: { code: "asc" },
+  });
+  const documentCounts = await prisma.fileAsset.groupBy({
+    by: ["ownerId"],
+    where: { tenantId: context.tenantId, ownerType: "Plot", ownerId: { in: plots.map((plot) => plot.id) }, deletedAt: null },
+    _count: true,
+  });
+  const documentCountByPlot = new Map(documentCounts.map((item) => [item.ownerId, item._count]));
+
+  const rows = [
+    ["Project", project.name],
+    ["City", project.city],
+    [],
+    ["Plot Number", "Date of Allotment", "Owner Name / Company Status", "Registry Status", "Document Count", "Value INR"],
+    ...plots.map((plot) => {
+      const allotment = plot.ownershipRecords.find((record) => record.kind === "ALLOTMENT");
+      const latestOwnership = [...plot.ownershipRecords].reverse()[0];
+      return [
+        plot.code,
+        allotment?.effectiveAt.toISOString().slice(0, 10) ?? "",
+        plot.currentOwner?.name ?? "With Company",
+        plot.registryRecords[0]?.status ?? "Not started",
+        String(documentCountByPlot.get(plot.id) ?? 0),
+        String(Number(latestOwnership?.amountInr ?? plot.priceInr ?? 0)),
+      ];
+    }),
+  ];
+
+  return {
+    fileName: `${project.name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "project"}-plot-report.csv`,
+    csv: rows.map((row) => row.map(csvCell).join(",")).join("\n"),
+  };
+}
+
+function csvCell(value: unknown) {
+  const text = String(value ?? "");
+  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
 async function plotIdsForProject(tenantId: string, projectId: string) {
   const plots = await prisma.plot.findMany({ where: { tenantId, projectId }, select: { id: true } });
   return plots.map((plot) => plot.id);
