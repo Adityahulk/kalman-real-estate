@@ -49,7 +49,7 @@ export function AddPlotPanel({ projectId, compact = false }: { projectId: string
 
 export function QuickAllotmentLink({ projectId }: { projectId: string }) {
   return (
-    <a className="btn-gold" href={`/app/projects/${projectId}/ownership?focus=allotment`}>
+    <a className="btn-gold" href={`/app/projects/${projectId}/ownership/new-allotment`}>
       <UserRoundPlus size={17} />
       New allotment
     </a>

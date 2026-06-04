@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   BadgeIndianRupee,
+  CheckCircle2,
   FileText,
   GitBranch,
   History,
@@ -15,20 +16,14 @@ import {
 import type React from "react";
 import { getSessionUser } from "@/server/session";
 import { getPlotWorkspace } from "@/server/services/plot-workspace";
-import { prisma } from "@/server/db";
 import { fullInr } from "@/lib/format";
 import { DeleteFileButton } from "@/components/delete-file-button";
 import { FileUploader } from "@/components/file-uploader";
 import { CadUploadForm } from "../../../../cad/cad-upload-form";
 import { DocumentApprovalButtons } from "../../../../documents/document-actions";
 import { ManualPlotZoneForm } from "../../../manual-entry-actions";
-import { GuidedOwnershipPanel, SmartLetterCard } from "../../../simplified-workflow-actions";
 import {
-  GeneratePlotDocumentPanel,
-  OwnershipDocumentUpload,
   PlotChecklistProgressForm,
-  PlotRegistryForm,
-  PlotTransferForm,
 } from "../../../../ownership/ownership-actions";
 
 export const dynamic = "force-dynamic";
@@ -48,7 +43,6 @@ export default async function ProjectPlotWorkspacePage({
   if (!session) return null;
   const workspace = await getPlotWorkspace({ tenantId: session.tenantId, userId: session.id, role: session.role }, params.plotId);
   if (workspace.plot.projectId !== params.projectId) notFound();
-  const owners = await prisma.owner.findMany({ where: { tenantId: session.tenantId }, orderBy: { name: "asc" } });
   const plot = workspace.plot;
   const requestedTab = searchParams.tab === "audit" ? "history" : searchParams.tab;
   const activeTab = tabs.includes(requestedTab as typeof tabs[number]) ? requestedTab as typeof tabs[number] : "overview";
@@ -96,29 +90,61 @@ export default async function ProjectPlotWorkspacePage({
             {tab.replaceAll("-", " ")}
           </Link>
         ))}
-        <div className="ml-0 flex flex-wrap gap-2 border-l-0 pl-0 xl:ml-2 xl:border-l xl:border-slate-200 xl:pl-3">
-          {advancedTabs.map((tab) => (
-            <Link
-              key={tab}
-              className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium ${
-                activeTab === tab ? "bg-navy-900 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
-              href={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=${tab}`}
-            >
-              {tab.replaceAll("-", " ")}
-            </Link>
-          ))}
-        </div>
+        <details className="relative">
+          <summary className="cursor-pointer rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200">More</summary>
+          <div className="absolute z-20 mt-2 grid min-w-48 gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-card">
+            {advancedTabs.map((tab) => (
+              <Link
+                key={tab}
+                className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium ${
+                  activeTab === tab ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"
+                }`}
+                href={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=${tab}`}
+              >
+                {tab.replaceAll("-", " ")}
+              </Link>
+            ))}
+          </div>
+        </details>
       </div>
 
       {activeTab === "overview" ? (
-        <section className="mt-4 grid gap-6 xl:grid-cols-[1fr_380px]">
+        <section className="mt-4 space-y-6">
           <div className="space-y-6">
             <div className="grid gap-4 md:grid-cols-4">
               <Metric icon={UserRound} label="Current owner" value={plot.currentOwner?.name ?? "Company"} />
               <Metric icon={Landmark} label="Registry" value={latestRegistry?.status ?? "Not started"} />
               <Metric icon={FileText} label="Documents" value={String(plotDocumentCount)} />
               <Metric icon={BadgeIndianRupee} label="Last value" value={fullInr(Number(latestOwnership?.amountInr ?? plot.priceInr ?? 0))} />
+            </div>
+            <div className="card p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="font-semibold">Quick actions</h2>
+                  <p className="mt-1 text-sm text-slate-500">Open a focused page for each action.</p>
+                </div>
+                <Link className="btn-outline h-9 px-3 text-xs" href={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=history`}>
+                  View history
+                </Link>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+                <Link className="btn-primary justify-center" href={plot.currentOwnerId ? `/app/projects/${plot.projectId}/plots/${plot.id}/transfer` : `/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}`}>
+                  <GitBranch size={17} />
+                  {plot.currentOwnerId ? "Change owner" : "Add owner"}
+                </Link>
+                <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/documents/upload`}>
+                  <Upload size={17} />
+                  Upload document
+                </Link>
+                <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/letters/new`}>
+                  <FileText size={17} />
+                  Generate letter
+                </Link>
+                <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/registry/update`}>
+                  <CheckCircle2 size={17} />
+                  Update registry
+                </Link>
+              </div>
             </div>
             <div className="card p-5">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -142,28 +168,11 @@ export default async function ProjectPlotWorkspacePage({
             </div>
             <Timeline title="Recent plot history" items={workspace.timeline.slice(0, 8)} />
           </div>
-          <aside className="space-y-6">
-            <SmartLetterCard
-              plotId={plot.id}
-              plotCode={plot.code}
-              ownerName={plot.currentOwner?.name ?? "Company"}
-              letters={workspace.generatedDocuments.map((document) => ({
-                id: document.id,
-                type: document.type,
-                status: document.status,
-                number: document.number,
-                fileAssetId: document.fileAssetId,
-                createdAt: document.createdAt,
-              }))}
-            />
-            <GuidedOwnershipPanel plotId={plot.id} plotStatus={plot.status} owners={owners} />
-            <OwnershipDocumentUpload ownerType="Plot" ownerId={plot.id} defaultVisibility="OWNER_VISIBLE" defaultDocumentType="REGISTRY_RECEIPT" title="Quick plot document upload" />
-          </aside>
         </section>
       ) : null}
 
       {activeTab === "ownership" ? (
-        <section className="mt-4 grid gap-6 xl:grid-cols-[1fr_420px]">
+        <section className="mt-4 grid gap-6 xl:grid-cols-[1fr_320px]">
           <div className="space-y-6">
             <OwnerSummary plot={plot} />
             <OwnershipTimeline records={plot.ownershipRecords} />
@@ -173,18 +182,22 @@ export default async function ProjectPlotWorkspacePage({
             </div>
           </div>
           <aside className="space-y-6">
-            <div id="ownership-action">
-              <GuidedOwnershipPanel plotId={plot.id} plotStatus={plot.status} owners={owners} />
-            </div>
-            {plot.currentOwnerId ? (
-              <OwnershipDocumentUpload ownerType="Owner" ownerId={plot.currentOwnerId} defaultVisibility="TEAM" defaultDocumentType="PAN_CARD" title="Upload owner PAN / Aadhaar / KYC" />
-            ) : null}
+            <ActionCard title="Ownership actions">
+              <Link className="btn-primary justify-center" href={plot.currentOwnerId ? `/app/projects/${plot.projectId}/plots/${plot.id}/transfer` : `/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}`}>
+                <GitBranch size={17} />
+                {plot.currentOwnerId ? "Change owner" : "Add owner"}
+              </Link>
+              <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/documents/upload`}>
+                <Upload size={17} />
+                Upload owner documents
+              </Link>
+            </ActionCard>
           </aside>
         </section>
       ) : null}
 
       {activeTab === "documents" ? (
-        <section className="mt-4 grid gap-6 xl:grid-cols-[1fr_380px]">
+        <section className="mt-4 grid gap-6 xl:grid-cols-[1fr_320px]">
           <div className="space-y-6">
             <div className="card p-5">
               <h2 className="mb-4 font-semibold">Generated letters</h2>
@@ -197,6 +210,7 @@ export default async function ProjectPlotWorkspacePage({
                         <div className="mt-1 text-xs text-slate-500">{document.status} · {document.createdAt.toLocaleDateString("en-IN")}</div>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
+                        <Link className="btn-outline h-8 px-3 text-xs" href={`/app/projects/${plot.projectId}/plots/${plot.id}/letters/${document.id}`}>Edit</Link>
                         {document.fileAssetId ? <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`}>Download</a> : null}
                         {document.fileAssetId ? <DeleteFileButton fileId={document.fileAssetId} fileName={document.number ?? document.type} /> : null}
                         <DocumentApprovalButtons documentId={document.id} />
@@ -213,14 +227,22 @@ export default async function ProjectPlotWorkspacePage({
             </div>
           </div>
           <aside className="space-y-6">
-            <GeneratePlotDocumentPanel plotId={plot.id} plotCode={plot.code} ownerName={plot.currentOwner?.name ?? "Company"} />
-            <OwnershipDocumentUpload ownerType="Plot" ownerId={plot.id} defaultVisibility="OWNER_VISIBLE" defaultDocumentType="ALLOTMENT_LETTER" title="Upload plot document" />
+            <ActionCard title="Document actions">
+              <Link className="btn-primary justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/letters/new`}>
+                <FileText size={17} />
+                Generate letter
+              </Link>
+              <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/documents/upload`}>
+                <Upload size={17} />
+                Upload document
+              </Link>
+            </ActionCard>
           </aside>
         </section>
       ) : null}
 
       {activeTab === "registry" ? (
-        <section className="mt-4 grid gap-6 xl:grid-cols-[1fr_380px]">
+        <section className="mt-4 grid gap-6 xl:grid-cols-[1fr_320px]">
           <div className="space-y-6">
             <div className="card p-5">
               <h2 className="mb-4 font-semibold">Registry records</h2>
@@ -241,14 +263,22 @@ export default async function ProjectPlotWorkspacePage({
             </div>
           </div>
           <aside className="space-y-6">
-            <PlotRegistryForm plotId={plot.id} />
-            <OwnershipDocumentUpload ownerType="Plot" ownerId={plot.id} defaultVisibility="OWNER_VISIBLE" defaultDocumentType="REGISTRY_RECEIPT" title="Upload registry receipt / deed" />
+            <ActionCard title="Registry actions">
+              <Link className="btn-primary justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/registry/update`}>
+                <CheckCircle2 size={17} />
+                Update registry
+              </Link>
+              <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/documents/upload`}>
+                <Upload size={17} />
+                Upload registry document
+              </Link>
+            </ActionCard>
           </aside>
         </section>
       ) : null}
 
       {activeTab === "transfers" ? (
-        <section className="mt-4 grid gap-6 xl:grid-cols-[1fr_420px]">
+        <section className="mt-4 grid gap-6 xl:grid-cols-[1fr_320px]">
           <div className="space-y-6">
             <OwnershipTimeline records={plot.ownershipRecords.filter((record) => record.kind === "TRANSFER" || record.kind === "ALLOTMENT")} />
             <div className="card p-5">
@@ -257,9 +287,20 @@ export default async function ProjectPlotWorkspacePage({
             </div>
           </div>
           <aside className="space-y-6">
-            <PlotTransferForm plotId={plot.id} owners={owners} />
-            <OwnershipDocumentUpload ownerType="Plot" ownerId={plot.id} defaultVisibility="OWNER_VISIBLE" defaultDocumentType="TRANSFER_LETTER" title="Upload transfer document" />
-            <GeneratePlotDocumentPanel plotId={plot.id} plotCode={plot.code} ownerName={plot.currentOwner?.name ?? "Company"} />
+            <ActionCard title="Transfer actions">
+              <Link className="btn-primary justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/transfer`}>
+                <GitBranch size={17} />
+                Change owner
+              </Link>
+              <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/letters/new?type=transfer_letter`}>
+                <FileText size={17} />
+                Generate transfer letter
+              </Link>
+              <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/documents/upload`}>
+                <Upload size={17} />
+                Upload transfer document
+              </Link>
+            </ActionCard>
           </aside>
         </section>
       ) : null}
@@ -359,6 +400,15 @@ function Metric({ icon: Icon, label, value }: { icon: React.ElementType; label: 
       <Icon className="text-navy-800" size={18} />
       <div className="mt-3 truncate text-lg font-semibold">{value}</div>
       <div className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
+    </div>
+  );
+}
+
+function ActionCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="card p-5">
+      <h2 className="mb-4 font-semibold">{title}</h2>
+      <div className="grid gap-2">{children}</div>
     </div>
   );
 }

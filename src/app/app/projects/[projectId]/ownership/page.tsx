@@ -1,10 +1,9 @@
 import Link from "next/link";
-import { FileText, FileWarning, GitBranch, Landmark, Search, UserRoundCheck } from "lucide-react";
+import { FileText, FileWarning, GitBranch, Landmark, Plus, Search, UserRoundCheck, Users } from "lucide-react";
 import { PlotStatus } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
 import { fullInr } from "@/lib/format";
-import { AddPlotPanel, QuickAllotmentLink } from "../../simplified-workflow-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +20,10 @@ export default async function ProjectOwnershipPage({
   const q = searchParams.q?.trim();
   const status = searchParams.status as PlotStatus | undefined;
   const owner = searchParams.owner?.trim();
+  const allProjectPlots = await prisma.plot.findMany({
+    where: { tenantId: session.tenantId, projectId: project.id },
+    select: { id: true, status: true, currentOwnerId: true },
+  });
 
   const plots = await prisma.plot.findMany({
     where: {
@@ -48,10 +51,15 @@ export default async function ProjectOwnershipPage({
 
   const plotFiles = await prisma.fileAsset.groupBy({
     by: ["ownerId"],
-    where: { tenantId: session.tenantId, ownerType: "Plot", ownerId: { in: plots.map((plot) => plot.id) }, deletedAt: null },
+    where: { tenantId: session.tenantId, ownerType: "Plot", ownerId: { in: allProjectPlots.map((plot) => plot.id) }, deletedAt: null },
     _count: true,
   });
   const fileCountByPlot = new Map(plotFiles.map((file) => [file.ownerId, file._count]));
+  const missingDocuments = allProjectPlots.filter((plot) => plot.currentOwnerId && !fileCountByPlot.has(plot.id)).length;
+  const statusCounts = allProjectPlots.reduce<Record<string, number>>((counts, plot) => {
+    counts[plot.status] = (counts[plot.status] ?? 0) + 1;
+    return counts;
+  }, {});
   const generatedLetters = await prisma.generatedDocument.findMany({
     where: { tenantId: session.tenantId, recordType: "Plot", recordId: { in: plots.map((plot) => plot.id) } },
     orderBy: { createdAt: "desc" },
@@ -79,13 +87,25 @@ export default async function ProjectOwnershipPage({
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Link className="btn-primary" href={`/app/projects/${project.id}/cad`}>
-            Open CAD map
+          <Link className="btn-primary" href={`/app/projects/${project.id}/ownership/add-plot`}>
+            <Plus size={17} />
+            Add plot
           </Link>
-          <AddPlotPanel compact projectId={project.id} />
-          <QuickAllotmentLink projectId={project.id} />
+          <Link className="btn-gold" href={`/app/projects/${project.id}/ownership/new-allotment`}>
+            <Users size={17} />
+            New allotment
+          </Link>
         </div>
       </div>
+
+      <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        <SummaryCard label="Total plots" value={String(allProjectPlots.length)} />
+        <SummaryCard label="Company inventory" value={String(statusCounts.COMPANY_OWNED ?? 0)} />
+        <SummaryCard label="Allotted" value={String(statusCounts.ALLOTTED ?? 0)} />
+        <SummaryCard label="Transferred" value={String(statusCounts.TRANSFERRED ?? 0)} />
+        <SummaryCard label="Registered" value={String(statusCounts.REGISTERED ?? 0)} />
+        <SummaryCard label="Missing docs" value={String(missingDocuments)} />
+      </section>
 
       <form className="mt-6 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-[1fr_180px_180px_160px_160px_auto]">
         <label>
@@ -122,22 +142,6 @@ export default async function ProjectOwnershipPage({
         </label>
         <button className="btn-outline self-end">Filter</button>
       </form>
-
-      <section className="mt-6 grid gap-6 xl:grid-cols-[380px_1fr]">
-        <AddPlotPanel projectId={project.id} />
-        <div className="rounded-xl border border-slate-200 bg-white p-5">
-          <h2 className="font-semibold">Plot registry is the ownership workbench</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">
-            Use CAD when you have a DXF layout, or add plots manually when the builder has only plot numbers and owner records.
-            Every row opens the same plot workspace for ownership, documents, registry, letters, and history.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Link className="btn-primary" href={`/app/projects/${project.id}/cad`}>Upload CAD</Link>
-            <QuickAllotmentLink projectId={project.id} />
-            <span className="chip bg-slate-100 text-slate-700">CAD and manual plots use the same workflow</span>
-          </div>
-        </div>
-      </section>
 
       <section className="card mt-6 overflow-hidden">
         <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-4">
@@ -187,11 +191,11 @@ export default async function ProjectOwnershipPage({
                     <td className="px-5 py-3">
                       <div className="flex min-w-[300px] flex-wrap gap-2">
                         <Link className="btn-primary h-8 px-3 text-xs" href={`/app/projects/${project.id}/plots/${plot.id}`}>Open</Link>
-                        <Link className="btn-outline h-8 px-3 text-xs" href={`/app/projects/${project.id}/plots/${plot.id}?tab=documents`}>
+                        <Link className="btn-outline h-8 px-3 text-xs" href={letter ? `/app/projects/${project.id}/plots/${plot.id}/letters/${letter.id}` : `/app/projects/${project.id}/plots/${plot.id}/letters/new`}>
                           <FileText size={14} />
-                          {letter?.fileAssetId ? "Download Letter" : "Generate Letter"}
+                          {letter ? "Open Letter" : "Generate Letter"}
                         </Link>
-                        <Link className="btn-outline h-8 px-3 text-xs" href={`/app/projects/${project.id}/plots/${plot.id}?tab=ownership#ownership-action`}>
+                        <Link className="btn-outline h-8 px-3 text-xs" href={plot.currentOwnerId ? `/app/projects/${project.id}/plots/${plot.id}/transfer` : `/app/projects/${project.id}/ownership/new-allotment?plotId=${plot.id}`}>
                           <GitBranch size={14} />
                           {plot.currentOwnerId ? "Change Owner" : "Add Owner"}
                         </Link>
@@ -205,5 +209,14 @@ export default async function ProjectOwnershipPage({
         </div>
       </section>
     </main>
+  );
+}
+
+function SummaryCard({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-card">
+      <div className="text-2xl font-semibold">{value}</div>
+      <div className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
+    </div>
   );
 }

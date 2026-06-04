@@ -225,6 +225,7 @@ model Project {
   name        String
   city        String
   address     String?
+  whatsappShareText String?
   status      String   @default("ACTIVE")
   budgetInr   Decimal? @db.Decimal(14, 2)
   spentInr    Decimal? @db.Decimal(14, 2)
@@ -521,10 +522,12 @@ model GeneratedDocument {
   recordId    String
   fileAssetId String?
   number      String?
+  editableHtml String?
   data        Json
   createdById String?
   approvedById String?
   approvedAt  DateTime?
+  finalizedAt DateTime?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 

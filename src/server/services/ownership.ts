@@ -34,6 +34,7 @@ export const allotPlotSchema = z.object({
   amountInr: z.number().nonnegative().optional(),
   sharePct: z.number().min(0).max(100).optional(),
   documentId: z.string().optional(),
+  effectiveAt: z.string().datetime().optional(),
   notes: z.string().optional(),
 });
 
@@ -55,6 +56,7 @@ export async function allotPlot(context: RequestContext, plotId: string, input: 
         sharePct: input.sharePct,
         documentId: input.documentId,
         notes: input.notes,
+        effectiveAt: input.effectiveAt ? new Date(input.effectiveAt) : undefined,
         createdById: context.userId,
       },
     });
@@ -69,6 +71,7 @@ export const transferPlotSchema = z.object({
   amountInr: z.number().nonnegative().optional(),
   sharePct: z.number().min(0).max(100).optional(),
   documentId: z.string().optional(),
+  effectiveAt: z.string().datetime().optional(),
   notes: z.string().optional(),
 });
 
@@ -90,6 +93,7 @@ export async function transferPlot(context: RequestContext, plotId: string, inpu
         sharePct: input.sharePct,
         documentId: input.documentId,
         notes: input.notes,
+        effectiveAt: input.effectiveAt ? new Date(input.effectiveAt) : undefined,
         createdById: context.userId,
       },
     });

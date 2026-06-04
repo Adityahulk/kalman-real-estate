@@ -8,9 +8,21 @@ export const createProjectSchema = z.object({
   name: z.string().min(2),
   city: z.string().min(2),
   address: z.string().optional(),
+  whatsappShareText: z.string().optional(),
   budgetInr: z.number().nonnegative().optional(),
   startedAt: z.string().datetime().optional(),
   handoverAt: z.string().datetime().optional(),
+});
+
+export const updateProjectSchema = z.object({
+  name: z.string().min(2).optional(),
+  city: z.string().min(2).optional(),
+  address: z.string().optional(),
+  whatsappShareText: z.string().optional(),
+  progressPct: z.number().int().min(0).max(100).optional(),
+  budgetInr: z.number().nonnegative().optional(),
+  startedAt: z.string().datetime().optional().nullable(),
+  handoverAt: z.string().datetime().optional().nullable(),
 });
 
 export async function createProject(context: RequestContext, input: z.infer<typeof createProjectSchema>) {
@@ -20,6 +32,7 @@ export async function createProject(context: RequestContext, input: z.infer<type
       name: input.name,
       city: input.city,
       address: input.address,
+      whatsappShareText: input.whatsappShareText,
       budgetInr: input.budgetInr,
       startedAt: input.startedAt ? new Date(input.startedAt) : undefined,
       handoverAt: input.handoverAt ? new Date(input.handoverAt) : undefined,
@@ -30,6 +43,33 @@ export async function createProject(context: RequestContext, input: z.infer<type
     action: AuditAction.CREATE,
     entityType: "Project",
     entityId: project.id,
+    after: project as unknown as Prisma.InputJsonValue,
+  });
+
+  return project;
+}
+
+export async function updateProject(context: RequestContext, projectId: string, input: z.infer<typeof updateProjectSchema>) {
+  const before = await prisma.project.findFirstOrThrow({ where: { id: projectId, tenantId: context.tenantId } });
+  const project = await prisma.project.update({
+    where: { id: projectId },
+    data: {
+      name: input.name,
+      city: input.city,
+      address: input.address,
+      whatsappShareText: input.whatsappShareText,
+      progressPct: input.progressPct,
+      budgetInr: input.budgetInr,
+      startedAt: input.startedAt === undefined ? undefined : input.startedAt ? new Date(input.startedAt) : null,
+      handoverAt: input.handoverAt === undefined ? undefined : input.handoverAt ? new Date(input.handoverAt) : null,
+    },
+  });
+
+  await writeAuditEvent(context, {
+    action: AuditAction.UPDATE,
+    entityType: "Project",
+    entityId: project.id,
+    before: before as unknown as Prisma.InputJsonValue,
     after: project as unknown as Prisma.InputJsonValue,
   });
 

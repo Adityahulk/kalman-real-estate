@@ -54,6 +54,14 @@ assert(projectReport.status === 200, "project report download failed");
 const projectReportText = await projectReport.text();
 assert(projectReportText.includes("Plot Number") && projectReportText.includes("Owner Name / Company Status"), "project report is missing ownership columns");
 
+const projectPatch = await request(`/api/v1/projects/${project.id}`, {
+  method: "PATCH",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ whatsappShareText: `Smoke share text ${stamp}`, progressPct: project.progressPct }),
+});
+assert(projectPatch.response.status === 200, "project share text update failed");
+assert(projectPatch.json.data?.whatsappShareText?.includes("Smoke share text"), "project share text was not saved");
+
 const cadUploadFlow = await request("/api/v1/cad/upload", {
   method: "POST",
   headers: { "content-type": "application/json", cookie },
@@ -94,6 +102,31 @@ assert(doc.response.status === 201, "document generation failed");
 assert(doc.json.data?.document?.fileAssetId, "document PDF file missing");
 const generatedLetterFile = await prisma.fileAsset.findUniqueOrThrow({ where: { id: doc.json.data.document.fileAssetId } });
 assert(generatedLetterFile.documentType === "ALLOTMENT_LETTER", "generated allotment letter was not typed");
+
+const draft = await request("/api/v1/documents/drafts", {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({
+    type: "allotment_letter",
+    recordType: "Plot",
+    recordId: plot.id,
+  }),
+});
+assert(draft.response.status === 201, "letter draft creation failed");
+assert(draft.json.data?.document?.editableHtml?.includes(plot.code), "letter draft did not include plot data");
+const draftId = draft.json.data.document.id;
+const draftSave = await request(`/api/v1/documents/${draftId}/draft`, {
+  method: "PATCH",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ editableHtml: `<h1>Smoke Allotment</h1><p>Plot ${plot.code} editable draft for smoke verification.</p>` }),
+});
+assert(draftSave.response.status === 200, "letter draft save failed");
+const draftRender = await request(`/api/v1/documents/${draftId}/render`, {
+  method: "POST",
+  headers: { cookie },
+});
+assert(draftRender.response.status === 200, "letter draft render failed");
+assert(draftRender.json.data?.document?.fileAssetId, "rendered letter file missing");
 
 const download = await fetch(`${baseUrl}/api/v1/files/${doc.json.data.document.fileAssetId}/download`, {
   headers: { cookie },
