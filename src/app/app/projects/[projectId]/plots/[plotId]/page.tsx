@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import {
   BadgeIndianRupee,
   CheckCircle2,
+  ChevronDown,
   FileText,
   GitBranch,
   History,
@@ -166,7 +167,7 @@ export default async function ProjectPlotWorkspacePage({
               </div>
               <FileUploader label="Upload plot image or house photo" ownerType="Plot" ownerId={plot.id} visibility="OWNER_VISIBLE" accept="image/*" />
             </div>
-            <Timeline title="Recent plot history" items={workspace.timeline.slice(0, 8)} />
+            <Timeline title="Recent plot history" items={workspace.timeline.slice(0, 8)} collapsible />
           </div>
         </section>
       ) : null}
@@ -477,13 +478,16 @@ function DocumentGrid({ files, empty }: { files: Awaited<ReturnType<typeof getPl
   );
 }
 
-function Timeline({ title = "Audit timeline", items }: { title?: string; items: Awaited<ReturnType<typeof getPlotWorkspace>>["timeline"] }) {
-  return (
-    <div className="card p-5">
-      <div className="mb-4 flex items-center gap-2">
-        <History size={18} />
-        <h2 className="font-semibold">{title}</h2>
-      </div>
+function Timeline({
+  title = "Audit timeline",
+  items,
+  collapsible = false,
+}: {
+  title?: string;
+  items: Awaited<ReturnType<typeof getPlotWorkspace>>["timeline"];
+  collapsible?: boolean;
+}) {
+  const body = (
       <div className="space-y-3">
         {items.map((item) => (
           <div key={item.id} className="rounded-lg border border-slate-200 p-3 text-sm">
@@ -496,6 +500,31 @@ function Timeline({ title = "Audit timeline", items }: { title?: string; items: 
         ))}
         {!items.length ? <Empty label="No audit history yet." /> : null}
       </div>
+  );
+
+  if (collapsible) {
+    return (
+      <details className="card group p-5">
+        <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <History size={18} />
+            <h2 className="font-semibold">{title}</h2>
+            <span className="chip bg-slate-100 text-slate-700">{items.length}</span>
+          </div>
+          <ChevronDown className="text-slate-400 transition group-open:rotate-180" size={18} />
+        </summary>
+        <div className="mt-4 border-t border-slate-100 pt-4">{body}</div>
+      </details>
+    );
+  }
+
+  return (
+    <div className="card p-5">
+      <div className="mb-4 flex items-center gap-2">
+        <History size={18} />
+        <h2 className="font-semibold">{title}</h2>
+      </div>
+      {body}
     </div>
   );
 }

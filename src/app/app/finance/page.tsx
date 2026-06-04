@@ -16,21 +16,35 @@ export default async function FinancePage() {
     prisma.invoice.findMany({ where: { tenantId: session.tenantId }, orderBy: { createdAt: "desc" }, take: 12 }),
     prisma.costInsight.findMany({ where: { tenantId: session.tenantId }, orderBy: { createdAt: "desc" }, take: 12 }),
   ]);
+  const plannedAmount = boq.reduce((sum, item) => sum + Number(item.plannedQty) * Number(item.plannedRateInr), 0);
+  const invoiceAmount = invoices.reduce((sum, invoice) => sum + Number(invoice.totalInr), 0);
 
   return (
     <main className="px-4 py-6 lg:px-8">
-      <div className="mb-6">
-        <h1 className="text-3xl font-semibold tracking-tight">Cost control and BOQ</h1>
-        <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-          Project budgets, BOQ, purchase orders, invoices, contractor bills, CAD-linked quantities, and variance intelligence.
-        </p>
-      </div>
-      <div className="grid gap-6 xl:grid-cols-[420px_1fr]">
-        <div className="space-y-6">
-          <BoqForm projects={projects.map((project) => ({ id: project.id, name: project.name }))} />
-          <VendorContractorForm />
-          <InvoicePaymentPanel projects={projects.map((project) => ({ id: project.id, name: project.name }))} invoices={invoices.map((invoice) => ({ id: invoice.id, number: invoice.number }))} />
+      <div className="mb-6 flex flex-col justify-between gap-4 border-b border-slate-200 pb-6 xl:flex-row xl:items-end">
+        <div>
+          <div className="text-sm text-slate-500">Finance</div>
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight">Cost control and BOQ</h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+            Review planned quantities, invoices, payments, and cost warnings.
+          </p>
         </div>
+      </div>
+      <section className="mb-6 grid gap-4 md:grid-cols-3">
+        <div className="card p-4">
+          <div className="text-2xl font-semibold">{boq.length}</div>
+          <div className="text-xs font-medium uppercase tracking-wide text-slate-500">BOQ items</div>
+        </div>
+        <div className="card p-4">
+          <div className="text-2xl font-semibold">{fullInr(plannedAmount)}</div>
+          <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Planned value</div>
+        </div>
+        <div className="card p-4">
+          <div className="text-2xl font-semibold">{fullInr(invoiceAmount)}</div>
+          <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Recent invoices</div>
+        </div>
+      </section>
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
         <div className="space-y-6">
           <section className="card overflow-hidden">
             <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-4">
@@ -88,6 +102,11 @@ export default async function FinancePage() {
             </div>
           </section>
         </div>
+        <aside className="space-y-6">
+          <BoqForm projects={projects.map((project) => ({ id: project.id, name: project.name }))} />
+          <VendorContractorForm />
+          <InvoicePaymentPanel projects={projects.map((project) => ({ id: project.id, name: project.name }))} invoices={invoices.map((invoice) => ({ id: invoice.id, number: invoice.number }))} />
+        </aside>
       </div>
     </main>
   );

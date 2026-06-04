@@ -99,12 +99,12 @@ export default async function ProjectOwnershipPage({
       </div>
 
       <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-        <SummaryCard label="Total plots" value={String(allProjectPlots.length)} />
-        <SummaryCard label="Company inventory" value={String(statusCounts.COMPANY_OWNED ?? 0)} />
-        <SummaryCard label="Allotted" value={String(statusCounts.ALLOTTED ?? 0)} />
-        <SummaryCard label="Transferred" value={String(statusCounts.TRANSFERRED ?? 0)} />
-        <SummaryCard label="Registered" value={String(statusCounts.REGISTERED ?? 0)} />
-        <SummaryCard label="Missing docs" value={String(missingDocuments)} />
+        <SummaryCard label="Total plots" value={String(allProjectPlots.length)} href={`/app/projects/${project.id}/ownership`} active={!searchParams.status && !searchParams.docs} />
+        <SummaryCard label="Company inventory" value={String(statusCounts.COMPANY_OWNED ?? 0)} href={`/app/projects/${project.id}/ownership?status=COMPANY_OWNED`} active={searchParams.status === "COMPANY_OWNED"} />
+        <SummaryCard label="Allotted" value={String(statusCounts.ALLOTTED ?? 0)} href={`/app/projects/${project.id}/ownership?status=ALLOTTED`} active={searchParams.status === "ALLOTTED"} />
+        <SummaryCard label="Transferred" value={String(statusCounts.TRANSFERRED ?? 0)} href={`/app/projects/${project.id}/ownership?status=TRANSFERRED`} active={searchParams.status === "TRANSFERRED"} />
+        <SummaryCard label="Registered" value={String(statusCounts.REGISTERED ?? 0)} href={`/app/projects/${project.id}/ownership?status=REGISTERED`} active={searchParams.status === "REGISTERED"} />
+        <SummaryCard label="Missing docs" value={String(missingDocuments)} href={`/app/projects/${project.id}/ownership?docs=missing`} active={searchParams.docs === "missing"} />
       </section>
 
       <form className="mt-6 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-[1fr_180px_180px_160px_160px_auto]">
@@ -212,11 +212,13 @@ export default async function ProjectOwnershipPage({
   );
 }
 
-function SummaryCard({ label, value }: { label: string; value: string }) {
+function SummaryCard({ label, value, href, active = false }: { label: string; value: string; href: string; active?: boolean }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-card">
+    <Link className={`rounded-xl border p-4 shadow-card transition hover:-translate-y-0.5 hover:shadow-lg ${
+      active ? "border-navy-900 bg-navy-900 text-white" : "border-slate-200 bg-white text-navy-950"
+    }`} href={href}>
       <div className="text-2xl font-semibold">{value}</div>
-      <div className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
-    </div>
+      <div className={`mt-1 text-xs font-medium uppercase tracking-wide ${active ? "text-white/70" : "text-slate-500"}`}>{label}</div>
+    </Link>
   );
 }

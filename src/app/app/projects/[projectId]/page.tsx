@@ -1,9 +1,8 @@
 import Link from "next/link";
-import { BadgeIndianRupee, Building2, CheckCircle2, FileDown, FileWarning, Landmark, Map, Share2, Upload, Users } from "lucide-react";
+import { Building2, CheckCircle2, ChevronDown, FileDown, Landmark, Map, Share2, Upload, Users } from "lucide-react";
 import type React from "react";
 import { getSessionUser } from "@/server/session";
 import { getProjectWorkspace } from "@/server/services/projects";
-import { fullInr } from "@/lib/format";
 import { FileUploader } from "@/components/file-uploader";
 import { WhatsAppShareLink } from "../simplified-workflow-actions";
 import { ProjectSiteInfoForm } from "../workflow-action-forms";
@@ -23,9 +22,11 @@ export default async function ProjectWorkspacePage({ params }: { params: { proje
   const defaultShareText = [
     `${project.name} in ${project.city}`,
     project.address ? `Location: ${project.address}` : "",
+    project.reraNumber ? `RERA: ${project.reraNumber}` : "",
     `Total plots: ${totalPlots}`,
     `Available plots with company: ${companyPlots}`,
     `Project progress: ${project.progressPct}%`,
+    project.siteContactPhone ? `Site contact: ${project.siteContactPhone}` : "",
     "Please contact the builder office for current availability, allotment details, site visit, and documents.",
   ].filter(Boolean).join("\n");
   const shareText = project.whatsappShareText ?? defaultShareText;
@@ -45,13 +46,12 @@ export default async function ProjectWorkspacePage({ params }: { params: { proje
         </div>
       </div>
 
-      <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-        <Metric icon={Map} label="Total plots" value={String(totalPlots)} />
-        <Metric icon={Landmark} label="With company" value={String(companyPlots)} />
-        <Metric icon={Users} label="Allotted" value={String(plotCounts.ALLOTTED ?? 0)} />
-        <Metric icon={CheckCircle2} label="Registered" value={String(plotCounts.REGISTERED ?? 0)} />
-        <Metric icon={FileWarning} label="Doc gaps" value={String(workspace.missingDocuments)} />
-        <Metric icon={BadgeIndianRupee} label="Budget" value={project.budgetInr ? fullInr(Number(project.budgetInr)) : "Not set"} />
+      <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <Metric icon={Map} label="Total plots" value={String(totalPlots)} href={`/app/projects/${project.id}/ownership`} />
+        <Metric icon={Landmark} label="With company" value={String(companyPlots)} href={`/app/projects/${project.id}/ownership?status=COMPANY_OWNED`} />
+        <Metric icon={Users} label="Allotted" value={String(plotCounts.ALLOTTED ?? 0)} href={`/app/projects/${project.id}/ownership?status=ALLOTTED`} />
+        <Metric icon={CheckCircle2} label="Registered" value={String(plotCounts.REGISTERED ?? 0)} href={`/app/projects/${project.id}/ownership?status=REGISTERED`} />
+        <Metric icon={Share2} label="Site progress" value={`${project.progressPct}%`} href={`/app/projects/${project.id}/development`} />
       </section>
 
       <section className="mt-6 grid gap-6 xl:grid-cols-[1fr_360px]">
@@ -67,8 +67,10 @@ export default async function ProjectWorkspacePage({ params }: { params: { proje
                 name: project.name,
                 city: project.city,
                 address: project.address,
+                reraNumber: project.reraNumber,
+                landAreaSqft: project.landAreaSqft?.toString() ?? null,
+                siteContactPhone: project.siteContactPhone,
                 progressPct: project.progressPct,
-                budgetInr: project.budgetInr?.toString() ?? null,
                 whatsappShareText: project.whatsappShareText,
               }}
               defaultShareText={defaultShareText}
@@ -112,28 +114,82 @@ export default async function ProjectWorkspacePage({ params }: { params: { proje
             </div>
           </div>
 
-          <div className="card p-5">
-            <div className="flex items-center gap-2">
-              <Share2 size={18} />
-              <h2 className="font-semibold">Site progress</h2>
+          <details className="card group p-5">
+            <summary className="flex cursor-pointer list-none items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <Share2 size={18} />
+                  <h2 className="font-semibold">Site progress</h2>
+                </div>
+                <div className="mt-3 h-2 rounded-full bg-slate-100">
+                  <div className="h-2 rounded-full bg-gold-shine" style={{ width: `${project.progressPct}%` }} />
+                </div>
+                <div className="mt-3 text-sm text-slate-600">{project.progressPct}% complete · {completedAssets} site parts completed</div>
+              </div>
+              <ChevronDown className="mt-1 text-slate-400 transition group-open:rotate-180" size={18} />
+            </summary>
+            <div className="mt-5 space-y-4 border-t border-slate-100 pt-4">
+              <div className="grid gap-2">
+                {workspace.assetStatus.length ? workspace.assetStatus.map((item) => (
+                  <div key={item.status} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
+                    <span className="capitalize text-slate-600">{item.status.replaceAll("_", " ").toLowerCase()}</span>
+                    <span className="font-semibold text-navy-900">{item._count}</span>
+                  </div>
+                )) : (
+                  <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-500">No site parts have been added yet.</div>
+                )}
+              </div>
+              {workspace.delayedAssets.length ? (
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Delayed work</div>
+                  <div className="mt-2 space-y-2">
+                    {workspace.delayedAssets.slice(0, 3).map((asset) => (
+                      <div key={asset.id} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                        {asset.name}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {workspace.ownerVisibleUpdates.length ? (
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Latest public updates</div>
+                  <div className="mt-2 space-y-2">
+                    {workspace.ownerVisibleUpdates.slice(0, 3).map((update) => (
+                      <div key={update.id} className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                        <div className="font-medium text-navy-900">{update.progressPct}% progress</div>
+                        <div className="mt-1 line-clamp-2 text-xs">{update.summary}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
             </div>
-            <div className="mt-4 h-2 rounded-full bg-slate-100">
-              <div className="h-2 rounded-full bg-gold-shine" style={{ width: `${project.progressPct}%` }} />
-            </div>
-            <div className="mt-3 text-sm text-slate-600">{project.progressPct}% complete · {completedAssets} site parts completed</div>
-          </div>
+          </details>
         </aside>
       </section>
     </main>
   );
 }
 
-function Metric({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
-  return (
-    <div className="card p-5">
+function Metric({ icon: Icon, label, value, href }: { icon: React.ElementType; label: string; value: string; href?: string }) {
+  const content = (
+    <>
       <Icon className="text-navy-800" size={20} />
       <div className="mt-3 truncate text-xl font-semibold">{value}</div>
       <div className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
+    </>
+  );
+  if (href) {
+    return (
+      <Link className="card block p-5 transition hover:-translate-y-0.5 hover:shadow-lg" href={href}>
+        {content}
+      </Link>
+    );
+  }
+  return (
+    <div className="card p-5">
+      {content}
     </div>
   );
 }

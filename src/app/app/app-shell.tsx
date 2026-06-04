@@ -127,15 +127,37 @@ export function AppShell({
           collapsed ? "w-20" : "w-72"
         } ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
       >
-        <div className="flex h-16 items-center gap-3 border-b border-slate-200 px-4">
-          <Link href="/app" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-navy-900 text-white">
-            <Building2 size={19} />
-          </Link>
+        <button
+          className="absolute -right-3 top-6 z-50 hidden h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 lg:flex"
+          onClick={toggleCollapsed}
+          type="button"
+          title={collapsed ? "Expand navigation" : "Minimize navigation"}
+          aria-label={collapsed ? "Expand navigation" : "Minimize navigation"}
+        >
+          {collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
+        </button>
+        <div className={`flex h-16 items-center gap-3 border-b border-slate-200 ${collapsed ? "justify-center px-2" : "px-4"}`}>
+          <div className="flex min-w-0 items-center gap-3">
+            <Link href="/app" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-navy-900 text-white">
+              <Building2 size={19} />
+            </Link>
+            {!collapsed ? (
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold">{user.tenantName}</div>
+                <div className="truncate text-xs text-slate-500">{user.role.replaceAll("_", " ")}</div>
+              </div>
+            ) : null}
+          </div>
           {!collapsed ? (
-            <div className="min-w-0">
-              <div className="truncate text-sm font-semibold">{user.tenantName}</div>
-              <div className="truncate text-xs text-slate-500">{user.role.replaceAll("_", " ")}</div>
-            </div>
+            <button
+              className="ml-auto rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-navy-900 lg:hidden"
+              onClick={toggleCollapsed}
+              type="button"
+              title="Minimize navigation"
+              aria-label="Minimize navigation"
+            >
+              <ChevronLeft size={17} />
+            </button>
           ) : null}
         </div>
 
@@ -197,10 +219,6 @@ export function AppShell({
             <FileStack size={17} />
             {!collapsed ? "Document archive" : null}
           </Link>
-          <button className="btn-ghost h-9 w-full justify-center px-2" onClick={toggleCollapsed} type="button">
-            {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
-            {!collapsed ? "Collapse" : null}
-          </button>
           <form action="/api/v1/auth/logout" method="post">
             <button className={`btn-ghost h-9 w-full px-2 ${collapsed ? "justify-center" : "justify-start"}`}>
               <LogOut size={17} />

@@ -1,10 +1,9 @@
 import Link from "next/link";
-import { ArrowRight, Building2, CheckCircle2, FileDown, FileWarning, Landmark, Map as MapIcon, Plus, Users } from "lucide-react";
+import { ArrowRight, Building2, CheckCircle2, FileDown, Landmark, Map as MapIcon, Plus, Users } from "lucide-react";
 import type React from "react";
 import { PlotStatus } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
-import { fullInr } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -26,20 +25,6 @@ export default async function AppHomePage() {
     _count: true,
   });
   const plotCounts = Object.fromEntries(plotStatus.map((item) => [item.status, item._count]));
-  const ownedPlots = projects.flatMap((project) => project.plots.filter((plot) => plot.currentOwnerId).map((plot) => ({ id: plot.id, projectId: project.id })));
-  const documentRows = ownedPlots.length
-    ? await prisma.fileAsset.groupBy({
-        by: ["ownerId"],
-        where: { tenantId: session.tenantId, ownerType: "Plot", ownerId: { in: ownedPlots.map((plot) => plot.id) }, deletedAt: null },
-        _count: true,
-      })
-    : [];
-  const plotsWithDocs = new Set(documentRows.map((row) => row.ownerId));
-  const missingDocuments = ownedPlots.filter((plot) => !plotsWithDocs.has(plot.id)).length;
-  const missingByProject = new Map<string, number>();
-  for (const plot of ownedPlots) {
-    if (!plotsWithDocs.has(plot.id)) missingByProject.set(plot.projectId, (missingByProject.get(plot.projectId) ?? 0) + 1);
-  }
 
   return (
     <main className="px-4 py-6 lg:px-8">
@@ -64,13 +49,12 @@ export default async function AppHomePage() {
           </div>
         </div>
 
-        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
           <Metric icon={Building2} label="Projects" value={String(projects.length)} />
           <Metric icon={MapIcon} label="Total plots" value={String(Object.values(plotCounts).reduce((sum, count) => sum + count, 0))} />
           <Metric icon={Landmark} label="With company" value={String(plotCounts.COMPANY_OWNED ?? 0)} />
           <Metric icon={Users} label="Allotted" value={String(plotCounts.ALLOTTED ?? 0)} />
           <Metric icon={CheckCircle2} label="Registered" value={String(plotCounts.REGISTERED ?? 0)} />
-          <Metric icon={FileWarning} label="Doc gaps" value={String(missingDocuments)} />
         </div>
 
         <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -94,7 +78,7 @@ export default async function AppHomePage() {
                 <div className="mt-5 grid grid-cols-3 gap-2 text-center text-xs">
                   <MiniMetric icon={MapIcon} label="Plots" value={project._count.plots} />
                   <MiniMetric icon={Landmark} label="Company" value={companyPlots} />
-                  <MiniMetric icon={FileWarning} label="Doc gaps" value={missingByProject.get(project.id) ?? 0} />
+                  <MiniMetric icon={Users} label="Allotted" value={project.plots.filter((plot) => plot.status === PlotStatus.ALLOTTED).length} />
                 </div>
                 <div className="mt-5">
                   <div className="mb-1 flex justify-between text-xs text-slate-500">
@@ -105,7 +89,6 @@ export default async function AppHomePage() {
                     <div className="h-2 rounded-full bg-gold-shine" style={{ width: `${project.progressPct}%` }} />
                   </div>
                 </div>
-                <div className="mt-4 text-sm font-medium text-navy-800">{project.budgetInr ? fullInr(Number(project.budgetInr)) : "Budget not set"}</div>
                 <div className="mt-4 grid grid-cols-2 gap-2">
                   <Link className="btn-primary h-9 px-3 text-xs" href={`/app/projects/${project.id}`}>Open</Link>
                   <a className="btn-outline h-9 px-3 text-xs" href={`/api/v1/projects/${project.id}/report`}>

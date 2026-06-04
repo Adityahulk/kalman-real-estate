@@ -225,6 +225,9 @@ model Project {
   name        String
   city        String
   address     String?
+  reraNumber  String?
+  landAreaSqft Decimal? @db.Decimal(14, 2)
+  siteContactPhone String?
   whatsappShareText String?
   status      String   @default("ACTIVE")
   budgetInr   Decimal? @db.Decimal(14, 2)
