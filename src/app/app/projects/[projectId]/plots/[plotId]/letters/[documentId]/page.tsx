@@ -32,6 +32,7 @@ export default async function LetterStudioPage({ params }: { params: { projectId
         }}
         missingVariables={missingVariables}
         backHref={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=documents`}
+        arrangeHref={`/app/projects/${plot.projectId}/plots/${plot.id}/letters/${document.id}/pdf`}
         eyebrow={`${plot.project.name} / Plot ${plot.code}`}
       />
   );

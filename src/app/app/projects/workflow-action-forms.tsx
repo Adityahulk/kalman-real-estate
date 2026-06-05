@@ -327,6 +327,7 @@ export function LetterStudioEditor({
   missingVariables,
   backHref,
   eyebrow,
+  arrangeHref,
 }: {
   document: {
     id: string;
@@ -339,6 +340,7 @@ export function LetterStudioEditor({
   missingVariables: string[];
   backHref?: string;
   eyebrow?: string;
+  arrangeHref?: string;
 }) {
   const router = useRouter();
   const editorRef = useRef<HTMLDivElement>(null);
@@ -505,6 +507,12 @@ export function LetterStudioEditor({
                 {loading === "render" ? <Loader2 className="animate-spin" size={14} /> : <Eye size={14} />}
                 Generate PDF
               </button>
+              {fileAssetId && arrangeHref ? (
+                <Link className="btn-outline h-9 px-3 text-xs" href={arrangeHref}>
+                  <FileText size={14} />
+                  Arrange pages
+                </Link>
+              ) : null}
               {fileAssetId ? (
                 <a className="btn-gold h-9 px-3 text-xs" href={`/api/v1/files/${fileAssetId}/download`}>
                   <Download size={14} />

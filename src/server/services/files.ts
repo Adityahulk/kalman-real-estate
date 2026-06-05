@@ -165,6 +165,14 @@ async function assertOwnerRecord(context: RequestContext, ownerType?: string, ow
     await prisma.marketingTask.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
     return;
   }
+  if (ownerType === "GeneratedDocumentRevision") {
+    await prisma.generatedDocumentRevision.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
+    return;
+  }
+  if (ownerType === "GeneratedDocument") {
+    await prisma.generatedDocument.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
+    return;
+  }
 }
 
 export async function getFileForDownload(context: RequestContext, id: string): Promise<FileAsset> {

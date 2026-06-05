@@ -2,13 +2,27 @@ import { NextRequest, NextResponse } from "next/server";
 import { FileStorageProvider } from "@prisma/client";
 import { apiError, getRequestContext } from "@/server/api";
 import { getFileForDownload } from "@/server/services/files";
-import { createDownloadUrl, getLocalObject, isLocalStorageKey } from "@/server/storage";
+import { createDownloadUrl, getLocalObject, getObjectResilient, isLocalStorageKey } from "@/server/storage";
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const context = await getRequestContext(request, "documents.view");
     const file = await getFileForDownload(context, params.id);
     const disposition = request.nextUrl.searchParams.get("disposition") === "inline" ? "inline" : "attachment";
+    const proxy = request.nextUrl.searchParams.get("proxy") === "1";
+
+    if (proxy) {
+      const bytes = await getObjectResilient(file.storageKey).catch((error) => {
+        if (file.fallbackStorageKey) return getLocalObject(file.fallbackStorageKey);
+        throw error;
+      });
+      return new NextResponse(bytes, {
+        headers: {
+          "content-type": file.mimeType,
+          "content-disposition": `${disposition}; filename="${file.fileName}"`,
+        },
+      });
+    }
 
     if (file.storageProvider === FileStorageProvider.LOCAL || isLocalStorageKey(file.storageKey)) {
       const bytes = await getLocalObject(file.storageKey);

@@ -540,8 +540,32 @@ model GeneratedDocument {
   finalizedAt DateTime?
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
+  revisions   GeneratedDocumentRevision[]
 
   @@index([tenantId, recordType, recordId])
+}
+
+model GeneratedDocumentRevision {
+  id            String   @id @default(cuid())
+  tenantId      String
+  documentId    String
+  revisionNo    Int
+  status        String   @default("DRAFT")
+  baseFileId    String
+  outputFileId  String?
+  operations    Json     @default("[]")
+  pageCount     Int      @default(0)
+  createdById   String?
+  approvedById  String?
+  approvedAt    DateTime?
+  issuedAt      DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  document      GeneratedDocument @relation(fields: [documentId], references: [id])
+
+  @@unique([tenantId, documentId, revisionNo])
+  @@index([tenantId, documentId])
 }
 
 model SiteAsset {
