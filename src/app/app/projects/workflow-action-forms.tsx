@@ -423,11 +423,6 @@ export function LetterStudioEditor({
     }
   }
 
-  function openPreview() {
-    setDraftHtml(currentHtml());
-    setView("preview");
-  }
-
   async function decide(nextStatus: "APPROVED" | "ISSUED" | "REJECTED") {
     if ((nextStatus === "APPROVED" || nextStatus === "ISSUED") && !fileAssetId) return;
     setApprovalLoading(nextStatus);
@@ -486,7 +481,7 @@ export function LetterStudioEditor({
                 <button type="button" className={`px-3 py-2 font-medium ${view === "edit" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => setView("edit")}>
                   Edit Draft
                 </button>
-                <button type="button" className={`px-3 py-2 font-medium ${view === "preview" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"}`} onClick={openPreview}>
+                <button type="button" className={`px-3 py-2 font-medium ${view === "preview" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => setView("preview")}>
                   PDF Preview
                 </button>
               </div>
