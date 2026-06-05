@@ -16,11 +16,11 @@ const TEXT_WIDTH = PAGE_WIDTH - LEFT - RIGHT;
 const BODY_SIZE = 10.4;
 const LINE_HEIGHT = 14.4;
 
-export function isAmbeyAllotmentHtml(html: string) {
-  return html.includes('data-template="ambey-allotment"') || html.includes("data-template='ambey-allotment'");
+export function isLetterStudioHtml(html: string) {
+  return /data-template=["']ambey-allotment["']/i.test(html) || /data-letter-template=["'][^"']+["']/i.test(html);
 }
 
-export async function buildAmbeyAllotmentPdfFromHtml(html: string) {
+export async function buildLetterStudioPdfFromHtml(html: string) {
   const pdf = await PDFDocument.create();
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
@@ -44,7 +44,7 @@ export async function buildAmbeyAllotmentPdfFromHtml(html: string) {
 
 function extractSections(html: string) {
   const sections: Array<{ attrs: Record<string, string>; html: string }> = [];
-  const pattern = /<section\b([^>]*)data-ambey-page=["'][^"']+["']([^>]*)>([\s\S]*?)<\/section>/gi;
+  const pattern = /<section\b([^>]*)(?:data-ambey-page|data-letter-page)=["'][^"']+["']([^>]*)>([\s\S]*?)<\/section>/gi;
   for (const match of html.matchAll(pattern)) {
     sections.push({ attrs: parseAttrs(`${match[1]} ${match[2]}`), html: match[3] });
   }

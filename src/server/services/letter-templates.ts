@@ -143,3 +143,68 @@ export function ambeyAllotmentTemplate() {
 </section>
 </div>`;
 }
+
+export function transferLetterTemplate() {
+  return `<div data-letter-template="transfer-letter">
+<section data-letter-page="1" data-top="760">
+<h1><u>Transfer Letter</u></h1>
+<p class="right">Transfer Letter No.: {{document.number}}<br>Date: {{document.date}}</p>
+<p>To<br><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.address}}</u><br><u>Aadhaar No. {{owner.aadhaarNo}}</u><br><u>Pan No. {{owner.panNo}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>
+<p><strong>Subject :-</strong> Transfer of Residential Plot No. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqydApprox}}</strong> in <strong>{{project.name}}, {{project.fullAddress}}</strong>.</p>
+<p>This is to confirm that the ownership / allotment interest in Plot No. <strong>{{plot.code}}</strong> of <strong>{{project.name}}</strong> has been recorded in favour of <strong>{{owner.nameWithRelation}}</strong>, resident of <strong>{{owner.address}}</strong>, subject to the terms, dues, records, approvals, and internal transfer conditions of <strong>{{firm.name}}</strong>.</p>
+<table>
+<tr><th>Project</th><td><strong>{{project.nameUpper}}</strong></td></tr>
+<tr><th>Plot No.</th><td><strong>{{plot.code}}</strong></td></tr>
+<tr><th>Plot Area</th><td><strong>{{plot.areaSqyd}} Sq. Yds. approx.</strong></td></tr>
+<tr><th>Transferee / Owner</th><td><strong>{{owner.nameWithRelationUpper}}</strong></td></tr>
+<tr><th>Address</th><td><strong>{{owner.addressUpper}}</strong></td></tr>
+<tr><th>Transfer Amount</th><td><strong>Rs. {{plot.priceInrFormatted}}/-</strong></td></tr>
+<tr><th>Share</th><td><strong>{{ownership.sharePct}}%</strong></td></tr>
+<tr><th>Effective Date</th><td><strong>{{ownership.effectiveDateDots}}</strong></td></tr>
+</table>
+<p>The transfer has been entered in the records of the Firm on the basis of information, documents, and declarations submitted by the parties. The transferee shall be bound by the terms and conditions of the original allotment, buyer agreement, colony rules, development controls, payment obligations, transfer fee conditions, and all government/statutory requirements applicable from time to time.</p>
+<p>This letter does not by itself substitute any registered conveyance deed, sale deed, registry, mutation, government approval, or statutory record. Registry and other government processes, wherever applicable, shall be completed separately by the concerned parties.</p>
+<p class="right">For M/s. {{firm.nameUpper}}<br><br>Authorized Signatory</p>
+</section>
+
+<section data-letter-page="2" data-top="760">
+<h2><u>Transfer Acknowledgement</u></h2>
+<p>I/We acknowledge that Plot No. <strong>{{plot.code}}</strong> in <strong>{{project.name}}, {{project.fullAddress}}</strong> has been transferred / recorded in my/our name as per the details mentioned in this transfer letter.</p>
+<p>I/We confirm that all details provided by me/us, including identity, address, contact, payment, and KYC details are true and correct. I/We shall submit any additional document, declaration, undertaking, or government record required by the Firm or the competent authority.</p>
+<p>I/We agree to follow all terms applicable to the said plot, including construction rules, colony maintenance, dues, taxes, statutory charges, registry expenses, and any future charges payable as per law or project rules.</p>
+<table class="plain">
+<tr><th>Owner Name</th><td>: {{owner.nameWithRelation}}</td></tr>
+<tr><th>Mobile No.</th><td>: {{owner.mobileNo}}</td></tr>
+<tr><th>PAN No.</th><td>: {{owner.panNo}}</td></tr>
+<tr><th>Aadhaar No.</th><td>: {{owner.aadhaarNo}}</td></tr>
+<tr><th>Address</th><td>: {{owner.address}}</td></tr>
+</table>
+<p><strong>Witnesses:</strong><br>1. Name: ________________________ Signature: ________________________<br>2. Name: ________________________ Signature: ________________________</p>
+<p class="right">Signature of Transferee / Owner</p>
+</section>
+</div>`;
+}
+
+export function registryStatusLetterTemplate() {
+  return `<div data-letter-template="registry-status-letter">
+<section data-letter-page="1" data-top="760">
+<h1><u>Registry Status Letter</u></h1>
+<p class="right">Letter No.: {{document.number}}<br>Date: {{document.date}}</p>
+<p>To<br><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.address}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>
+<p><strong>Subject :-</strong> Registry status of Residential Plot No. <strong>{{plot.code}}</strong> of <strong>{{project.name}}, {{project.fullAddress}}</strong>.</p>
+<p>This letter records the present registry status available in the project records of <strong>{{firm.name}}</strong> for the below mentioned plot.</p>
+<table>
+<tr><th>Project</th><td><strong>{{project.nameUpper}}</strong></td></tr>
+<tr><th>Plot No.</th><td><strong>{{plot.code}}</strong></td></tr>
+<tr><th>Plot Area</th><td><strong>{{plot.areaSqyd}} Sq. Yds. approx.</strong></td></tr>
+<tr><th>Owner</th><td><strong>{{owner.nameWithRelationUpper}}</strong></td></tr>
+<tr><th>Registry Status</th><td><strong>{{registry.status}}</strong></td></tr>
+<tr><th>Registry No.</th><td><strong>{{registry.number}}</strong></td></tr>
+<tr><th>Registry Date</th><td><strong>{{registry.date}}</strong></td></tr>
+</table>
+<p>The above status is based on the documents, receipts, registry details, and internal records available with the Firm as on the date of this letter. If any government record, registry deed, receipt, mutation, or related document is pending or later updated, the project records may be updated accordingly.</p>
+<p>This letter is issued only for record and communication purposes. The original registry deed, registry receipt, and official government records shall remain the final proof wherever required under applicable law.</p>
+<p class="right">For M/s. {{firm.nameUpper}}<br><br>Authorized Signatory</p>
+</section>
+</div>`;
+}

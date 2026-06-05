@@ -1,5 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import { buildAmbeyAllotmentPdfFromHtml, isAmbeyAllotmentHtml } from "./ambey-allotment-pdf";
+import { buildLetterStudioPdfFromHtml, isLetterStudioHtml } from "./ambey-allotment-pdf";
 
 export async function buildGeneratedDocumentPdf(input: {
   title: string;
@@ -36,8 +36,8 @@ export async function buildGeneratedDocumentPdfFromHtml(input: {
   tenantName: string;
   html: string;
 }) {
-  if (isAmbeyAllotmentHtml(input.html)) {
-    return buildAmbeyAllotmentPdfFromHtml(input.html);
+  if (isLetterStudioHtml(input.html)) {
+    return buildLetterStudioPdfFromHtml(input.html);
   }
 
   return buildGeneratedDocumentPdf({

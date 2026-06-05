@@ -8,7 +8,7 @@ import { generatedDocumentStorageKey, putGeneratedObject } from "../storage";
 import { createGeneratedFileAsset } from "./files";
 import { buildGeneratedDocumentPdf, buildGeneratedDocumentPdfFromHtml } from "./document-pdf";
 import { createNotification } from "./notifications";
-import { ambeyAllotmentTemplate } from "./letter-templates";
+import { ambeyAllotmentTemplate, registryStatusLetterTemplate, transferLetterTemplate } from "./letter-templates";
 
 export const generateDocumentSchema = z.object({
   templateId: z.string().optional(),
@@ -358,19 +358,10 @@ function renderTemplate(template: string, variables: Record<string, string>) {
 
 function defaultTemplate(type: string) {
   if (type === "transfer_letter") {
-    return `<h1>Transfer Letter</h1>
-<p>Date: {{today}}</p>
-<p>This confirms transfer of Plot {{plot.code}} at {{project.name}}, {{project.city}}.</p>
-<p>Current owner / buyer: {{owner.name}}, {{owner.address}}, {{owner.phone}}.</p>
-<p>Transfer amount: INR {{ownership.amountInr}}. Share: {{ownership.sharePct}}%.</p>
-<p>Builder: {{tenant.name}}</p>`;
+    return transferLetterTemplate();
   }
   if (type === "registry_status_letter") {
-    return `<h1>Registry Status Letter</h1>
-<p>Date: {{today}}</p>
-<p>Plot {{plot.code}} at {{project.name}}, {{project.city}} has registry status: {{registry.status}}.</p>
-<p>Registry number: {{registry.number}}. Registry date: {{registry.date}}.</p>
-<p>Owner: {{owner.name}}.</p>`;
+    return registryStatusLetterTemplate();
   }
   return ambeyAllotmentTemplate();
 }

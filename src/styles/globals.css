@@ -75,11 +75,13 @@
   pointer-events: none;
   user-select: text;
 }
-.letter-paper-editor [data-template="ambey-allotment"] {
+.letter-paper-editor [data-template="ambey-allotment"],
+.letter-paper-editor [data-letter-template] {
   display: grid;
   gap: 32px;
 }
-.letter-paper-editor section[data-ambey-page] {
+.letter-paper-editor section[data-ambey-page],
+.letter-paper-editor section[data-letter-page] {
   width: min(100%, 860px);
   min-height: 1110px;
   margin: 0 auto;

@@ -357,6 +357,12 @@ export function LetterStudioEditor({
     setMounted(true);
   }, []);
 
+  useEffect(() => {
+    if (!mounted || view !== "edit" || !editorRef.current) return;
+    if (editorRef.current.innerHTML.trim()) return;
+    editorRef.current.innerHTML = draftHtml;
+  }, [draftHtml, mounted, view]);
+
   function currentHtml() {
     return editorRef.current?.innerHTML ?? draftHtml;
   }
@@ -569,7 +575,6 @@ export function LetterStudioEditor({
               suppressHydrationWarning
               className="letter-paper-editor"
               onInput={() => setDirty(true)}
-              dangerouslySetInnerHTML={{ __html: draftHtml }}
             />
           </section>
         ) : (
