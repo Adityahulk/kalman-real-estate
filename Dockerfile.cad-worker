@@ -26,6 +26,11 @@ RUN apt-get update \
 
 RUN python3 -m pip install --break-system-packages --no-cache-dir --upgrade ezdxf PyMuPDF
 
+RUN addgroup --system --gid 1001 nodejs \
+  && adduser --system --uid 1001 nextjs \
+  && mkdir -p /app/storage \
+  && chown -R nextjs:nodejs /app/storage
+
 ARG ODA_APPIMAGE_URL=""
 RUN mkdir -p /opt/oda \
   && if [ -n "$ODA_APPIMAGE_URL" ]; then \
@@ -46,7 +51,8 @@ RUN mkdir -p /opt/oda \
 COPY package.json package-lock.json ./
 RUN npm ci --include=dev
 
-COPY . .
+COPY --chown=nextjs:nodejs . .
 RUN npx prisma generate
 
+USER nextjs
 CMD ["npm", "run", "worker:cad"]

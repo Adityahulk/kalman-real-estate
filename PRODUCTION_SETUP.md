@@ -126,6 +126,23 @@ GET /api/v1/cad/health
 
 Use managed Postgres, managed Redis, and S3/R2/MinIO-compatible storage where available. Keep `FILE_STORAGE_DRIVER=s3_with_local_fallback` and mount `/app/storage` so the app can continue generating PDFs and accepting uploads when S3 is missing or temporarily unavailable. Set the environment variables from `.env.example`, run migrations in CI/CD, and run separate worker processes for CAD parsing, document generation, AI reports, and notifications.
 
+The production compose file includes a `storage-init` container that fixes the shared Docker volume permissions before the web and worker containers start. This is required because the app runs as UID `1001` and must be able to write fallback CAD files, PDFs, photos, invoices, and registry documents under `/app/storage`.
+
+If an existing server shows an error like `EACCES: permission denied, mkdir '/app/storage/...'`, rebuild and recreate the containers so `storage-init` runs:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production down
+docker compose -f docker-compose.prod.yml --env-file .env.production build --no-cache web cad-worker document-worker ai-worker migrate
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d
+```
+
+To repair only the existing named storage volume without rebuilding, run:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm storage-init
+docker compose -f docker-compose.prod.yml --env-file .env.production restart web cad-worker document-worker
+```
+
 ## Containerized Production Deployment
 
 The deployable production shape is split by workload:
