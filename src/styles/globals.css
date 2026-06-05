@@ -71,10 +71,6 @@
   gap: 32px;
   outline: none;
 }
-.letter-paper-preview {
-  pointer-events: none;
-  user-select: text;
-}
 .letter-paper-editor [data-template="ambey-allotment"],
 .letter-paper-editor [data-letter-template] {
   display: grid;

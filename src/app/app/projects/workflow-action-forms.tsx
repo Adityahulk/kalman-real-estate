@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, Bold, CheckCircle2, Download, Eye, FileText, Italic, Loader2, Save, Send, Underline, Wand2, X } from "lucide-react";
 
@@ -359,14 +359,13 @@ export function LetterStudioEditor({
     setMounted(true);
   }, []);
 
-  useEffect(() => {
-    if (!mounted || view !== "edit" || !editorRef.current) return;
-    if (editorRef.current.innerHTML.trim()) return;
-    editorRef.current.innerHTML = draftHtml;
-  }, [draftHtml, mounted, view]);
-
   function currentHtml() {
     return editorRef.current?.innerHTML ?? draftHtml;
+  }
+
+  function changeView(nextView: "edit" | "preview") {
+    if (nextView === "preview") editorRef.current?.blur();
+    setView(nextView);
   }
 
   function format(command: "bold" | "italic" | "underline") {
@@ -418,7 +417,7 @@ export function LetterStudioEditor({
       setDirty(false);
       setFileAssetId(body.data?.file?.id ?? body.data?.document?.fileAssetId ?? fileAssetId);
       setStatus(body.data?.document?.status ?? "GENERATED");
-      setView("preview");
+      changeView("preview");
       router.refresh();
     }
   }
@@ -478,10 +477,10 @@ export function LetterStudioEditor({
 
             <div className="flex flex-wrap items-center gap-2">
               <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 bg-white text-sm">
-                <button type="button" className={`px-3 py-2 font-medium ${view === "edit" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => setView("edit")}>
+                <button type="button" className={`px-3 py-2 font-medium ${view === "edit" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => changeView("edit")}>
                   Edit Draft
                 </button>
-                <button type="button" className={`px-3 py-2 font-medium ${view === "preview" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => setView("preview")}>
+                <button type="button" className={`px-3 py-2 font-medium ${view === "preview" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => changeView("preview")}>
                   PDF Preview
                 </button>
               </div>
@@ -570,44 +569,87 @@ export function LetterStudioEditor({
             Opening letter studio...
           </section>
         ) : view === "edit" ? (
-          <section className="rounded-2xl border border-slate-200 bg-slate-200/70 p-3 shadow-inner md:p-6">
-            <div
-              ref={editorRef}
-              contentEditable
-              suppressContentEditableWarning
-              suppressHydrationWarning
-              className="letter-paper-editor"
-              onInput={() => setDirty(true)}
-            />
-          </section>
+          <LetterDraftCanvas
+            key={`letter-edit-${letter.id}`}
+            editorRef={editorRef}
+            draftHtml={draftHtml}
+            onInput={() => setDirty(true)}
+          />
         ) : (
-          <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
-            {fileAssetId ? (
-              <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-200">
-                <iframe
-                  title="Generated PDF preview"
-                  className="h-[calc(100vh-15rem)] min-h-[640px] w-full bg-white"
-                  src={`/api/v1/files/${fileAssetId}/download?disposition=inline&proxy=1`}
-                />
-              </div>
-            ) : (
-              <div className="grid min-h-[520px] place-items-center rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
-                <div>
-                  <FileText className="mx-auto mb-3 text-slate-400" size={36} />
-                  <h2 className="font-semibold text-navy-900">No PDF preview yet</h2>
-                  <p className="mt-2 max-w-sm text-sm text-slate-500">Generate the PDF after reviewing the draft. The preview will open here automatically.</p>
-                  <button type="button" className="btn-primary mx-auto mt-4" onClick={renderPdf} disabled={Boolean(loading)}>
-                    {loading === "render" ? <Loader2 className="animate-spin" size={17} /> : <Eye size={17} />}
-                    Generate PDF
-                  </button>
-                </div>
-              </div>
-            )}
-          </section>
+          <LetterPdfPreview
+            key={`letter-preview-${fileAssetId ?? "empty"}`}
+            fileAssetId={fileAssetId}
+            loading={loading}
+            onGenerate={renderPdf}
+          />
         )}
       </div>
 
     </div>
+  );
+}
+
+function LetterDraftCanvas({
+  editorRef,
+  draftHtml,
+  onInput,
+}: {
+  editorRef: RefObject<HTMLDivElement>;
+  draftHtml: string;
+  onInput: () => void;
+}) {
+  useEffect(() => {
+    if (!editorRef.current) return;
+    editorRef.current.innerHTML = draftHtml;
+  }, [draftHtml, editorRef]);
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-slate-200/70 p-3 shadow-inner md:p-6">
+      <div
+        ref={editorRef}
+        contentEditable
+        suppressContentEditableWarning
+        suppressHydrationWarning
+        className="letter-paper-editor"
+        onInput={onInput}
+      />
+    </section>
+  );
+}
+
+function LetterPdfPreview({
+  fileAssetId,
+  loading,
+  onGenerate,
+}: {
+  fileAssetId: string | null;
+  loading: "save" | "render" | "";
+  onGenerate: () => void;
+}) {
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
+      {fileAssetId ? (
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-200">
+          <iframe
+            title="Generated PDF preview"
+            className="h-[calc(100vh-15rem)] min-h-[640px] w-full bg-white"
+            src={`/api/v1/files/${fileAssetId}/download?disposition=inline&proxy=1`}
+          />
+        </div>
+      ) : (
+        <div className="grid min-h-[520px] place-items-center rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+          <div>
+            <FileText className="mx-auto mb-3 text-slate-400" size={36} />
+            <h2 className="font-semibold text-navy-900">No PDF preview yet</h2>
+            <p className="mt-2 max-w-sm text-sm text-slate-500">Generate the PDF after reviewing the draft. The preview will open here automatically.</p>
+            <button type="button" className="btn-primary mx-auto mt-4" onClick={onGenerate} disabled={Boolean(loading)}>
+              {loading === "render" ? <Loader2 className="animate-spin" size={17} /> : <Eye size={17} />}
+              Generate PDF
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
