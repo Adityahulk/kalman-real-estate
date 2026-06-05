@@ -126,6 +126,8 @@ GET /api/v1/cad/health
 
 Use managed Postgres, managed Redis, and S3/R2/MinIO-compatible storage where available. Keep `FILE_STORAGE_DRIVER=s3_with_local_fallback` and mount `/app/storage` so the app can continue generating PDFs and accepting uploads when S3 is missing or temporarily unavailable. Set the environment variables from `.env.example`, run migrations in CI/CD, and run separate worker processes for CAD parsing, document generation, AI reports, and notifications.
 
+In fallback mode, S3 is only attempted when credentials are actually configured. Without `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`, uploads and generated files go directly to `/app/storage`, including CAD files. If deploying on AWS with an instance/task role instead of explicit keys, set `S3_ALLOW_IAM_ROLE="true"`.
+
 The production compose file includes a `storage-init` container that fixes the shared Docker volume permissions before the web and worker containers start. This is required because the app runs as UID `1001` and must be able to write fallback CAD files, PDFs, photos, invoices, and registry documents under `/app/storage`.
 
 If an existing server shows an error like `EACCES: permission denied, mkdir '/app/storage/...'`, rebuild and recreate the containers so `storage-init` runs:

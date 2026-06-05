@@ -1,11 +1,11 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, resolve, sep } from "node:path";
 import { FileStorageProvider } from "@prisma/client";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const endpoint = process.env.S3_ENDPOINT;
-const localStorageRoot = process.env.LOCAL_STORAGE_ROOT ?? join(process.cwd(), "storage");
+const localStorageRoot = resolve(process.env.LOCAL_STORAGE_ROOT ?? resolve(process.cwd(), "storage"));
 const s3TimeoutMs = Number(process.env.S3_TIMEOUT_MS ?? 2_500);
 
 export const objectStorage = new S3Client({
@@ -58,7 +58,15 @@ function s3Bucket() {
 }
 
 function shouldTryS3() {
-  return storageDriver() !== "local" && Boolean(s3Bucket());
+  return storageDriver() !== "local" && Boolean(s3Bucket()) && hasS3CredentialSource();
+}
+
+function hasS3CredentialSource() {
+  if (process.env.S3_ACCESS_KEY_ID && process.env.S3_SECRET_ACCESS_KEY) return true;
+  if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) return true;
+  if (process.env.AWS_WEB_IDENTITY_TOKEN_FILE && process.env.AWS_ROLE_ARN) return true;
+  if (process.env.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI || process.env.AWS_CONTAINER_CREDENTIALS_FULL_URI) return true;
+  return process.env.S3_ALLOW_IAM_ROLE === "true";
 }
 
 export function localFallbackKey(key: string) {
@@ -168,7 +176,16 @@ export function isLocalStorageKey(key: string) {
 }
 
 export function localStoragePath(key: string) {
-  return join(localStorageRoot, key.replace(/^local\//, ""));
+  const relativeKey = key.replace(/^local\//, "");
+  const parts = relativeKey.split("/").filter(Boolean);
+  if (!parts.length || parts.some((part) => part === "." || part === "..")) {
+    throw invalidLocalStorageKey();
+  }
+  const filePath = resolve(localStorageRoot, ...parts);
+  if (filePath !== localStorageRoot && !filePath.startsWith(`${localStorageRoot}${sep}`)) {
+    throw invalidLocalStorageKey();
+  }
+  return filePath;
 }
 
 export async function putLocalObject(key: string, bytes: Buffer) {
@@ -180,6 +197,49 @@ export async function putLocalObject(key: string, bytes: Buffer) {
 
 export async function getLocalObject(key: string) {
   return readFile(localStoragePath(key));
+}
+
+export async function getS3Object(key: string) {
+  const bucket = s3Bucket();
+  if (!bucket) throw new Error("S3_BUCKET is not configured");
+  const result = await withTimeout(
+    objectStorage.send(new GetObjectCommand({ Bucket: bucket, Key: key })),
+    "S3 object download timed out or failed",
+  );
+  const body = result.Body;
+  if (!body || typeof (body as AsyncIterable<Uint8Array>)[Symbol.asyncIterator] !== "function") {
+    throw new Error("Unsupported S3 object stream");
+  }
+  const chunks: Buffer[] = [];
+  for await (const chunk of body as AsyncIterable<Uint8Array>) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  return Buffer.concat(chunks);
+}
+
+export async function getObjectResilient(key: string) {
+  if (isLocalStorageKey(key)) return getLocalObject(key);
+
+  const localKey = localFallbackKey(key);
+  if (storageDriver() === "local" || !shouldTryS3()) return getLocalObject(localKey);
+
+  if (storageDriver() === "s3_with_local_fallback") {
+    try {
+      return await getLocalObject(localKey);
+    } catch (localBeforeError) {
+      try {
+        return await getS3Object(key);
+      } catch (s3Error) {
+        try {
+          return await getLocalObject(localKey);
+        } catch {
+          throw new Error(
+            `Stored file is unavailable. Local fallback missing (${humanStorageWarning(localBeforeError)}). S3 read failed (${humanStorageWarning(s3Error)}).`,
+          );
+        }
+      }
+    }
+  }
+
+  return getS3Object(key);
 }
 
 export function generatedDocumentStorageKey(tenantId: string, documentId: string) {
@@ -254,6 +314,12 @@ function storageConfigError(error: unknown) {
   const wrapped = new Error(`S3 storage is not available: ${humanStorageWarning(error)}`);
   wrapped.name = "StorageConfigError";
   return wrapped;
+}
+
+function invalidLocalStorageKey() {
+  const error = new Error("Invalid local storage key");
+  error.name = "BadRequestError";
+  return error;
 }
 
 export function humanStorageWarning(error: unknown) {

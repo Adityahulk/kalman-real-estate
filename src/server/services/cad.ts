@@ -23,6 +23,7 @@ export const cadUploadCompleteSchema = z.object({
 
 export async function createCadUpload(context: RequestContext, input: z.infer<typeof cadUploadSchema>) {
   await assertCadParentInTenant(context, input);
+  const originalName = safeCadFileName(input.originalName, input.format);
   const version = await prisma.cadFile.count({
     where: { tenantId: context.tenantId, parentType: input.parentType, parentId: input.parentId },
   });
@@ -31,7 +32,7 @@ export async function createCadUpload(context: RequestContext, input: z.infer<ty
     "cad",
     input.parentType.toLowerCase(),
     input.parentId,
-    `${Date.now()}-${input.originalName}`,
+    `${Date.now()}-${originalName}`,
   ]);
 
   const upload = await createUploadTargets({ key, contentType: input.contentType });
@@ -42,7 +43,7 @@ export async function createCadUpload(context: RequestContext, input: z.infer<ty
       parentType: input.parentType,
       parentId: input.parentId,
       format: input.format,
-      originalName: input.originalName,
+      originalName,
       storageKey: upload.primary.storageKey,
       uploadedById: context.userId,
       version: version + 1,
@@ -62,6 +63,15 @@ export async function createCadUpload(context: RequestContext, input: z.infer<ty
     upload,
     queue: { queued: false, reason: "waiting_for_file_upload" },
   };
+}
+
+function safeCadFileName(name: string, format: CadFormat) {
+  const fallback = format === CadFormat.VECTOR_PDF ? "plan.pdf" : `${format.toLowerCase()}-plan.dxf`;
+  const leaf = name.split(/[\\/]/).filter(Boolean).pop() ?? fallback;
+  const cleaned = leaf.replace(/[^a-zA-Z0-9._ -]/g, "-").replace(/\s+/g, " ").trim();
+  if (!cleaned || cleaned === "." || cleaned === "..") return fallback;
+  if (!cleaned.toLowerCase().endsWith(".dxf") && !cleaned.toLowerCase().endsWith(".pdf") && !cleaned.toLowerCase().endsWith(".dwg")) return fallback;
+  return cleaned;
 }
 
 export async function completeCadUpload(context: RequestContext, id: string, input: z.infer<typeof cadUploadCompleteSchema>) {

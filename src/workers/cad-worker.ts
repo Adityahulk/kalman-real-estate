@@ -1,15 +1,14 @@
-import { Readable } from "node:stream";
+import "@/server/load-env";
 import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
-import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { CadEntityType, CadStatus, PrismaClient } from "@prisma/client";
 import { Worker } from "bullmq";
 import IORedis from "ioredis";
-import { getLocalObject, isLocalStorageKey, objectStorage } from "@/server/storage";
+import { getObjectResilient } from "@/server/storage";
 
 const require = createRequire(import.meta.url);
 const DxfParser = require("dxf-parser");
@@ -126,21 +125,6 @@ function calculateBounds(entities: DxfEntity[]) {
   };
 }
 
-async function getObjectBuffer(key: string) {
-  if (isLocalStorageKey(key)) {
-    return getLocalObject(key);
-  }
-
-  const bucket = process.env.S3_BUCKET;
-  if (!bucket) throw new Error("S3_BUCKET is not configured");
-  const result = await objectStorage.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
-  const stream = result.Body;
-  if (!(stream instanceof Readable)) throw new Error("Unsupported object stream");
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  return Buffer.concat(chunks);
-}
-
 async function processCad(job: CadJob) {
   const cadFile = await prisma.cadFile.findFirstOrThrow({
     where: { id: job.cadFileId, tenantId: job.tenantId },
@@ -148,7 +132,7 @@ async function processCad(job: CadJob) {
 
   await prisma.cadFile.update({ where: { id: cadFile.id }, data: { status: cadFile.format === "DWG" ? CadStatus.CONVERTING : CadStatus.PARSING } });
 
-  const buffer = await getObjectBuffer(cadFile.storageKey);
+  const buffer = await getObjectResilient(cadFile.storageKey);
   const extracted = await extractWithProductionPipeline(cadFile.format, cadFile.originalName, buffer).catch(async (error) => {
     if (cadFile.format !== "DXF") throw error;
     const parsed = new DxfParser().parseSync(buffer.toString("utf8"));
@@ -308,7 +292,8 @@ type ExtractedEntity = {
 
 async function extractWithProductionPipeline(format: string, originalName: string, buffer: Buffer): Promise<{ layers: string[]; entities: ExtractedEntity[] }> {
   const dir = await mkdtemp(join(tmpdir(), "kalman-cad-"));
-  const sourcePath = join(dir, originalName);
+  const safeName = basename(originalName).replace(/[^a-zA-Z0-9._ -]/g, "-") || (format === "VECTOR_PDF" ? "plan.pdf" : "plan.dxf");
+  const sourcePath = join(dir, safeName);
   await writeFile(sourcePath, buffer);
   let extractorFormat = format;
   let extractorPath = sourcePath;

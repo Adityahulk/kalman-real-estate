@@ -72,7 +72,15 @@ export function CadUploadForm({
     }
 
     setStage("uploading");
-    const uploadedTo = await uploadToTarget(payload.data.upload as UploadPlan, selectedFile);
+    let uploadedTo: UploadTarget;
+    try {
+      uploadedTo = await uploadToTarget(payload.data.upload as UploadPlan, selectedFile);
+    } catch (error) {
+      setLoading(false);
+      setStage("idle");
+      setMessage(error instanceof Error ? error.message : "CAD upload failed. Please retry.");
+      return;
+    }
     const completeResponse = await fetch(`/api/v1/cad/${payload.data.cadFile.id}/upload-complete`, {
       method: "POST",
       headers: { "content-type": "application/json" },

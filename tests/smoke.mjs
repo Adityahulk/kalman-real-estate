@@ -75,6 +75,10 @@ const cadUploadFlow = await request("/api/v1/cad/upload", {
   }),
 });
 assert(cadUploadFlow.response.status === 201, "CAD upload record creation failed");
+if (process.env.FILE_STORAGE_DRIVER === "s3_with_local_fallback" && !process.env.S3_ACCESS_KEY_ID && !process.env.AWS_ACCESS_KEY_ID) {
+  assert(cadUploadFlow.json.data.upload.primary.provider === "LOCAL", "CAD upload did not select local fallback without S3 credentials");
+  assert(cadUploadFlow.json.data.upload.primary.storageKey.startsWith(`local/${tenantId}/cad/`), "CAD local fallback key is not tenant scoped");
+}
 const cadUploadTarget = typeof cadUploadFlow.json.data.upload === "string"
   ? { url: cadUploadFlow.json.data.upload, storageProvider: "S3", storageKey: cadUploadFlow.json.data.cadFile.storageKey }
   : cadUploadFlow.json.data.upload.primary;

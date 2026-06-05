@@ -83,6 +83,7 @@ export function AppShell({
     const match = pathname.match(/^\/app\/projects\/([^/]+)/);
     return match?.[1] ?? "";
   }, [pathname]);
+  const isCommandCenter = pathname === "/app";
   useEffect(() => {
     if (!selectedProjectId) return;
     window.localStorage.setItem("kalman-selected-project-id", selectedProjectId);
@@ -96,7 +97,7 @@ export function AppShell({
     });
   }
 
-  const selectedProject = projects.find((project) => project.id === (selectedProjectId || fallbackProjectId)) ?? null;
+  const selectedProject = projects.find((project) => project.id === (selectedProjectId || (isCommandCenter ? "" : fallbackProjectId))) ?? null;
   const sidebarWidth = collapsed ? "lg:pl-20" : "lg:pl-72";
 
   function projectHref(key: string) {
