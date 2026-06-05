@@ -7,6 +7,7 @@ export type Permission =
   | "cad.upload"
   | "cad.review"
   | "cad.publish"
+  | "cad.delete"
   | "cad.view"
   | "ownership.manage"
   | "ownership.view"
@@ -31,6 +32,7 @@ const permissionsByRole: Record<Role, Permission[]> = {
     "cad.upload",
     "cad.review",
     "cad.publish",
+    "cad.delete",
     "cad.view",
     "ownership.manage",
     "ownership.view",
@@ -54,6 +56,7 @@ const permissionsByRole: Record<Role, Permission[]> = {
     "cad.upload",
     "cad.review",
     "cad.publish",
+    "cad.delete",
     "cad.view",
     "ownership.manage",
     "ownership.view",
@@ -75,6 +78,7 @@ const permissionsByRole: Record<Role, Permission[]> = {
     "cad.upload",
     "cad.review",
     "cad.publish",
+    "cad.delete",
     "cad.view",
     "ownership.manage",
     "ownership.view",

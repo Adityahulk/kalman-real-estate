@@ -431,10 +431,26 @@ function readMeasurement(measurements: Prisma.JsonValue | null, key: string) {
 export async function deleteCadFile(context: RequestContext, id: string, input: z.infer<typeof deleteCadSchema>) {
   const before = await prisma.cadFile.findFirstOrThrow({
     where: { id, tenantId: context.tenantId },
+    include: {
+      scenes: { select: { id: true, entities: { select: { id: true } } } },
+      versions: { select: { id: true } },
+      reviewIssues: { select: { id: true } },
+    },
   });
+  if (before.status === CadStatus.PUBLISHED) {
+    throwBadRequest("Published CAD versions cannot be deleted. Upload a new version or keep the published audit trail.");
+  }
 
-  const file = await prisma.cadFile.delete({
-    where: { id },
+  const entityIds = before.scenes.flatMap((scene) => scene.entities.map((entity) => entity.id));
+  const sceneIds = before.scenes.map((scene) => scene.id);
+  const file = await prisma.$transaction(async (tx) => {
+    if (entityIds.length) await tx.spatialLink.deleteMany({ where: { tenantId: context.tenantId, cadEntityId: { in: entityIds } } });
+    await tx.cadReviewIssue.deleteMany({ where: { tenantId: context.tenantId, cadFileId: id } });
+    if (entityIds.length) await tx.cadEntity.deleteMany({ where: { tenantId: context.tenantId, id: { in: entityIds } } });
+    if (sceneIds.length) await tx.cadLayer.deleteMany({ where: { tenantId: context.tenantId, sceneId: { in: sceneIds } } });
+    if (sceneIds.length) await tx.cadScene.deleteMany({ where: { tenantId: context.tenantId, id: { in: sceneIds } } });
+    await tx.cadVersion.deleteMany({ where: { tenantId: context.tenantId, cadFileId: id } });
+    return tx.cadFile.delete({ where: { id } });
   });
 
   await writeAuditEvent(context, {
