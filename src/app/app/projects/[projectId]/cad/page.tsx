@@ -3,6 +3,7 @@ import { CheckCircle2, Clock3, FileWarning, Layers3, Map, Upload } from "lucide-
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
 import { CadUploadForm } from "../../../cad/cad-upload-form";
+import { DeleteCadButton } from "@/components/delete-cad-button";
 
 export const dynamic = "force-dynamic";
 
@@ -89,6 +90,7 @@ export default async function ProjectCadPage({ params }: { params: { projectId: 
                 <div className="flex flex-col gap-2">
                   <CadStatus status={file.status} />
                   <Link className="btn-outline h-8 px-3 text-xs" href={`/app/cad/${file.id}`}>{file.status === "PUBLISHED" ? "Open map" : "Review"}</Link>
+                  <DeleteCadButton cadFileId={file.id} fileName={file.originalName} />
                 </div>
               </div>
             ))}

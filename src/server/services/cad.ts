@@ -21,6 +21,10 @@ export const cadUploadCompleteSchema = z.object({
   storageKey: z.string().min(1),
 });
 
+export const deleteCadSchema = z.object({
+  reason: z.string().optional(),
+});
+
 export async function createCadUpload(context: RequestContext, input: z.infer<typeof cadUploadSchema>) {
   await assertCadParentInTenant(context, input);
   const originalName = safeCadFileName(input.originalName, input.format);
@@ -422,6 +426,26 @@ function readMeasurement(measurements: Prisma.JsonValue | null, key: string) {
   const value = (measurements as Record<string, unknown>)[key];
   if (typeof value !== "number") return undefined;
   return value;
+}
+
+export async function deleteCadFile(context: RequestContext, id: string, input: z.infer<typeof deleteCadSchema>) {
+  const before = await prisma.cadFile.findFirstOrThrow({
+    where: { id, tenantId: context.tenantId },
+  });
+
+  const file = await prisma.cadFile.delete({
+    where: { id },
+  });
+
+  await writeAuditEvent(context, {
+    action: AuditAction.DELETE,
+    entityType: "CadFile",
+    entityId: id,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: { deletedAt: new Date().toISOString(), deletedById: context.userId, deleteReason: input.reason },
+  });
+
+  return file;
 }
 
 function throwBadRequest(message: string): never {
