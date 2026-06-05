@@ -1,10 +1,7 @@
 import { notFound } from "next/navigation";
-import { FileText } from "lucide-react";
 import { getSessionUser } from "@/server/session";
 import { prisma } from "@/server/db";
-import { ActionHint, ActionPageShell } from "../../../../../action-page-shell";
 import { LetterStudioEditor } from "../../../../../workflow-action-forms";
-import { DocumentApprovalButtons } from "../../../../../../documents/document-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -24,27 +21,6 @@ export default async function LetterStudioPage({ params }: { params: { projectId
   const missingVariables = extractMissingVariables(document.data);
 
   return (
-    <ActionPageShell
-      eyebrow={`${plot.project.name} / ${plot.code}`}
-      title="Letter Studio"
-      description="Edit the auto-filled draft, preview the letter, generate the final PDF, then approve or issue it."
-      backHref={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=documents`}
-      backLabel="Back to documents"
-      aside={
-        <>
-          <ActionHint title="Letter status">
-            <div className="flex items-center gap-2">
-              <FileText size={16} />
-              {document.number ?? document.type} · {document.status.replaceAll("_", " ")}
-            </div>
-          </ActionHint>
-          <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-card">
-            <div className="mb-3 font-semibold">Approval</div>
-            <DocumentApprovalButtons documentId={document.id} />
-          </div>
-        </>
-      }
-    >
       <LetterStudioEditor
         document={{
           id: document.id,
@@ -54,11 +30,10 @@ export default async function LetterStudioPage({ params }: { params: { projectId
           editableHtml: document.editableHtml,
           fileAssetId: document.fileAssetId,
         }}
-        projectId={plot.projectId}
-        plotId={plot.id}
         missingVariables={missingVariables}
+        backHref={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=documents`}
+        eyebrow={`${plot.project.name} / Plot ${plot.code}`}
       />
-    </ActionPageShell>
   );
 }
 

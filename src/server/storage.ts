@@ -1,10 +1,12 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { FileStorageProvider } from "@prisma/client";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const endpoint = process.env.S3_ENDPOINT;
 const localStorageRoot = process.env.LOCAL_STORAGE_ROOT ?? join(process.cwd(), "storage");
+const s3TimeoutMs = Number(process.env.S3_TIMEOUT_MS ?? 2_500);
 
 export const objectStorage = new S3Client({
   endpoint,
@@ -23,37 +25,111 @@ export function storageKey(parts: string[]) {
   return parts.map((part) => part.replace(/[^a-zA-Z0-9._-]/g, "-")).join("/");
 }
 
+type StorageDriver = "local" | "s3" | "s3_with_local_fallback";
+
+type UploadTarget = {
+  provider: FileStorageProvider;
+  storageKey: string;
+  url: string;
+};
+
+export type UploadTargets = {
+  primary: UploadTarget;
+  fallback?: UploadTarget;
+  preferredProvider: FileStorageProvider;
+  warning?: string;
+};
+
+export type StoredObjectResult = {
+  storageProvider: FileStorageProvider;
+  storageKey: string;
+  fallbackStorageKey?: string;
+  warning?: string;
+};
+
+export function storageDriver(): StorageDriver {
+  const value = process.env.FILE_STORAGE_DRIVER;
+  if (value === "local" || value === "s3") return value;
+  return "s3_with_local_fallback";
+}
+
+function s3Bucket() {
+  return process.env.S3_BUCKET;
+}
+
+function shouldTryS3() {
+  return storageDriver() !== "local" && Boolean(s3Bucket());
+}
+
+export function localFallbackKey(key: string) {
+  return key.startsWith("local/") ? key : `local/${key}`;
+}
+
+function localUploadTarget(key: string): UploadTarget {
+  const localKey = localFallbackKey(key);
+  return {
+    provider: FileStorageProvider.LOCAL,
+    storageKey: localKey,
+    url: `/api/v1/storage/upload?key=${encodeURIComponent(localKey)}`,
+  };
+}
+
+async function s3UploadTarget(key: string, contentType: string, expiresInSeconds?: number): Promise<UploadTarget> {
+  const bucket = s3Bucket();
+  if (!bucket) throw new Error("S3_BUCKET is not configured");
+  const command = new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType });
+  return {
+    provider: FileStorageProvider.S3,
+    storageKey: key,
+    url: await withTimeout(
+      getSignedUrl(objectStorage, command, { expiresIn: expiresInSeconds ?? 900 }),
+      "S3 upload URL could not be created",
+    ),
+  };
+}
+
+export async function createUploadTargets(input: {
+  key: string;
+  contentType: string;
+  expiresInSeconds?: number;
+}): Promise<UploadTargets> {
+  const fallback = localUploadTarget(input.key);
+  if (!shouldTryS3()) {
+    return { primary: fallback, preferredProvider: FileStorageProvider.LOCAL };
+  }
+
+  try {
+    const primary = await s3UploadTarget(input.key, input.contentType, input.expiresInSeconds);
+    return {
+      primary,
+      fallback,
+      preferredProvider: FileStorageProvider.S3,
+    };
+  } catch (error) {
+    if (storageDriver() === "s3") throw storageConfigError(error);
+    return {
+      primary: fallback,
+      preferredProvider: FileStorageProvider.LOCAL,
+      warning: humanStorageWarning(error),
+    };
+  }
+}
+
 export async function createUploadUrl(input: {
   key: string;
   contentType: string;
   expiresInSeconds?: number;
 }) {
-  if (process.env.FILE_STORAGE_DRIVER === "local") {
-    return `/api/v1/storage/upload?key=${encodeURIComponent(input.key)}`;
-  }
-
-  const bucket = process.env.S3_BUCKET;
-  if (!bucket) {
-    throw new Error("S3_BUCKET is not configured");
-  }
-
-  const command = new PutObjectCommand({
-    Bucket: bucket,
-    Key: input.key,
-    ContentType: input.contentType,
-  });
-
-  return getSignedUrl(objectStorage, command, {
-    expiresIn: input.expiresInSeconds ?? 900,
-  });
+  return (await createUploadTargets(input)).primary.url;
 }
 
 export async function createDownloadUrl(input: {
   key: string;
   fileName?: string;
+  disposition?: "attachment" | "inline";
   expiresInSeconds?: number;
 }) {
-  const bucket = process.env.S3_BUCKET;
+  const bucket = s3Bucket();
   if (!bucket) {
     throw new Error("S3_BUCKET is not configured");
   }
@@ -61,26 +137,30 @@ export async function createDownloadUrl(input: {
   const command = new GetObjectCommand({
     Bucket: bucket,
     Key: input.key,
-    ResponseContentDisposition: input.fileName ? `attachment; filename="${input.fileName}"` : undefined,
+    ResponseContentDisposition: input.fileName ? `${input.disposition ?? "attachment"}; filename="${input.fileName}"` : undefined,
   });
 
-  return getSignedUrl(objectStorage, command, {
-    expiresIn: input.expiresInSeconds ?? 300,
-  });
+  return withTimeout(
+    getSignedUrl(objectStorage, command, { expiresIn: input.expiresInSeconds ?? 300 }),
+    "S3 download URL could not be created",
+  );
 }
 
 export async function putObject(key: string, bytes: Buffer, contentType: string) {
-  const bucket = process.env.S3_BUCKET;
+  const bucket = s3Bucket();
   if (!bucket) {
     throw new Error("S3_BUCKET is not configured");
   }
 
-  await objectStorage.send(new PutObjectCommand({
-    Bucket: bucket,
-    Key: key,
-    Body: bytes,
-    ContentType: contentType,
-  }));
+  await withTimeout(
+    objectStorage.send(new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: bytes,
+      ContentType: contentType,
+    })),
+    "S3 object upload timed out or failed",
+  );
 }
 
 export function isLocalStorageKey(key: string) {
@@ -103,16 +183,80 @@ export async function getLocalObject(key: string) {
 }
 
 export function generatedDocumentStorageKey(tenantId: string, documentId: string) {
-  if (process.env.FILE_STORAGE_DRIVER === "local" || process.env.NODE_ENV !== "production") {
-    return `local/generated/${tenantId}/${documentId}.pdf`;
-  }
   return storageKey([tenantId, "generated", `${documentId}.pdf`]);
 }
 
-export async function putGeneratedObject(key: string, bytes: Buffer, contentType: string) {
-  if (isLocalStorageKey(key)) {
-    await putLocalObject(key, bytes);
-    return;
+export async function putGeneratedObject(key: string, bytes: Buffer, contentType: string): Promise<StoredObjectResult> {
+  return putObjectResilient(key, bytes, contentType, { mirrorLocalOnS3Success: true });
+}
+
+export async function putObjectResilient(
+  key: string,
+  bytes: Buffer,
+  contentType: string,
+  options: { mirrorLocalOnS3Success?: boolean } = {},
+): Promise<StoredObjectResult> {
+  const localKey = localFallbackKey(key);
+
+  if (!shouldTryS3() || key.startsWith("local/")) {
+    await putLocalObject(localKey, bytes);
+    return {
+      storageProvider: FileStorageProvider.LOCAL,
+      storageKey: localKey,
+    };
   }
-  await putObject(key, bytes, contentType);
+
+  try {
+    await putObject(key, bytes, contentType);
+    let fallbackStorageKey: string | undefined;
+    if (options.mirrorLocalOnS3Success) {
+      try {
+        await putLocalObject(localKey, bytes);
+        fallbackStorageKey = localKey;
+      } catch {
+        fallbackStorageKey = undefined;
+      }
+    }
+    return {
+      storageProvider: FileStorageProvider.S3,
+      storageKey: key,
+      fallbackStorageKey,
+    };
+  } catch (error) {
+    if (storageDriver() === "s3") throw storageConfigError(error);
+    try {
+      await putLocalObject(localKey, bytes);
+      return {
+        storageProvider: FileStorageProvider.LOCAL,
+        storageKey: localKey,
+        warning: humanStorageWarning(error),
+      };
+    } catch (localError) {
+      const message = `Storage unavailable: S3 failed (${humanStorageWarning(error)}) and local fallback failed (${humanStorageWarning(localError)}).`;
+      throw new Error(message);
+    }
+  }
+}
+
+async function withTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timer = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(message)), s3TimeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timer]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+function storageConfigError(error: unknown) {
+  const wrapped = new Error(`S3 storage is not available: ${humanStorageWarning(error)}`);
+  wrapped.name = "StorageConfigError";
+  return wrapped;
+}
+
+export function humanStorageWarning(error: unknown) {
+  if (error instanceof Error) return error.message;
+  return "unknown storage error";
 }

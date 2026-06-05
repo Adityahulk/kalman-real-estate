@@ -38,12 +38,14 @@ async function processDocument(job: DocumentJob) {
   });
 
   const key = generatedDocumentStorageKey(job.tenantId, document.id);
-  await putGeneratedObject(key, pdf, "application/pdf");
+  const stored = await putGeneratedObject(key, pdf, "application/pdf");
 
   const file = await prisma.fileAsset.create({
     data: {
       tenantId: job.tenantId,
-      storageKey: key,
+      storageKey: stored.storageKey,
+      storageProvider: stored.storageProvider,
+      fallbackStorageKey: stored.fallbackStorageKey,
       fileName: `${document.number ?? document.id}.pdf`,
       mimeType: "application/pdf",
       sizeBytes: pdf.length,

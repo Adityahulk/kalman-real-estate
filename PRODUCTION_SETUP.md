@@ -5,7 +5,7 @@ This repo now has the production foundation for a multi-tenant builder SaaS:
 - Next.js app and `/api/v1` API layer.
 - PostgreSQL schema and migration through Prisma.
 - Redis-backed queue definitions for CAD, documents, and AI reports.
-- S3-compatible object storage adapter for CAD, documents, photos, videos, and invoices.
+- Resilient object storage adapter for CAD, documents, photos, videos, and invoices: S3-compatible storage is preferred, with Docker volume local storage as automatic fallback.
 - Tenant-aware services for CAD, ownership, documents, development, marketing, finance, AI, audit, and notifications.
 
 ## Local Boot
@@ -124,7 +124,7 @@ GET /api/v1/cad/health
 
 ## Production Deployment Notes
 
-Use managed Postgres, managed Redis, and S3/R2/MinIO-compatible storage. Set the environment variables from `.env.example`, run migrations in CI/CD, and run separate worker processes for CAD parsing, document generation, AI reports, and notifications.
+Use managed Postgres, managed Redis, and S3/R2/MinIO-compatible storage where available. Keep `FILE_STORAGE_DRIVER=s3_with_local_fallback` and mount `/app/storage` so the app can continue generating PDFs and accepting uploads when S3 is missing or temporarily unavailable. Set the environment variables from `.env.example`, run migrations in CI/CD, and run separate worker processes for CAD parsing, document generation, AI reports, and notifications.
 
 ## Containerized Production Deployment
 
@@ -191,7 +191,7 @@ If `ODA_APPIMAGE_URL` is empty, the CAD worker still supports DXF and vector PDF
 For AWS:
 
 - Run `web`, `cad-worker`, `document-worker`, and `ai-worker` as separate ECS services.
-- Use RDS Postgres, ElastiCache Redis, and S3.
+- Use RDS Postgres, ElastiCache Redis, and S3, while keeping the local storage volume mounted as fallback.
 - Scale `cad-worker` independently based on queue depth.
 
 For DigitalOcean:

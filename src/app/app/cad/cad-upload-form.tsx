@@ -2,10 +2,12 @@
 
 import { ChangeEvent, FormEvent, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CadFormat, CadScope } from "@prisma/client";
+import { CadFormat, CadScope, FileStorageProvider } from "@prisma/client";
 import { Loader2, Upload } from "lucide-react";
 
 type ProjectOption = { id: string; name: string };
+type UploadTarget = { provider: FileStorageProvider; storageKey: string; url: string };
+type UploadPlan = string | { primary: UploadTarget; fallback?: UploadTarget; preferredProvider?: FileStorageProvider };
 
 export function CadUploadForm({
   projects,
@@ -70,15 +72,20 @@ export function CadUploadForm({
     }
 
     setStage("uploading");
-    const putResponse = await fetch(payload.data.upload, {
-      method: "PUT",
-      headers: { "content-type": selectedFile.type || "application/octet-stream" },
-      body: selectedFile,
+    const uploadedTo = await uploadToTarget(payload.data.upload as UploadPlan, selectedFile);
+    const completeResponse = await fetch(`/api/v1/cad/${payload.data.cadFile.id}/upload-complete`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        storageProvider: uploadedTo.provider,
+        storageKey: uploadedTo.storageKey || payload.data.cadFile.storageKey,
+      }),
     });
-    if (!putResponse.ok) {
+    const completePayload = await completeResponse.json();
+    if (!completeResponse.ok) {
       setLoading(false);
       setStage("idle");
-      setMessage("CAD record created, but file upload failed. Check storage configuration and retry.");
+      setMessage(completePayload.error ?? "CAD uploaded, but the file record could not be finalized.");
       return;
     }
 
@@ -191,4 +198,31 @@ export function CadUploadForm({
       </button>
     </form>
   );
+}
+
+async function uploadToTarget(upload: UploadPlan, file: File): Promise<UploadTarget> {
+  const contentType = file.type || "application/octet-stream";
+  if (typeof upload === "string") {
+    const response = await fetch(upload, { method: "PUT", headers: { "content-type": contentType }, body: file });
+    if (!response.ok) throw new Error("CAD upload failed");
+    return {
+      provider: upload.includes("/api/v1/storage/upload") ? FileStorageProvider.LOCAL : FileStorageProvider.S3,
+      storageKey: "",
+      url: upload,
+    };
+  }
+
+  try {
+    await putFile(upload.primary, file, contentType);
+    return upload.primary;
+  } catch (primaryError) {
+    if (!upload.fallback) throw primaryError;
+    await putFile(upload.fallback, file, contentType);
+    return upload.fallback;
+  }
+}
+
+async function putFile(target: UploadTarget, file: File, contentType: string) {
+  const response = await fetch(target.url, { method: "PUT", headers: { "content-type": contentType }, body: file });
+  if (!response.ok) throw new Error(`${target.provider} upload failed`);
 }

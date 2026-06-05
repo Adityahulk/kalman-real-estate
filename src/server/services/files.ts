@@ -1,9 +1,9 @@
-import { AuditAction, FileAsset, FileVisibility, Prisma, RealEstateDocumentType } from "@prisma/client";
+import { AuditAction, FileAsset, FileStorageProvider, FileVisibility, Prisma, RealEstateDocumentType } from "@prisma/client";
 import { z } from "zod";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
-import { createUploadUrl, storageKey } from "../storage";
+import { createUploadTargets, storageKey } from "../storage";
 
 export const fileUploadSchema = z.object({
   fileName: z.string().min(1),
@@ -22,13 +22,21 @@ export const deleteFileSchema = z.object({
   reason: z.string().optional(),
 });
 
+export const uploadCompleteSchema = z.object({
+  storageProvider: z.nativeEnum(FileStorageProvider),
+  storageKey: z.string().min(1),
+  sizeBytes: z.number().int().nonnegative().optional(),
+});
+
 export async function createFileUpload(context: RequestContext, input: z.infer<typeof fileUploadSchema>) {
   await assertOwnerRecord(context, input.ownerType, input.ownerId);
   const key = storageKey([context.tenantId, "files", `${Date.now()}-${input.fileName}`]);
+  const upload = await createUploadTargets({ key, contentType: input.mimeType });
   const file = await prisma.fileAsset.create({
     data: {
       tenantId: context.tenantId,
-      storageKey: key,
+      storageKey: upload.primary.storageKey,
+      storageProvider: upload.primary.provider,
       fileName: input.fileName,
       mimeType: input.mimeType,
       sizeBytes: input.sizeBytes,
@@ -43,7 +51,6 @@ export async function createFileUpload(context: RequestContext, input: z.infer<t
     },
   });
 
-  const upload = await createUploadUrl({ key, contentType: input.mimeType });
   await writeAuditEvent(context, {
     action: AuditAction.UPLOAD,
     entityType: "FileAsset",
@@ -67,12 +74,16 @@ export async function createGeneratedFileAsset(
     notes?: string;
     ownerType?: string;
     ownerId?: string;
+    storageProvider?: FileStorageProvider;
+    fallbackStorageKey?: string;
   },
 ) {
   return prisma.fileAsset.create({
     data: {
       tenantId: context.tenantId,
       storageKey: input.storageKey,
+      storageProvider: input.storageProvider ?? (input.storageKey.startsWith("local/") ? FileStorageProvider.LOCAL : FileStorageProvider.S3),
+      fallbackStorageKey: input.fallbackStorageKey,
       fileName: input.fileName,
       mimeType: input.mimeType,
       sizeBytes: input.sizeBytes,
@@ -86,6 +97,46 @@ export async function createGeneratedFileAsset(
       uploadedById: context.userId,
     },
   });
+}
+
+export async function completeFileUpload(context: RequestContext, id: string, input: z.infer<typeof uploadCompleteSchema>) {
+  const before = await prisma.fileAsset.findFirstOrThrow({
+    where: { id, tenantId: context.tenantId, deletedAt: null },
+  });
+  assertUploadKeyAllowed(context, before, input.storageKey);
+
+  const file = await prisma.fileAsset.update({
+    where: { id },
+    data: {
+      storageProvider: input.storageProvider,
+      storageKey: input.storageKey,
+      sizeBytes: input.sizeBytes ?? before.sizeBytes,
+    },
+  });
+
+  await writeAuditEvent(context, {
+    action: AuditAction.UPDATE,
+    entityType: "FileAsset",
+    entityId: id,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: file as unknown as Prisma.InputJsonValue,
+  });
+
+  return file;
+}
+
+function assertUploadKeyAllowed(context: RequestContext, file: FileAsset, storageKey: string) {
+  const allowed = new Set([
+    file.storageKey,
+    file.fallbackStorageKey,
+    `local/${file.storageKey}`,
+  ].filter(Boolean) as string[]);
+  const tenantPrefix = `${context.tenantId}/`;
+  const localTenantPrefix = `local/${context.tenantId}/`;
+  if (allowed.has(storageKey) || storageKey.startsWith(tenantPrefix) || storageKey.startsWith(localTenantPrefix)) return;
+  const error = new Error("Upload key does not belong to this tenant");
+  error.name = "ForbiddenError";
+  throw error;
 }
 
 async function assertOwnerRecord(context: RequestContext, ownerType?: string, ownerId?: string) {

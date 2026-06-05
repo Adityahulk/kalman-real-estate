@@ -1,9 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bold, CheckCircle2, Download, Eye, FileText, Italic, Loader2, Save, Send, Underline, Wand2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, Bold, CheckCircle2, Download, Eye, FileText, Italic, Loader2, Save, Send, Underline, Wand2, X } from "lucide-react";
 
 type ProjectInfo = {
   id: string;
@@ -324,9 +324,9 @@ export function LetterDraftStartForm({
 
 export function LetterStudioEditor({
   document: letter,
-  projectId,
-  plotId,
   missingVariables,
+  backHref,
+  eyebrow,
 }: {
   document: {
     id: string;
@@ -336,18 +336,29 @@ export function LetterStudioEditor({
     editableHtml: string | null;
     fileAssetId: string | null;
   };
-  projectId: string;
-  plotId: string;
   missingVariables: string[];
+  backHref?: string;
+  eyebrow?: string;
 }) {
   const router = useRouter();
   const editorRef = useRef<HTMLDivElement>(null);
-  const [message, setMessage] = useState("");
+  const [mounted, setMounted] = useState(false);
+  const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [loading, setLoading] = useState<"save" | "render" | "">("");
+  const [approvalLoading, setApprovalLoading] = useState<"APPROVED" | "ISSUED" | "REJECTED" | "">("");
   const [dirty, setDirty] = useState(false);
+  const [view, setView] = useState<"edit" | "preview">(letter.fileAssetId ? "preview" : "edit");
+  const [draftHtml, setDraftHtml] = useState(letter.editableHtml ?? "");
+  const [fileAssetId, setFileAssetId] = useState(letter.fileAssetId);
+  const [status, setStatus] = useState(letter.status);
+  const [missingOpen, setMissingOpen] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   function currentHtml() {
-    return editorRef.current?.innerHTML ?? letter.editableHtml ?? "";
+    return editorRef.current?.innerHTML ?? draftHtml;
   }
 
   function format(command: "bold" | "italic" | "underline") {
@@ -358,16 +369,18 @@ export function LetterStudioEditor({
 
   async function saveDraft() {
     setLoading("save");
-    setMessage("");
+    setMessage(null);
+    const editableHtml = currentHtml();
     const response = await fetch(`/api/v1/documents/${letter.id}/draft`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ editableHtml: currentHtml() }),
+      body: JSON.stringify({ editableHtml }),
     });
     const body = await response.json();
     setLoading("");
-    setMessage(response.ok ? "Draft saved." : body.error ?? "Draft save failed");
+    setMessage(response.ok ? { kind: "success", text: "Draft saved." } : { kind: "error", text: body.error ?? "Draft save failed" });
     if (response.ok) {
+      setDraftHtml(editableHtml);
       setDirty(false);
       router.refresh();
     }
@@ -375,228 +388,251 @@ export function LetterStudioEditor({
 
   async function renderPdf() {
     setLoading("render");
-    setMessage("");
+    setMessage(null);
+    const editableHtml = currentHtml();
     const saveResponse = await fetch(`/api/v1/documents/${letter.id}/draft`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ editableHtml: currentHtml() }),
+      body: JSON.stringify({ editableHtml }),
     });
     const saveBody = await saveResponse.json();
     if (!saveResponse.ok) {
       setLoading("");
-      setMessage(saveBody.error ?? "Draft save failed");
+      setMessage({ kind: "error", text: saveBody.error ?? "Draft save failed" });
       return;
     }
     const response = await fetch(`/api/v1/documents/${letter.id}/render`, { method: "POST" });
     const body = await response.json();
     setLoading("");
-    setMessage(response.ok ? "PDF generated. Review, approve, issue, or download below." : body.error ?? "PDF generation failed");
+    setMessage(response.ok ? { kind: "success", text: "PDF generated. Preview is ready." } : { kind: "error", text: body.error ?? "PDF generation failed" });
     if (response.ok) {
+      setDraftHtml(editableHtml);
       setDirty(false);
+      setFileAssetId(body.data?.file?.id ?? body.data?.document?.fileAssetId ?? fileAssetId);
+      setStatus(body.data?.document?.status ?? "GENERATED");
+      setView("preview");
       router.refresh();
     }
   }
 
-  return (
-    <div className="space-y-5">
-      <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-card">
-        <div className="flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Letter Studio</div>
-            <h2 className="mt-1 text-lg font-semibold text-navy-900">{letter.number ?? letter.type.replaceAll("_", " ")}</h2>
-            <div className="mt-1 flex flex-wrap gap-2 text-xs">
-              <span className="chip bg-slate-100 text-slate-700">{letter.status.replaceAll("_", " ")}</span>
-              {dirty ? <span className="chip bg-amber-50 text-amber-800">Unsaved changes</span> : null}
-              {missingVariables.length ? <span className="chip bg-amber-50 text-amber-800">{missingVariables.length} blank fields</span> : null}
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("bold")}>
-              <Bold size={14} />
-              Bold
-            </button>
-            <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("italic")}>
-              <Italic size={14} />
-              Italic
-            </button>
-            <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("underline")}>
-              <Underline size={14} />
-              Underline
-            </button>
-          </div>
-        </div>
-      </div>
+  function openPreview() {
+    setDraftHtml(currentHtml());
+    setView("preview");
+  }
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
-        <section className="rounded-2xl border border-slate-200 bg-slate-100 p-3 shadow-inner md:p-5">
-          <div className="sticky top-16 z-10 mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
+  async function decide(nextStatus: "APPROVED" | "ISSUED" | "REJECTED") {
+    if ((nextStatus === "APPROVED" || nextStatus === "ISSUED") && !fileAssetId) return;
+    setApprovalLoading(nextStatus);
+    setMessage(null);
+    const endpoint = nextStatus === "REJECTED" ? "reject" : "approve";
+    const response = await fetch(`/api/v1/documents/${letter.id}/${endpoint}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: nextStatus, notes: nextStatus }),
+    });
+    const body = await response.json();
+    setApprovalLoading("");
+    if (!response.ok) {
+      setMessage({ kind: "error", text: body.error ?? "Document update failed" });
+      return;
+    }
+    setStatus(body.data?.status ?? nextStatus);
+    setMessage({ kind: "success", text: `Document ${nextStatus.toLowerCase()}.` });
+    router.refresh();
+  }
+
+  const groupedMissing = groupMissingVariables(missingVariables);
+  const documentTitle = letter.number ?? letter.type.replaceAll("_", " ");
+  const canIssue = Boolean(fileAssetId);
+
+  return (
+    <div className="min-h-[calc(100vh-4rem)] bg-slate-100">
+      <div className="sticky top-16 z-30 border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur">
+        <div className="mx-auto flex max-w-[1480px] flex-col gap-3 px-4 py-3 lg:px-6">
+          <div className="flex flex-col justify-between gap-3 xl:flex-row xl:items-center">
             <div>
-              <div className="text-sm font-semibold text-navy-900">Edit the letter directly</div>
-              <div className="text-xs text-slate-500">Click inside the paper, change text, then save and regenerate the PDF preview.</div>
+              <div className="flex flex-wrap items-center gap-3">
+                {backHref ? (
+                  <Link className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-navy-900" href={backHref}>
+                    <ArrowLeft size={16} />
+                    Back
+                  </Link>
+                ) : null}
+                {eyebrow ? <span className="text-sm text-slate-500">{eyebrow}</span> : null}
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <h1 className="text-lg font-semibold text-navy-900 md:text-xl">{documentTitle}</h1>
+                <span className="chip bg-slate-100 text-slate-700">{status.replaceAll("_", " ")}</span>
+                {dirty ? <span className="chip bg-amber-50 text-amber-800">Unsaved changes</span> : null}
+                {missingVariables.length ? (
+                  <button type="button" className="chip bg-amber-50 text-amber-800" onClick={() => setMissingOpen((value) => !value)}>
+                    <AlertCircle size={13} />
+                    {missingVariables.length} blank fields
+                  </button>
+                ) : null}
+              </div>
             </div>
-            <div className="flex flex-wrap gap-2">
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 bg-white text-sm">
+                <button type="button" className={`px-3 py-2 font-medium ${view === "edit" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => setView("edit")}>
+                  Edit Draft
+                </button>
+                <button type="button" className={`px-3 py-2 font-medium ${view === "preview" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"}`} onClick={openPreview}>
+                  PDF Preview
+                </button>
+              </div>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("bold")} disabled={view !== "edit"}>
+                <Bold size={14} />
+              </button>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("italic")} disabled={view !== "edit"}>
+                <Italic size={14} />
+              </button>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("underline")} disabled={view !== "edit"}>
+                <Underline size={14} />
+              </button>
               <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={saveDraft} disabled={Boolean(loading)}>
                 {loading === "save" ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
                 Save
               </button>
               <button type="button" className="btn-primary h-9 px-3 text-xs" onClick={renderPdf} disabled={Boolean(loading)}>
                 {loading === "render" ? <Loader2 className="animate-spin" size={14} /> : <Eye size={14} />}
-                Generate PDF preview
+                Generate PDF
+              </button>
+              {fileAssetId ? (
+                <a className="btn-gold h-9 px-3 text-xs" href={`/api/v1/files/${fileAssetId}/download`}>
+                  <Download size={14} />
+                  Download
+                </a>
+              ) : (
+                <button type="button" className="btn-gold h-9 px-3 text-xs opacity-50" disabled>
+                  <Download size={14} />
+                  Download
+                </button>
+              )}
+              <button type="button" className="btn-outline h-9 px-3 text-xs" disabled={!canIssue || Boolean(approvalLoading)} onClick={() => decide("APPROVED")}>
+                {approvalLoading === "APPROVED" ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />}
+                Approve
+              </button>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" disabled={!canIssue || Boolean(approvalLoading)} onClick={() => decide("ISSUED")}>
+                Issue
+              </button>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" disabled={Boolean(approvalLoading)} onClick={() => decide("REJECTED")}>
+                {approvalLoading === "REJECTED" ? <Loader2 className="animate-spin" size={14} /> : <X size={14} />}
+                Reject
               </button>
             </div>
           </div>
-          <div
-            ref={editorRef}
-            contentEditable
-            suppressContentEditableWarning
-            className="letter-paper-editor"
-            onInput={() => setDirty(true)}
-            dangerouslySetInnerHTML={{ __html: letter.editableHtml ?? "" }}
-          />
-        </section>
 
-        <aside className="space-y-5">
-          <div className="card overflow-hidden">
-            <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-3">
-              <FileText size={17} />
-              <h2 className="font-semibold">PDF preview</h2>
-            </div>
-            {letter.fileAssetId ? (
-              <div className="p-4">
-                <iframe title="Generated PDF preview" className="h-[540px] w-full rounded-lg border border-slate-200 bg-white" src={`/api/v1/files/${letter.fileAssetId}/download`} />
-                <a className="btn-gold mt-3 w-full justify-center" href={`/api/v1/files/${letter.fileAssetId}/download`}>
-                  <Download size={17} />
-                  Download PDF
-                </a>
-              </div>
-            ) : (
-              <div className="p-6 text-center text-sm text-slate-500">
-                <FileText className="mx-auto mb-3 text-slate-400" />
-                Generate the PDF preview after reviewing the paper draft.
-              </div>
-            )}
-          </div>
-
-          {missingVariables.length ? (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-              <div className="font-semibold">Blank data to review</div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {missingVariables.slice(0, 16).map((variable) => (
-                  <span key={variable} className="rounded-full bg-white/80 px-2.5 py-1 text-xs text-amber-900">{variable}</span>
-                ))}
-                {missingVariables.length > 16 ? <span className="rounded-full bg-white/80 px-2.5 py-1 text-xs text-amber-900">+{missingVariables.length - 16} more</span> : null}
-              </div>
+          {message ? (
+            <div className={`rounded-lg px-3 py-2 text-sm ${message.kind === "success" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
+              {message.text}
             </div>
           ) : null}
 
-          {message ? <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
-
-          <div className="card p-4">
-            <div className="grid gap-2">
-              <button type="button" className="btn-outline justify-center" onClick={saveDraft} disabled={Boolean(loading)}>
-                {loading === "save" ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
-                Save draft
-              </button>
-              <button type="button" className="btn-primary justify-center" onClick={renderPdf} disabled={Boolean(loading)}>
-                {loading === "render" ? <Loader2 className="animate-spin" size={17} /> : <CheckCircle2 size={17} />}
-                Generate PDF
-              </button>
-              <Link className="btn-outline justify-center" href={`/app/projects/${projectId}/plots/${plotId}?tab=documents`}>Back to documents</Link>
+          {missingOpen ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div className="font-semibold">Blank data to review</div>
+                <button type="button" className="rounded-lg p-1 hover:bg-white/70" onClick={() => setMissingOpen(false)} aria-label="Close missing fields">
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                {groupedMissing.map((group) => (
+                  <div key={group.label} className="rounded-lg bg-white/75 p-3">
+                    <div className="text-xs font-semibold uppercase tracking-wide text-amber-900">{group.label}</div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {group.items.map((variable) => (
+                        <span key={variable} className="rounded-full bg-amber-50 px-2 py-1 text-xs text-amber-900">{variable}</span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        </aside>
+          ) : null}
+        </div>
       </div>
 
-      <style>{`
-        .letter-paper-editor {
-          display: grid;
-          gap: 28px;
-          outline: none;
-        }
-        .letter-paper-editor [data-template="ambey-allotment"] {
-          display: grid;
-          gap: 28px;
-        }
-        .letter-paper-editor section[data-ambey-page] {
-          width: min(100%, 794px);
-          min-height: 1123px;
-          margin: 0 auto;
-          background: #fff;
-          border: 1px solid #dbe3ee;
-          box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16);
-          padding: 74px 86px;
-          color: #111827;
-          font-family: Arial, Helvetica, sans-serif;
-          font-size: 14px;
-          line-height: 1.55;
-        }
-        .letter-paper-editor section[data-ambey-page="1"],
-        .letter-paper-editor section[data-ambey-page="2"] {
-          padding-top: 180px;
-        }
-        .letter-paper-editor h1,
-        .letter-paper-editor h2,
-        .letter-paper-editor h3 {
-          margin: 0 0 14px;
-          color: #111827;
-          font-weight: 700;
-          text-align: center;
-        }
-        .letter-paper-editor p {
-          margin: 0 0 12px;
-        }
-        .letter-paper-editor .right {
-          text-align: right;
-        }
-        .letter-paper-editor .center {
-          text-align: center;
-        }
-        .letter-paper-editor .muted {
-          color: #475569;
-        }
-        .letter-paper-editor .photo-box,
-        .letter-paper-editor .site-plan-box {
-          display: grid;
-          min-height: 210px;
-          place-items: center;
-          border: 1px solid #94a3b8;
-          color: #64748b;
-        }
-        .letter-paper-editor table {
-          width: 100%;
-          border-collapse: collapse;
-          margin: 12px 0;
-        }
-        .letter-paper-editor th,
-        .letter-paper-editor td {
-          border: 1px solid #475569;
-          padding: 8px 10px;
-          vertical-align: top;
-        }
-        .letter-paper-editor .plain th,
-        .letter-paper-editor .plain td {
-          border: 0;
-          padding: 4px 0;
-        }
-        .letter-paper-editor ol,
-        .letter-paper-editor ul {
-          padding-left: 22px;
-        }
-        .letter-paper-editor li {
-          margin-bottom: 8px;
-        }
-        @media (max-width: 720px) {
-          .letter-paper-editor section[data-ambey-page] {
-            min-height: 0;
-            padding: 36px 24px;
-            font-size: 13px;
-          }
-          .letter-paper-editor section[data-ambey-page="1"],
-          .letter-paper-editor section[data-ambey-page="2"] {
-            padding-top: 82px;
-          }
-        }
-      `}</style>
+      <div className="mx-auto max-w-[1480px] px-4 py-6 lg:px-6">
+        {!mounted ? (
+          <section className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-card">
+            Opening letter studio...
+          </section>
+        ) : view === "edit" ? (
+          <section className="rounded-2xl border border-slate-200 bg-slate-200/70 p-3 shadow-inner md:p-6">
+            <div
+              ref={editorRef}
+              contentEditable
+              suppressContentEditableWarning
+              suppressHydrationWarning
+              className="letter-paper-editor"
+              onInput={() => setDirty(true)}
+              dangerouslySetInnerHTML={{ __html: draftHtml }}
+            />
+          </section>
+        ) : (
+          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+            {fileAssetId ? (
+              <div className="space-y-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                  <span className="font-medium">PDF file is ready. Review the paper below, then download or issue it.</span>
+                  <div className="flex flex-wrap gap-2">
+                    <a className="btn-outline h-9 px-3 text-xs" href={`/api/v1/files/${fileAssetId}/download?disposition=inline`} target="_blank" rel="noreferrer">
+                      <Eye size={14} />
+                      Open PDF
+                    </a>
+                    <a className="btn-gold h-9 px-3 text-xs" href={`/api/v1/files/${fileAssetId}/download`}>
+                      <Download size={14} />
+                      Download
+                    </a>
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 bg-slate-200/70 p-3 shadow-inner md:p-6">
+                  <div className="letter-paper-editor letter-paper-preview" dangerouslySetInnerHTML={{ __html: draftHtml }} />
+                </div>
+              </div>
+            ) : (
+              <div className="grid min-h-[520px] place-items-center rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                <div>
+                  <FileText className="mx-auto mb-3 text-slate-400" size={36} />
+                  <h2 className="font-semibold text-navy-900">No PDF preview yet</h2>
+                  <p className="mt-2 max-w-sm text-sm text-slate-500">Generate the PDF after reviewing the draft. The preview will open here automatically.</p>
+                  <button type="button" className="btn-primary mx-auto mt-4" onClick={renderPdf} disabled={Boolean(loading)}>
+                    {loading === "render" ? <Loader2 className="animate-spin" size={17} /> : <Eye size={17} />}
+                    Generate PDF
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        )}
+      </div>
+
     </div>
   );
+}
+
+function groupMissingVariables(missingVariables: string[]) {
+  const groups = [
+    { label: "Owner", items: [] as string[] },
+    { label: "Plot", items: [] as string[] },
+    { label: "Project / RERA", items: [] as string[] },
+    { label: "Stamp / Legal", items: [] as string[] },
+    { label: "Firm", items: [] as string[] },
+    { label: "Other", items: [] as string[] },
+  ];
+
+  for (const variable of missingVariables) {
+    const lower = variable.toLowerCase();
+    if (lower.startsWith("owner.")) groups[0].items.push(variable);
+    else if (lower.startsWith("plot.")) groups[1].items.push(variable);
+    else if (lower.startsWith("project.") || lower.startsWith("rera.")) groups[2].items.push(variable);
+    else if (lower.startsWith("stamp.") || lower.includes("registry") || lower.includes("legal")) groups[3].items.push(variable);
+    else if (lower.startsWith("firm.") || lower.startsWith("tenant.")) groups[4].items.push(variable);
+    else groups[5].items.push(variable);
+  }
+
+  return groups.filter((group) => group.items.length);
 }

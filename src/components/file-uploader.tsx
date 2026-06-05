@@ -1,7 +1,7 @@
 "use client";
 
 import { ChangeEvent, useState } from "react";
-import { FileVisibility } from "@prisma/client";
+import { FileStorageProvider, FileVisibility } from "@prisma/client";
 import { CheckCircle2, Loader2, UploadCloud, XCircle } from "lucide-react";
 
 type UploadedFile = {
@@ -9,6 +9,20 @@ type UploadedFile = {
   fileName: string;
   storageKey: string;
 };
+
+type UploadTarget = {
+  provider: FileStorageProvider;
+  storageKey: string;
+  url: string;
+};
+
+type UploadPlan =
+  | string
+  | {
+      primary: UploadTarget;
+      fallback?: UploadTarget;
+      preferredProvider?: FileStorageProvider;
+    };
 
 export function FileUploader({
   label,
@@ -56,16 +70,23 @@ export function FileUploader({
       if (!metaResponse.ok) throw new Error(meta.error ?? "File metadata creation failed");
       setProgress(35);
 
-      const putResponse = await fetch(meta.data.upload, {
-        method: "PUT",
-        headers: { "content-type": file.type || "application/octet-stream" },
-        body: file,
+      const uploadedTo = await uploadToTarget(meta.data.upload as UploadPlan, file);
+      setProgress(85);
+      const completeResponse = await fetch(`/api/v1/files/${meta.data.file.id}/upload-complete`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          storageProvider: uploadedTo.provider,
+          storageKey: uploadedTo.storageKey || meta.data.file.storageKey,
+          sizeBytes: file.size,
+        }),
       });
-      if (!putResponse.ok) throw new Error("Object storage upload failed");
+      const completeBody = await completeResponse.json();
+      if (!completeResponse.ok) throw new Error(completeBody.error ?? "Upload completed, but file metadata could not be updated");
 
       setProgress(100);
       setStatus("done");
-      onUploaded?.(meta.data.file);
+      onUploaded?.(completeBody.data ?? meta.data.file);
     } catch (error) {
       setStatus("error");
       setProgress(0);
@@ -93,4 +114,31 @@ export function FileUploader({
       ) : null}
     </div>
   );
+}
+
+async function uploadToTarget(upload: UploadPlan, file: File): Promise<UploadTarget> {
+  const contentType = file.type || "application/octet-stream";
+  if (typeof upload === "string") {
+    const response = await fetch(upload, { method: "PUT", headers: { "content-type": contentType }, body: file });
+    if (!response.ok) throw new Error("Object storage upload failed");
+    return {
+      provider: upload.includes("/api/v1/storage/upload") ? FileStorageProvider.LOCAL : FileStorageProvider.S3,
+      storageKey: "",
+      url: upload,
+    };
+  }
+
+  try {
+    await putFile(upload.primary, file, contentType);
+    return upload.primary;
+  } catch (primaryError) {
+    if (!upload.fallback) throw primaryError;
+    await putFile(upload.fallback, file, contentType);
+    return upload.fallback;
+  }
+}
+
+async function putFile(target: UploadTarget, file: File, contentType: string) {
+  const response = await fetch(target.url, { method: "PUT", headers: { "content-type": contentType }, body: file });
+  if (!response.ok) throw new Error(`${target.provider} upload failed`);
 }

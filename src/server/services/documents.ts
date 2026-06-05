@@ -56,9 +56,11 @@ export async function generateDocument(context: RequestContext, input: z.infer<t
     ],
   });
   const key = generatedDocumentStorageKey(context.tenantId, document.id);
-  await putGeneratedObject(key, pdf, "application/pdf");
+  const stored = await putGeneratedObject(key, pdf, "application/pdf");
   const file = await createGeneratedFileAsset(context, {
-    storageKey: key,
+    storageKey: stored.storageKey,
+    storageProvider: stored.storageProvider,
+    fallbackStorageKey: stored.fallbackStorageKey,
     fileName: `${document.number ?? document.id}.pdf`,
     mimeType: "application/pdf",
     sizeBytes: pdf.length,
@@ -78,7 +80,7 @@ export async function generateDocument(context: RequestContext, input: z.infer<t
     data: { documentId: readyDocument.id, fileAssetId: file.id },
   });
   await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "GeneratedDocument", entityId: document.id, after: document });
-  return { document: readyDocument, file, queue };
+  return { document: readyDocument, file, queue, storage: stored };
 }
 
 export async function createDocumentDraft(context: RequestContext, input: z.infer<typeof createDocumentDraftSchema>) {
@@ -146,9 +148,11 @@ export async function renderDocumentDraft(context: RequestContext, id: string) {
     html,
   });
   const key = generatedDocumentStorageKey(context.tenantId, document.id);
-  await putGeneratedObject(key, pdf, "application/pdf");
+  const stored = await putGeneratedObject(key, pdf, "application/pdf");
   const file = await createGeneratedFileAsset(context, {
-    storageKey: key,
+    storageKey: stored.storageKey,
+    storageProvider: stored.storageProvider,
+    fallbackStorageKey: stored.fallbackStorageKey,
     fileName: `${document.number ?? document.id}.pdf`,
     mimeType: "application/pdf",
     sizeBytes: pdf.length,
@@ -171,7 +175,7 @@ export async function renderDocumentDraft(context: RequestContext, id: string) {
     data: { documentId: rendered.id, fileAssetId: file.id },
   });
   await writeAuditEvent(context, { action: AuditAction.UPDATE, entityType: "GeneratedDocument", entityId: id, after: rendered as unknown as Prisma.InputJsonValue });
-  return { document: rendered, file };
+  return { document: rendered, file, storage: stored };
 }
 
 export const approveDocumentSchema = z.object({

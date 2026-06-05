@@ -1,10 +1,10 @@
-import { AuditAction, CadEntityType, CadFormat, CadScope, CadStatus, Prisma } from "@prisma/client";
+import { AuditAction, CadEntityType, CadFormat, CadScope, CadStatus, FileStorageProvider, Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../db";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { enqueueCadProcessing } from "../jobs";
-import { createUploadUrl, storageKey } from "../storage";
+import { createUploadTargets, storageKey } from "../storage";
 import { createNotification } from "./notifications";
 
 export const cadUploadSchema = z.object({
@@ -14,6 +14,11 @@ export const cadUploadSchema = z.object({
   format: z.nativeEnum(CadFormat),
   originalName: z.string().min(1),
   contentType: z.string().default("application/octet-stream"),
+});
+
+export const cadUploadCompleteSchema = z.object({
+  storageProvider: z.nativeEnum(FileStorageProvider),
+  storageKey: z.string().min(1),
 });
 
 export async function createCadUpload(context: RequestContext, input: z.infer<typeof cadUploadSchema>) {
@@ -29,6 +34,7 @@ export async function createCadUpload(context: RequestContext, input: z.infer<ty
     `${Date.now()}-${input.originalName}`,
   ]);
 
+  const upload = await createUploadTargets({ key, contentType: input.contentType });
   const cadFile = await prisma.cadFile.create({
     data: {
       tenantId: context.tenantId,
@@ -37,14 +43,13 @@ export async function createCadUpload(context: RequestContext, input: z.infer<ty
       parentId: input.parentId,
       format: input.format,
       originalName: input.originalName,
-      storageKey: key,
+      storageKey: upload.primary.storageKey,
       uploadedById: context.userId,
       version: version + 1,
       status: CadStatus.UPLOADED,
     },
   });
 
-  const upload = await createUploadUrl({ key, contentType: input.contentType });
   await writeAuditEvent(context, {
     action: AuditAction.UPLOAD,
     entityType: "CadFile",
@@ -57,6 +62,29 @@ export async function createCadUpload(context: RequestContext, input: z.infer<ty
     upload,
     queue: { queued: false, reason: "waiting_for_file_upload" },
   };
+}
+
+export async function completeCadUpload(context: RequestContext, id: string, input: z.infer<typeof cadUploadCompleteSchema>) {
+  const before = await prisma.cadFile.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  const tenantPrefix = `${context.tenantId}/`;
+  const localTenantPrefix = `local/${context.tenantId}/`;
+  if (!input.storageKey.startsWith(tenantPrefix) && !input.storageKey.startsWith(localTenantPrefix)) {
+    const error = new Error("Upload key does not belong to this tenant");
+    error.name = "ForbiddenError";
+    throw error;
+  }
+  const cadFile = await prisma.cadFile.update({
+    where: { id },
+    data: { storageKey: input.storageKey },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.UPDATE,
+    entityType: "CadFile",
+    entityId: id,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: { storageKey: cadFile.storageKey, storageProvider: input.storageProvider },
+  });
+  return cadFile;
 }
 
 export async function getCadStatus(context: RequestContext, id: string) {

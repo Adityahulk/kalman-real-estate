@@ -116,6 +116,11 @@ enum FileVisibility {
   SHARED
 }
 
+enum FileStorageProvider {
+  S3
+  LOCAL
+}
+
 enum RealEstateDocumentType {
   ALLOTMENT_LETTER
   TRANSFER_LETTER
@@ -483,6 +488,8 @@ model FileAsset {
   id          String         @id @default(cuid())
   tenantId    String
   storageKey  String
+  storageProvider FileStorageProvider @default(S3)
+  fallbackStorageKey String?
   fileName    String
   mimeType    String
   sizeBytes   Int

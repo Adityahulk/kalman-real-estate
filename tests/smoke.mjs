@@ -75,13 +75,34 @@ const cadUploadFlow = await request("/api/v1/cad/upload", {
   }),
 });
 assert(cadUploadFlow.response.status === 201, "CAD upload record creation failed");
-const cadUploadUrl = new URL(cadUploadFlow.json.data.upload, baseUrl);
-const cadPut = await fetch(cadUploadUrl, {
+const cadUploadTarget = typeof cadUploadFlow.json.data.upload === "string"
+  ? { url: cadUploadFlow.json.data.upload, storageProvider: "S3", storageKey: cadUploadFlow.json.data.cadFile.storageKey }
+  : cadUploadFlow.json.data.upload.primary;
+const cadFallbackTarget = typeof cadUploadFlow.json.data.upload === "string" ? null : cadUploadFlow.json.data.upload.fallback;
+let usedCadTarget = cadUploadTarget;
+let cadPut = await fetch(new URL(cadUploadTarget.url, baseUrl), {
   method: "PUT",
   headers: { cookie, "content-type": "application/dxf" },
   body: "0\nEOF\n",
-});
+}).catch(() => ({ status: 0 }));
+if (cadPut.status !== 200 && cadFallbackTarget) {
+  usedCadTarget = cadFallbackTarget;
+  cadPut = await fetch(new URL(cadFallbackTarget.url, baseUrl), {
+    method: "PUT",
+    headers: { cookie, "content-type": "application/dxf" },
+    body: "0\nEOF\n",
+  });
+}
 assert(cadPut.status === 200, "CAD binary upload failed");
+const cadComplete = await request(`/api/v1/cad/${cadUploadFlow.json.data.cadFile.id}/upload-complete`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({
+    storageProvider: usedCadTarget.provider ?? usedCadTarget.storageProvider,
+    storageKey: usedCadTarget.storageKey,
+  }),
+});
+assert(cadComplete.response.status === 200, "CAD upload completion failed");
 const cadQueue = await request(`/api/v1/cad/${cadUploadFlow.json.data.cadFile.id}/process`, {
   method: "POST",
   headers: { cookie },
