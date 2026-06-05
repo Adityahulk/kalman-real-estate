@@ -586,25 +586,14 @@ export function LetterStudioEditor({
             />
           </section>
         ) : (
-          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+          <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
             {fileAssetId ? (
-              <div className="space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                  <span className="font-medium">PDF file is ready. Review the paper below, then download or issue it.</span>
-                  <div className="flex flex-wrap gap-2">
-                    <a className="btn-outline h-9 px-3 text-xs" href={`/api/v1/files/${fileAssetId}/download?disposition=inline`} target="_blank" rel="noreferrer">
-                      <Eye size={14} />
-                      Open PDF
-                    </a>
-                    <a className="btn-gold h-9 px-3 text-xs" href={`/api/v1/files/${fileAssetId}/download`}>
-                      <Download size={14} />
-                      Download
-                    </a>
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-200/70 p-3 shadow-inner md:p-6">
-                  <div className="letter-paper-editor letter-paper-preview" dangerouslySetInnerHTML={{ __html: draftHtml }} />
-                </div>
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-200">
+                <iframe
+                  title="Generated PDF preview"
+                  className="h-[calc(100vh-15rem)] min-h-[640px] w-full bg-white"
+                  src={`/api/v1/files/${fileAssetId}/download?disposition=inline&proxy=1`}
+                />
               </div>
             ) : (
               <div className="grid min-h-[520px] place-items-center rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
