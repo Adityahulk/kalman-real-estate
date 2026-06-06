@@ -1,11 +1,11 @@
 import "@/server/load-env";
 import { createRequire } from "node:module";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
-import { CadEntityType, CadStatus, PrismaClient } from "@prisma/client";
+import { CadEntityType, CadStatus, InsightSeverity, PrismaClient } from "@prisma/client";
 import { Worker } from "bullmq";
 import IORedis from "ioredis";
 import { getObjectResilient } from "@/server/storage";
@@ -133,151 +133,157 @@ async function processCad(job: CadJob) {
   await prisma.cadFile.update({ where: { id: cadFile.id }, data: { status: cadFile.format === "DWG" ? CadStatus.CONVERTING : CadStatus.PARSING } });
 
   const buffer = await getObjectResilient(cadFile.storageKey);
-  const extracted = await extractWithProductionPipeline(cadFile.format, cadFile.originalName, buffer).catch(async (error) => {
-    if (cadFile.format !== "DXF") throw error;
-    const parsed = new DxfParser().parseSync(buffer.toString("utf8"));
-    const rawEntities = (parsed.entities ?? []) as DxfEntity[];
-    return {
-      layers: [...new Set(rawEntities.map((entity) => entity.layer).filter(Boolean))] as string[],
-      entities: rawEntities.map((entity) => ({
-        layer: entity.layer,
-        label: entity.text ?? entity.string ?? entity.layer ?? entity.type ?? "Entity",
-        type: classifyEntity(entity),
-        confidence: classifyEntity(entity) === CadEntityType.UNKNOWN ? 0.35 : 0.72,
-        geometry: geometryFor(entity),
-        measurements: entity.vertices && isClosed(entity.vertices) ? { areaSqft: polygonArea(entity.vertices) } : {},
-        status: classifyEntity(entity) === CadEntityType.UNKNOWN ? "SUGGESTED" : "CONFIRMED",
-      })),
-    };
+  const extracted: ExtractionResult = await extractWithProductionPipeline(cadFile.format, cadFile.originalName, buffer).catch(async (error) => {
+    if (cadFile.format !== "DXF") throw new Error(extractionErrorMessage(error));
+    try {
+      const parsed = new DxfParser().parseSync(buffer.toString("utf8"));
+      const rawEntities = (parsed.entities ?? []) as DxfEntity[];
+      return {
+        layers: [...new Set(rawEntities.map((entity) => entity.layer).filter(Boolean))] as string[],
+        entities: rawEntities.map((entity) => ({
+          layer: entity.layer,
+          label: entity.text ?? entity.string ?? entity.layer ?? entity.type ?? "Entity",
+          type: classifyEntity(entity),
+          confidence: classifyEntity(entity) === CadEntityType.UNKNOWN ? 0.35 : 0.72,
+          geometry: geometryFor(entity),
+          measurements: entity.vertices && isClosed(entity.vertices) ? { areaSqft: polygonArea(entity.vertices) } : {},
+          status: classifyEntity(entity) === CadEntityType.UNKNOWN ? "SUGGESTED" : "CONFIRMED",
+        })),
+        metadata: { extractorFallback: "dxf-parser" },
+      };
+    } catch (fallbackError) {
+      throw new Error(`DXF extraction failed: ${extractionErrorMessage(fallbackError)}`);
+    }
   });
   const rawEntities = extracted.entities;
   const layerNames = extracted.layers;
+  if (!rawEntities.length) {
+    throw new Error(
+      cadFile.format === "VECTOR_PDF"
+        ? "No usable vector geometry was extracted from this PDF. Export the source plan as a vector PDF or DXF."
+        : "No usable CAD entities were extracted from this DXF.",
+    );
+  }
   const bounds = calculateExtractedBounds(rawEntities);
 
   await prisma.cadFile.update({ where: { id: cadFile.id }, data: { status: CadStatus.EXTRACTING } });
+  await prisma.$transaction(async (tx) => {
+    const oldScenes = await tx.cadScene.findMany({
+      where: { tenantId: job.tenantId, cadFileId: cadFile.id },
+      select: { id: true, entities: { select: { id: true } } },
+    });
+    const oldSceneIds = oldScenes.map((scene) => scene.id);
+    const oldEntityIds = oldScenes.flatMap((scene) => scene.entities.map((entity) => entity.id));
+    if (oldEntityIds.length) await tx.spatialLink.deleteMany({ where: { tenantId: job.tenantId, cadEntityId: { in: oldEntityIds } } });
+    await tx.cadReviewIssue.deleteMany({ where: { tenantId: job.tenantId, cadFileId: cadFile.id } });
+    if (oldEntityIds.length) await tx.cadEntity.deleteMany({ where: { tenantId: job.tenantId, id: { in: oldEntityIds } } });
+    if (oldSceneIds.length) await tx.cadLayer.deleteMany({ where: { tenantId: job.tenantId, sceneId: { in: oldSceneIds } } });
+    if (oldSceneIds.length) await tx.cadScene.deleteMany({ where: { tenantId: job.tenantId, id: { in: oldSceneIds } } });
 
-  const scene = await prisma.cadScene.create({
-    data: {
-      tenantId: job.tenantId,
-      cadFileId: cadFile.id,
-      scope: cadFile.parentType,
-      parentId: cadFile.parentId,
-      bounds,
-      units: "cad-units",
-      sceneJson: { source: "dxf-parser", entityCount: rawEntities.length },
-    },
-  });
+    const scene = await tx.cadScene.create({
+      data: {
+        tenantId: job.tenantId,
+        cadFileId: cadFile.id,
+        scope: cadFile.parentType,
+        parentId: cadFile.parentId,
+        bounds,
+        units: cadFile.format === "VECTOR_PDF" ? "pdf-points" : "cad-units",
+        sceneJson: {
+          source: cadFile.format === "VECTOR_PDF" ? "pymupdf" : "ezdxf",
+          format: cadFile.format,
+          entityCount: rawEntities.length,
+          ...(extracted.metadata ?? {}),
+        },
+      },
+    });
 
-  const layers = await Promise.all(
-    layerNames.map((name) =>
-      prisma.cadLayer.create({
+    const layers = [];
+    for (const name of layerNames) {
+      layers.push(await tx.cadLayer.create({
         data: {
           tenantId: job.tenantId,
           sceneId: scene.id,
           name,
           purpose: classifyEntity({ layer: name }),
         },
-      }),
-    ),
-  );
-  const layerByName = new Map(layers.map((layer) => [layer.name, layer.id]));
+      }));
+    }
+    const layerByName = new Map(layers.map((layer) => [layer.name, layer.id]));
+    let warningCount = 0;
+    const entitiesForWarnings: Array<{ id: string; label?: string | null; type: CadEntityType; geometry?: object; sourceLayer?: string | null }> = [];
 
-  let warningCount = 0;
-  const entitiesForWarnings: Array<{ id: string; label?: string | null; type: CadEntityType; geometry?: object; sourceLayer?: string | null }> = [];
-  for (const entity of rawEntities) {
-    const type = entity.type as CadEntityType;
-    const confidence = entity.confidence ?? 0.35;
-
-    const cadEntity = await prisma.cadEntity.create({
-      data: {
-        tenantId: job.tenantId,
-        sceneId: scene.id,
-        layerId: entity.layer ? layerByName.get(entity.layer) : undefined,
+    for (const entity of rawEntities) {
+      const type = parseEntityType(entity.type);
+      const confidence = Math.min(1, Math.max(0, entity.confidence ?? 0.35));
+      const cadEntity = await tx.cadEntity.create({
+        data: {
+          tenantId: job.tenantId,
+          sceneId: scene.id,
+          layerId: entity.layer ? layerByName.get(entity.layer) : undefined,
+          type,
+          label: entity.label?.slice(0, 500),
+          confidence,
+          geometry: entity.geometry,
+          measurements: entity.measurements ?? {},
+          sourceLayer: entity.layer,
+          status: entity.status === "CONFIRMED" || entity.status === "REJECTED" ? entity.status : "SUGGESTED",
+        },
+      });
+      entitiesForWarnings.push({
+        id: cadEntity.id,
+        label: cadEntity.label,
         type,
-        label: entity.label,
-        confidence,
-        geometry: entity.geometry,
-        measurements: entity.measurements,
-        sourceLayer: entity.layer,
-        status: entity.status ?? (confidence >= 0.7 ? "CONFIRMED" : "SUGGESTED"),
-      },
-    });
-    entitiesForWarnings.push({
-      id: cadEntity.id,
-      label: cadEntity.label,
-      type,
-      geometry: cadEntity.geometry as object,
-      sourceLayer: cadEntity.sourceLayer,
-    });
+        geometry: cadEntity.geometry as object,
+        sourceLayer: cadEntity.sourceLayer,
+      });
 
-    if (type === CadEntityType.UNKNOWN) {
+      const warnings: Array<{ severity: InsightSeverity; code: string; message: string }> = [];
+      if (type === CadEntityType.UNKNOWN) {
+        warnings.push({ severity: InsightSeverity.MEDIUM, code: "UNKNOWN_ENTITY", message: "Entity could not be confidently classified from layer/text." });
+      }
+      if (isOpenPolyline(cadEntity.geometry)) {
+        warnings.push({ severity: InsightSeverity.LOW, code: "UNCLOSED_POLYLINE", message: "Polyline is open. Confirm before using it as a live plot or construction zone." });
+      }
+      if (type === CadEntityType.PLOT && isMissingUsefulLabel(cadEntity.label, cadEntity.sourceLayer)) {
+        warnings.push({ severity: InsightSeverity.MEDIUM, code: "MISSING_PLOT_LABEL", message: "Plot boundary has no clear plot number. Add or correct the label before publishing." });
+      }
+      for (const warning of warnings) {
+        warningCount += 1;
+        await tx.cadReviewIssue.create({
+          data: { tenantId: job.tenantId, cadFileId: cadFile.id, entityId: cadEntity.id, ...warning },
+        });
+      }
+    }
+
+    for (const duplicate of duplicateLabels(entitiesForWarnings)) {
       warningCount += 1;
-      await prisma.cadReviewIssue.create({
+      await tx.cadReviewIssue.create({
         data: {
           tenantId: job.tenantId,
           cadFileId: cadFile.id,
-          entityId: cadEntity.id,
+          entityId: duplicate.id,
           severity: "MEDIUM",
-          code: "UNKNOWN_ENTITY",
-          message: "Entity could not be confidently classified from layer/text.",
+          code: "DUPLICATE_LABEL",
+          message: `Duplicate CAD label "${duplicate.label}" detected. Confirm this is not the same plot/asset repeated.`,
         },
       });
     }
 
-    if (isOpenPolyline(cadEntity.geometry)) {
-      warningCount += 1;
-      await prisma.cadReviewIssue.create({
-        data: {
-          tenantId: job.tenantId,
-          cadFileId: cadFile.id,
-          entityId: cadEntity.id,
-          severity: "LOW",
-          code: "UNCLOSED_POLYLINE",
-          message: "Polyline is open. Confirm before using it as a live plot or construction zone.",
-        },
-      });
-    }
-
-    if (type === CadEntityType.PLOT && isMissingUsefulLabel(cadEntity.label, cadEntity.sourceLayer)) {
-      warningCount += 1;
-      await prisma.cadReviewIssue.create({
-        data: {
-          tenantId: job.tenantId,
-          cadFileId: cadFile.id,
-          entityId: cadEntity.id,
-          severity: "MEDIUM",
-          code: "MISSING_PLOT_LABEL",
-          message: "Plot boundary has no clear plot number. Add or correct the label before publishing.",
-        },
-      });
-    }
-  }
-
-  for (const duplicate of duplicateLabels(entitiesForWarnings)) {
-    warningCount += 1;
-    await prisma.cadReviewIssue.create({
+    await tx.cadFile.update({
+      where: { id: cadFile.id },
       data: {
-        tenantId: job.tenantId,
-        cadFileId: cadFile.id,
-        entityId: duplicate.id,
-        severity: "MEDIUM",
-        code: "DUPLICATE_LABEL",
-        message: `Duplicate CAD label "${duplicate.label}" detected. Confirm this is not the same plot/asset repeated.`,
+        status: CadStatus.REVIEW_REQUIRED,
+        errorMessage: null,
+        processingLog: {
+          format: cadFile.format,
+          parsedEntities: rawEntities.length,
+          layers: layerNames.length,
+          warnings: warningCount,
+          ...(extracted.metadata ?? {}),
+        },
       },
     });
-  }
-
-  await prisma.cadFile.update({
-    where: { id: cadFile.id },
-    data: {
-      status: CadStatus.REVIEW_REQUIRED,
-      processingLog: {
-        parsedEntities: rawEntities.length,
-        layers: layerNames.length,
-        warnings: warningCount,
-      },
-    },
-  });
+  }, { timeout: 120_000 });
 }
 
 type ExtractedEntity = {
@@ -290,26 +296,43 @@ type ExtractedEntity = {
   status?: string;
 };
 
-async function extractWithProductionPipeline(format: string, originalName: string, buffer: Buffer): Promise<{ layers: string[]; entities: ExtractedEntity[] }> {
+type ExtractionResult = {
+  layers: string[];
+  entities: ExtractedEntity[];
+  metadata?: Record<string, string | number | boolean | null>;
+};
+
+async function extractWithProductionPipeline(format: string, originalName: string, buffer: Buffer): Promise<ExtractionResult> {
   const dir = await mkdtemp(join(tmpdir(), "kalman-cad-"));
-  const safeName = basename(originalName).replace(/[^a-zA-Z0-9._ -]/g, "-") || (format === "VECTOR_PDF" ? "plan.pdf" : "plan.dxf");
-  const sourcePath = join(dir, safeName);
-  await writeFile(sourcePath, buffer);
-  let extractorFormat = format;
-  let extractorPath = sourcePath;
+  try {
+    const safeName = basename(originalName).replace(/[^a-zA-Z0-9._ -]/g, "-") || (format === "VECTOR_PDF" ? "plan.pdf" : "plan.dxf");
+    const sourcePath = join(dir, safeName);
+    await writeFile(sourcePath, buffer);
+    let extractorFormat = format;
+    let extractorPath = sourcePath;
 
-  if (format === "DWG") {
-    const odaBinary = process.env.ODA_CONVERTER_BIN;
-    if (!odaBinary) throw new Error("ODA_CONVERTER_BIN is not configured for DWG conversion");
-    await execFileAsync(odaBinary, [dir, dir, "ACAD2018", "DXF", "0", "1"]);
-    extractorPath = sourcePath.replace(/\.dwg$/i, ".dxf");
-    extractorFormat = "DXF";
+    if (format === "DWG") {
+      const odaBinary = process.env.ODA_CONVERTER_BIN;
+      if (!odaBinary) throw new Error("ODA_CONVERTER_BIN is not configured for DWG conversion");
+      await execFileAsync(odaBinary, [dir, dir, "ACAD2018", "DXF", "0", "1"]);
+      extractorPath = sourcePath.replace(/\.dwg$/i, ".dxf");
+      extractorFormat = "DXF";
+    }
+
+    const python = process.env.PYTHON_BIN ?? "python3";
+    const script = join(process.cwd(), "src/workers/cad-python/extract_cad.py");
+    const { stdout } = await execFileAsync(python, [script, extractorPath, extractorFormat], {
+      maxBuffer: Number(process.env.CAD_EXTRACTOR_MAX_OUTPUT_MB ?? 100) * 1024 * 1024,
+      timeout: Number(process.env.CAD_EXTRACTION_TIMEOUT_MS ?? 300_000),
+    });
+    const result = JSON.parse(stdout) as ExtractionResult;
+    if (!Array.isArray(result.layers) || !Array.isArray(result.entities)) {
+      throw new Error("CAD extractor returned an invalid result");
+    }
+    return result;
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
-
-  const python = process.env.PYTHON_BIN ?? "python3";
-  const script = join(process.cwd(), "src/workers/cad-python/extract_cad.py");
-  const { stdout } = await execFileAsync(python, [script, extractorPath, extractorFormat], { maxBuffer: 10 * 1024 * 1024 });
-  return JSON.parse(stdout) as { layers: string[]; entities: ExtractedEntity[] };
 }
 
 function calculateExtractedBounds(entities: ExtractedEntity[]) {
@@ -326,7 +349,8 @@ function calculateExtractedBounds(entities: ExtractedEntity[]) {
     }
   };
   entities.forEach((entity) => visit(entity.geometry));
-  return { minX: Math.min(...xs, 0), minY: Math.min(...ys, 0), maxX: Math.max(...xs, 0), maxY: Math.max(...ys, 0) };
+  if (!xs.length || !ys.length) throw new Error("Extracted CAD geometry has no usable coordinates");
+  return { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
 }
 
 new Worker<CadJob>(
@@ -374,4 +398,24 @@ function duplicateLabels(entities: Array<{ id: string; label?: string | null; ty
     seen.set(key, [...(seen.get(key) ?? []), { id: entity.id, label }]);
   }
   return [...seen.values()].filter((items) => items.length > 1).flat();
+}
+
+function parseEntityType(value: string) {
+  return Object.values(CadEntityType).includes(value as CadEntityType) ? value as CadEntityType : CadEntityType.UNKNOWN;
+}
+
+function extractionErrorMessage(error: unknown) {
+  const value = error as { stderr?: unknown; message?: unknown };
+  const stderr = typeof value?.stderr === "string" ? value.stderr : "";
+  const runtimeLine = stderr
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .reverse()
+    .find((line) => line.startsWith("RuntimeError:"));
+  if (runtimeLine) return runtimeLine.replace(/^RuntimeError:\s*/, "");
+  if (typeof value?.message === "string") {
+    if (value.message.includes("timed out")) return "CAD extraction timed out. Simplify or split the drawing and try again.";
+    return value.message.split(/\r?\n/)[0];
+  }
+  return "CAD extraction failed";
 }

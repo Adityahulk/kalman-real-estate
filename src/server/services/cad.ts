@@ -31,6 +31,7 @@ type StoredCadUpload = z.infer<typeof cadUploadSchema> & {
 
 export async function createStoredCadUpload(context: RequestContext, input: StoredCadUpload) {
   await assertCadParentInTenant(context, input);
+  validateCadBytes(input.bytes, input.format);
   const originalName = safeCadFileName(input.originalName, input.format);
   const key = storageKey([
     context.tenantId,
@@ -462,6 +463,7 @@ export async function replaceCadFile(
   if (before.status === CadStatus.PUBLISHED) {
     throwBadRequest("Published CAD versions are immutable. Upload a new CAD version instead.");
   }
+  validateCadBytes(input.bytes, input.format);
 
   const originalName = safeCadFileName(input.originalName, input.format);
   const key = storageKey([
@@ -511,6 +513,20 @@ export async function replaceCadFile(
   });
 
   return { cadFile, storage: stored, queue };
+}
+
+function validateCadBytes(bytes: Buffer, format: CadFormat) {
+  if (format === CadFormat.VECTOR_PDF && !bytes.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
+    throwBadRequest("The uploaded file is not a valid PDF. Export the drawing again as a vector PDF.");
+  }
+  if (format === CadFormat.DXF) {
+    const header = bytes.subarray(0, Math.min(bytes.length, 4096)).toString("latin1");
+    const isAsciiDxf = /\bSECTION\b/i.test(header) || /\bENTITIES\b/i.test(header);
+    const isBinaryDxf = header.startsWith("AutoCAD Binary DXF");
+    if (!isAsciiDxf && !isBinaryDxf) {
+      throwBadRequest("The uploaded file does not appear to be a valid DXF. Export it again from the CAD application.");
+    }
+  }
 }
 
 export async function getCadEntityBusinessLink(context: RequestContext, entityId: string) {

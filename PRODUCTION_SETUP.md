@@ -201,6 +201,10 @@ docker compose -f docker-compose.prod.yml --env-file .env.production build cad-w
 ```env
 ODA_CONVERTER_BIN="/opt/oda/ODAFileConverter"
 PYTHON_BIN="/usr/bin/python3"
+MAX_CAD_UPLOAD_MB="100"
+CAD_EXTRACTION_TIMEOUT_MS="300000"
+CAD_EXTRACTOR_MAX_OUTPUT_MB="100"
+MAX_PDF_CAD_ENTITIES="25000"
 ```
 
 If `ODA_APPIMAGE_URL` is empty, the CAD worker still supports DXF and vector PDF through Python, but DWG conversion remains disabled and `/api/v1/cad/health` will report `dwg: false`.

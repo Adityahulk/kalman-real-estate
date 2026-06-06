@@ -20,10 +20,11 @@ export const aiQueue = queue<AiReportJob>("ai.report");
 export async function enqueueCadProcessing(job: CadProcessJob) {
   if (!cadQueue) return { queued: false, reason: "REDIS_URL not configured" };
   const result = await cadQueue.add("process-cad", job, {
+    jobId: job.cadFileId,
     attempts: 3,
     backoff: { type: "exponential", delay: 10_000 },
-    removeOnComplete: 100,
-    removeOnFail: 500,
+    removeOnComplete: true,
+    removeOnFail: true,
   });
   return { queued: true, jobId: result.id };
 }
