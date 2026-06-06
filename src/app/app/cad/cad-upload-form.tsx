@@ -2,12 +2,10 @@
 
 import { ChangeEvent, FormEvent, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { CadFormat, CadScope, FileStorageProvider } from "@prisma/client";
+import { CadFormat, CadScope } from "@prisma/client";
 import { Loader2, Upload } from "lucide-react";
 
 type ProjectOption = { id: string; name: string };
-type UploadTarget = { provider: FileStorageProvider; storageKey: string; url: string };
-type UploadPlan = string | { primary: UploadTarget; fallback?: UploadTarget; preferredProvider?: FileStorageProvider };
 
 export function CadUploadForm({
   projects,
@@ -48,68 +46,33 @@ export function CadUploadForm({
     }
     setLoading(true);
     setMessage("");
-    setStage("preparing");
-
+    setStage("uploading");
+    const form = new FormData();
+    form.set("file", selectedFile);
+    form.set("projectId", (fixedProjectId ?? projectId) || "");
+    form.set("parentType", fixedParentType ?? parentType);
+    form.set("parentId", (fixedParentId ?? parentId) || projectId);
+    form.set("format", format);
     const response = await fetch("/api/v1/cad/upload", {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        projectId: (fixedProjectId ?? projectId) || undefined,
-        parentType: fixedParentType ?? parentType,
-        parentId: (fixedParentId ?? parentId) || projectId,
-        format,
-        originalName: selectedFile?.name ?? originalName,
-        contentType: selectedFile?.type || (format === "VECTOR_PDF" ? "application/pdf" : "application/octet-stream"),
-      }),
+      body: form,
     });
-    const payload = await response.json();
+    const payload = await readApiResponse(response);
 
     if (!response.ok) {
       setLoading(false);
       setStage("idle");
-      setMessage(payload.error ?? "CAD upload setup failed");
-      return;
-    }
-
-    setStage("uploading");
-    let uploadedTo: UploadTarget;
-    try {
-      uploadedTo = await uploadToTarget(payload.data.upload as UploadPlan, selectedFile);
-    } catch (error) {
-      setLoading(false);
-      setStage("idle");
-      setMessage(error instanceof Error ? error.message : "CAD upload failed. Please retry.");
-      return;
-    }
-    const completeResponse = await fetch(`/api/v1/cad/${payload.data.cadFile.id}/upload-complete`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        storageProvider: uploadedTo.provider,
-        storageKey: uploadedTo.storageKey || payload.data.cadFile.storageKey,
-      }),
-    });
-    const completePayload = await completeResponse.json();
-    if (!completeResponse.ok) {
-      setLoading(false);
-      setStage("idle");
-      setMessage(completePayload.error ?? "CAD uploaded, but the file record could not be finalized.");
-      return;
-    }
-
-    setStage("queueing");
-    const queueResponse = await fetch(`/api/v1/cad/${payload.data.cadFile.id}/process`, { method: "POST" });
-    const queuePayload = await queueResponse.json();
-    if (!queueResponse.ok) {
-      setLoading(false);
-      setStage("idle");
-      setMessage(queuePayload.error ?? "File uploaded, but processing could not be queued.");
+      setMessage(payload.error ?? "CAD upload failed");
       return;
     }
 
     setLoading(false);
     setStage("done");
-    setMessage(`Uploaded ${payload.data.cadFile.originalName}. CAD processing has been queued.`);
+    setMessage(
+      payload.data.queue?.queued
+        ? `Uploaded ${payload.data.cadFile.originalName}. CAD processing has been queued.`
+        : `Uploaded ${payload.data.cadFile.originalName}, but processing could not be queued: ${payload.data.queue?.reason ?? "queue unavailable"}.`,
+    );
     if (redirectToReview) router.push(`/app/cad/${payload.data.cadFile.id}`);
     router.refresh();
   }
@@ -193,8 +156,8 @@ export function CadUploadForm({
 
       {loading ? (
         <div className="mt-4 rounded-lg bg-gold-50 px-3 py-2 text-sm text-navy-900">
-          {stage === "preparing" ? "Preparing CAD record..." : null}
-          {stage === "uploading" ? "Uploading CAD file..." : null}
+          {stage === "preparing" ? "Preparing CAD upload..." : null}
+          {stage === "uploading" ? "Uploading CAD file and queueing extraction..." : null}
           {stage === "queueing" ? "Queueing extraction worker..." : null}
         </div>
       ) : null}
@@ -208,29 +171,16 @@ export function CadUploadForm({
   );
 }
 
-async function uploadToTarget(upload: UploadPlan, file: File): Promise<UploadTarget> {
-  const contentType = file.type || "application/octet-stream";
-  if (typeof upload === "string") {
-    const response = await fetch(upload, { method: "PUT", headers: { "content-type": contentType }, body: file });
-    if (!response.ok) throw new Error("CAD upload failed");
+async function readApiResponse(response: Response) {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
     return {
-      provider: upload.includes("/api/v1/storage/upload") ? FileStorageProvider.LOCAL : FileStorageProvider.S3,
-      storageKey: "",
-      url: upload,
+      ok: false,
+      error: response.status === 413
+        ? "The CAD file is larger than the server upload limit."
+        : `CAD upload failed with HTTP ${response.status}.`,
     };
   }
-
-  try {
-    await putFile(upload.primary, file, contentType);
-    return upload.primary;
-  } catch (primaryError) {
-    if (!upload.fallback) throw primaryError;
-    await putFile(upload.fallback, file, contentType);
-    return upload.fallback;
-  }
-}
-
-async function putFile(target: UploadTarget, file: File, contentType: string) {
-  const response = await fetch(target.url, { method: "PUT", headers: { "content-type": contentType }, body: file });
-  if (!response.ok) throw new Error(`${target.provider} upload failed`);
 }

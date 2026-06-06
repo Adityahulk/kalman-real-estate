@@ -15,10 +15,11 @@ import {
   RotateCcw,
   Search,
   Send,
+  Upload,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
-import { FormEvent, MouseEvent, PointerEvent, WheelEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, MouseEvent, PointerEvent, WheelEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -281,6 +282,39 @@ export function CadWorkspace({
     router.refresh();
   }
 
+  async function replaceFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    const lower = file.name.toLowerCase();
+    if (!lower.endsWith(".dxf") && !lower.endsWith(".pdf")) {
+      setMessage("Choose a DXF or vector PDF file.");
+      return;
+    }
+
+    setLoading(true);
+    setMessage("Uploading the replacement CAD file...");
+    const form = new FormData();
+    form.set("file", file);
+    const response = await fetch(`/api/v1/cad/${cadFile.id}/file`, {
+      method: "PUT",
+      body: form,
+    });
+    const body = await readApiResponse(response);
+    setLoading(false);
+    if (!response.ok) {
+      setMessage(body.error ?? "Replacement upload failed.");
+      return;
+    }
+    setStatusSnapshot({ status: body.data.cadFile.status, errorMessage: null });
+    setMessage(
+      body.data.queue?.queued
+        ? "Replacement file uploaded. CAD processing has been queued."
+        : `Replacement file uploaded, but the worker queue is unavailable: ${body.data.queue?.reason ?? "unknown reason"}.`,
+    );
+    router.refresh();
+  }
+
   if (!scene) {
     return (
       <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-card">
@@ -300,10 +334,17 @@ export function CadWorkspace({
           </div>
           {message ? <div className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
           {effectiveStatus === "FAILED" || effectiveStatus === "UPLOADED" ? (
-            <button className="btn-primary mt-6" onClick={retry} disabled={loading}>
-              {loading ? <Loader2 className="animate-spin" size={17} /> : <RotateCcw size={17} />}
-              Retry processing
-            </button>
+            <div className="mt-6 flex flex-wrap justify-center gap-3">
+              <button className="btn-primary" onClick={retry} disabled={loading}>
+                {loading ? <Loader2 className="animate-spin" size={17} /> : <RotateCcw size={17} />}
+                Retry processing
+              </button>
+              <label className="btn-outline cursor-pointer">
+                <Upload size={17} />
+                Re-upload CAD file
+                <input className="sr-only" type="file" accept=".dxf,.pdf" onChange={replaceFile} disabled={loading} />
+              </label>
+            </div>
           ) : null}
         </div>
       </div>
@@ -626,6 +667,20 @@ function statusHelp(status: string) {
 
 function cadStatusRank(status: string) {
   return ["UPLOADED", "CONVERTING", "PARSING", "EXTRACTING", "REVIEW_REQUIRED", "PUBLISHED"].indexOf(status);
+}
+
+async function readApiResponse(response: Response) {
+  const text = await response.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {
+      ok: false,
+      error: response.status === 413
+        ? "The CAD file is larger than the server upload limit."
+        : `CAD request failed with HTTP ${response.status}.`,
+    };
+  }
 }
 
 function ToolbarButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {

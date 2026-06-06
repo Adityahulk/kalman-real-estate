@@ -4,7 +4,7 @@ import { prisma } from "../db";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { enqueueCadProcessing } from "../jobs";
-import { createUploadTargets, storageKey } from "../storage";
+import { createUploadTargets, getObjectResilient, putObjectResilient, storageKey } from "../storage";
 import { createNotification } from "./notifications";
 
 export const cadUploadSchema = z.object({
@@ -24,6 +24,64 @@ export const cadUploadCompleteSchema = z.object({
 export const deleteCadSchema = z.object({
   reason: z.string().optional(),
 });
+
+type StoredCadUpload = z.infer<typeof cadUploadSchema> & {
+  bytes: Buffer;
+};
+
+export async function createStoredCadUpload(context: RequestContext, input: StoredCadUpload) {
+  await assertCadParentInTenant(context, input);
+  const originalName = safeCadFileName(input.originalName, input.format);
+  const key = storageKey([
+    context.tenantId,
+    "cad",
+    input.parentType.toLowerCase(),
+    input.parentId,
+    `${Date.now()}-${originalName}`,
+  ]);
+  const stored = await putObjectResilient(key, input.bytes, input.contentType, {
+    mirrorLocalOnS3Success: true,
+  });
+  const version = await prisma.cadFile.count({
+    where: { tenantId: context.tenantId, parentType: input.parentType, parentId: input.parentId },
+  });
+  const cadFile = await prisma.cadFile.create({
+    data: {
+      tenantId: context.tenantId,
+      projectId: input.projectId,
+      parentType: input.parentType,
+      parentId: input.parentId,
+      format: input.format,
+      originalName,
+      storageKey: stored.storageKey,
+      uploadedById: context.userId,
+      version: version + 1,
+      status: CadStatus.UPLOADED,
+      processingLog: {
+        storageProvider: stored.storageProvider,
+        fallbackStorageKey: stored.fallbackStorageKey,
+        storageWarning: stored.warning,
+        storedAt: new Date().toISOString(),
+      },
+    },
+  });
+
+  const queue = await enqueueCadProcessing({ cadFileId: cadFile.id, tenantId: context.tenantId });
+  await writeAuditEvent(context, {
+    action: AuditAction.UPLOAD,
+    entityType: "CadFile",
+    entityId: cadFile.id,
+    after: {
+      cadFileId: cadFile.id,
+      originalName: cadFile.originalName,
+      storageKey: cadFile.storageKey,
+      storageProvider: stored.storageProvider,
+      processingQueued: queue.queued,
+    },
+  });
+
+  return { cadFile, storage: stored, queue };
+}
 
 export async function createCadUpload(context: RequestContext, input: z.infer<typeof cadUploadSchema>) {
   await assertCadParentInTenant(context, input);
@@ -86,6 +144,11 @@ export async function completeCadUpload(context: RequestContext, id: string, inp
     const error = new Error("Upload key does not belong to this tenant");
     error.name = "ForbiddenError";
     throw error;
+  }
+  try {
+    await getObjectResilient(input.storageKey);
+  } catch {
+    throwBadRequest("The CAD file was not received by storage. Please upload the file again.");
   }
   const cadFile = await prisma.cadFile.update({
     where: { id },
@@ -363,6 +426,11 @@ export async function startCadProcessing(context: RequestContext, id: string, re
     where: { id, tenantId: context.tenantId },
   });
   if (cadFile.status === CadStatus.PUBLISHED) throwBadRequest("Published CAD versions are immutable and cannot be processed again");
+  try {
+    await getObjectResilient(cadFile.storageKey);
+  } catch {
+    throwBadRequest("The uploaded CAD file is missing from storage. Re-upload the DXF file to repair this CAD record.");
+  }
 
   const updated = await prisma.cadFile.update({
     where: { id },
@@ -381,6 +449,68 @@ export async function startCadProcessing(context: RequestContext, id: string, re
     data: { cadFileId: id, status: updated.status, queue },
   });
   return { cadFile: updated, queue };
+}
+
+export async function replaceCadFile(
+  context: RequestContext,
+  id: string,
+  input: { bytes: Buffer; originalName: string; contentType: string; format: CadFormat },
+) {
+  const before = await prisma.cadFile.findFirstOrThrow({
+    where: { id, tenantId: context.tenantId },
+  });
+  if (before.status === CadStatus.PUBLISHED) {
+    throwBadRequest("Published CAD versions are immutable. Upload a new CAD version instead.");
+  }
+
+  const originalName = safeCadFileName(input.originalName, input.format);
+  const key = storageKey([
+    context.tenantId,
+    "cad",
+    before.parentType.toLowerCase(),
+    before.parentId,
+    `${Date.now()}-${originalName}`,
+  ]);
+  const stored = await putObjectResilient(key, input.bytes, input.contentType, {
+    mirrorLocalOnS3Success: true,
+  });
+  const cadFile = await prisma.cadFile.update({
+    where: { id },
+    data: {
+      originalName,
+      format: input.format,
+      storageKey: stored.storageKey,
+      status: CadStatus.UPLOADED,
+      errorMessage: null,
+      processingLog: {
+        storageProvider: stored.storageProvider,
+        fallbackStorageKey: stored.fallbackStorageKey,
+        storageWarning: stored.warning,
+        replacedAt: new Date().toISOString(),
+      },
+    },
+  });
+  const queue = await enqueueCadProcessing({ cadFileId: cadFile.id, tenantId: context.tenantId });
+
+  await writeAuditEvent(context, {
+    action: AuditAction.UPLOAD,
+    entityType: "CadFile",
+    entityId: id,
+    before: {
+      originalName: before.originalName,
+      storageKey: before.storageKey,
+      status: before.status,
+    },
+    after: {
+      originalName: cadFile.originalName,
+      storageKey: cadFile.storageKey,
+      storageProvider: stored.storageProvider,
+      replacementUpload: true,
+      processingQueued: queue.queued,
+    },
+  });
+
+  return { cadFile, storage: stored, queue };
 }
 
 export async function getCadEntityBusinessLink(context: RequestContext, entityId: string) {
