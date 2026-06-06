@@ -233,13 +233,18 @@ Run CAD separately from the web process. Use at least 4 GB RAM for ordinary plan
 
 PaddleOCR models are downloaded while building `Dockerfile.cad-worker`, copied into the non-root runtime user home, and remain inside the image. Production processing does not depend on downloading OCR models at job time.
 
+PaddleOCR imports OpenCV during the image build. The CAD image installs Debian's `libgl1` package to provide the required `libGL.so.1` runtime without requiring a desktop environment.
+
 After deploying this migration, rebuild the CAD worker instead of restarting an old image:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.production build --no-cache cad-worker web migrate
+COMPOSE_PARALLEL_LIMIT=1 docker compose -f docker-compose.prod.yml --env-file .env.production build --no-cache cad-worker
+COMPOSE_PARALLEL_LIMIT=1 docker compose -f docker-compose.prod.yml --env-file .env.production build web migrate
 docker compose -f docker-compose.prod.yml --env-file .env.production run --rm migrate
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d --force-recreate web cad-worker
 ```
+
+The serial build commands are especially important on a 1 GB deployment host; they prevent several large images from being exported concurrently.
 
 Verify the strict extractor locally:
 
