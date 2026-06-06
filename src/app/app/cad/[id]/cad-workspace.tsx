@@ -89,6 +89,12 @@ type BusinessLink = {
   record: Record<string, unknown> | null;
 };
 
+type ViewPoint = { x: number; y: number };
+type ViewTransform = { scale: number; offset: ViewPoint };
+
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 12;
+
 const typeStyle: Record<string, { stroke: string; fill: string; label: string }> = {
   PLOT: { stroke: "#f4c542", fill: "rgba(244,197,66,0.22)", label: "Plot" },
   ROAD: { stroke: "#94a3b8", fill: "rgba(148,163,184,0.24)", label: "Road" },
@@ -121,7 +127,7 @@ export function CadWorkspace({
   const viewport = useMemo(() => makeViewport(scene), [scene]);
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
+  const [drag, setDrag] = useState<{ pointer: ViewPoint; offset: ViewPoint } | null>(null);
   const [selectedId, setSelectedId] = useState(scene?.entities[0]?.id ?? "");
   const [query, setQuery] = useState("");
   const [hiddenLayers, setHiddenLayers] = useState<Set<string>>(new Set());
@@ -134,6 +140,7 @@ export function CadWorkspace({
     errorMessage: cadFile.errorMessage,
   });
   const svgRef = useRef<SVGSVGElement | null>(null);
+  const transformRef = useRef<ViewTransform>({ scale: 1, offset: { x: 0, y: 0 } });
 
   const visibleEntities = useMemo(() => {
     if (!scene) return [];
@@ -209,28 +216,82 @@ export function CadWorkspace({
   }
 
   function fit() {
-    setScale(1);
-    setOffset({ x: 0, y: 0 });
+    updateTransform(1, { x: 0, y: 0 });
   }
 
   function onWheel(event: WheelEvent<SVGSVGElement>) {
     event.preventDefault();
-    const direction = event.deltaY > 0 ? -0.1 : 0.1;
-    setScale((current) => Math.min(5, Math.max(0.35, Number((current + direction).toFixed(2)))));
+    const anchor = clientToSvgPoint(event.clientX, event.clientY);
+    if (!anchor) return;
+    const factor = Math.exp(-event.deltaY * 0.0015);
+    zoomAt(transformRef.current.scale * factor, anchor);
   }
 
   function onPointerDown(event: PointerEvent<SVGSVGElement>) {
     if ((event.target as Element).closest("[data-entity]")) return;
-    setDrag({ x: event.clientX - offset.x, y: event.clientY - offset.y });
+    const pointer = clientToSvgPoint(event.clientX, event.clientY);
+    if (!pointer) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDrag({ pointer, offset: transformRef.current.offset });
   }
 
   function onPointerMove(event: PointerEvent<SVGSVGElement>) {
     if (!drag) return;
-    setOffset({ x: event.clientX - drag.x, y: event.clientY - drag.y });
+    const pointer = clientToSvgPoint(event.clientX, event.clientY);
+    if (!pointer) return;
+    updateTransform(transformRef.current.scale, {
+      x: drag.offset.x + pointer.x - drag.pointer.x,
+      y: drag.offset.y + pointer.y - drag.pointer.y,
+    });
   }
 
-  function onPointerUp() {
+  function onPointerUp(event?: PointerEvent<SVGSVGElement>) {
+    if (event?.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
     setDrag(null);
+  }
+
+  function updateTransform(nextScale: number, nextOffset: ViewPoint) {
+    const transform = {
+      scale: Number(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextScale)).toFixed(3)),
+      offset: nextOffset,
+    };
+    transformRef.current = transform;
+    setScale(transform.scale);
+    setOffset(transform.offset);
+  }
+
+  function zoomAt(nextScale: number, anchor: ViewPoint) {
+    const current = transformRef.current;
+    const clampedScale = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextScale));
+    if (clampedScale === current.scale) return;
+    const ratio = clampedScale / current.scale;
+    updateTransform(clampedScale, {
+      x: anchor.x - (anchor.x - current.offset.x) * ratio,
+      y: anchor.y - (anchor.y - current.offset.y) * ratio,
+    });
+  }
+
+  function zoomFromToolbar(factor: number) {
+    const svg = svgRef.current;
+    const rect = svg?.getBoundingClientRect();
+    const anchor = rect ? clientToSvgPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) : null;
+    zoomAt(transformRef.current.scale * factor, anchor ?? {
+      x: viewport.width / 2,
+      y: viewport.height / 2,
+    });
+  }
+
+  function clientToSvgPoint(clientX: number, clientY: number) {
+    const svg = svgRef.current;
+    const matrix = svg?.getScreenCTM();
+    if (!svg || !matrix) return null;
+    const point = svg.createSVGPoint();
+    point.x = clientX;
+    point.y = clientY;
+    const transformed = point.matrixTransform(matrix.inverse());
+    return { x: transformed.x, y: transformed.y };
   }
 
   async function saveSelected(event: FormEvent<HTMLFormElement>) {
@@ -436,10 +497,9 @@ export function CadWorkspace({
         <section className="relative min-h-[620px] overflow-hidden bg-[#020617]">
           <div className="absolute left-4 right-4 top-4 z-10 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-slate-950/80 p-1 text-white backdrop-blur">
-              <ToolbarButton label="Zoom in" onClick={() => setScale((value) => Math.min(5, value + 0.2))}><ZoomIn size={16} /></ToolbarButton>
-              <ToolbarButton label="Zoom out" onClick={() => setScale((value) => Math.max(0.35, value - 0.2))}><ZoomOut size={16} /></ToolbarButton>
+              <ToolbarButton label="Zoom in" onClick={() => zoomFromToolbar(1.25)}><ZoomIn size={16} /></ToolbarButton>
+              <ToolbarButton label="Zoom out" onClick={() => zoomFromToolbar(0.8)}><ZoomOut size={16} /></ToolbarButton>
               <ToolbarButton label="Fit" onClick={fit}><Maximize2 size={16} /></ToolbarButton>
-              <ToolbarButton label="Reset" onClick={fit}><RotateCcw size={16} /></ToolbarButton>
               <span className="px-2 text-xs text-slate-300">{Math.round(scale * 100)}%</span>
             </div>
             <div className="rounded-lg border border-white/10 bg-slate-950/80 px-3 py-2 text-xs text-slate-300 backdrop-blur">
@@ -455,7 +515,7 @@ export function CadWorkspace({
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
-            onPointerLeave={onPointerUp}
+            onPointerCancel={onPointerUp}
           >
             <defs>
               <pattern id="cad-grid" width="40" height="40" patternUnits="userSpaceOnUse">
@@ -467,7 +527,7 @@ export function CadWorkspace({
             </defs>
             <rect width={viewport.width} height={viewport.height} fill="#020617" />
             <rect width={viewport.width} height={viewport.height} fill="url(#cad-grid)" />
-            <g transform={`translate(${offset.x} ${offset.y}) scale(${scale}) translate(${viewport.pad} ${viewport.pad})`}>
+            <g transform={`translate(${offset.x} ${offset.y}) scale(${scale}) translate(${viewport.padX} ${viewport.padY})`}>
               {visibleEntities.map((entity) => (
                 <EntityShape
                   key={entity.id}
@@ -486,9 +546,11 @@ export function CadWorkspace({
           <div className="absolute bottom-4 left-4 rounded-lg border border-white/10 bg-slate-950/80 p-3 text-white backdrop-blur">
             <div className="mb-2 text-xs uppercase tracking-wide text-slate-400">Minimap</div>
             <svg viewBox={`0 0 ${viewport.width} ${viewport.height}`} className="h-28 w-44 rounded bg-slate-900">
-              {visibleEntities.map((entity) => (
-                <EntityShape key={entity.id} entity={entity} viewport={viewport} minimap selected={entity.id === selected?.id} />
-              ))}
+              <g transform={`translate(${viewport.padX} ${viewport.padY})`}>
+                {visibleEntities.map((entity) => (
+                  <EntityShape key={entity.id} entity={entity} viewport={viewport} minimap selected={entity.id === selected?.id} />
+                ))}
+              </g>
             </svg>
           </div>
         </section>
@@ -796,20 +858,36 @@ function makeViewport(scene: Scene | null) {
     const geometry = entity.geometry && typeof entity.geometry === "object" ? entity.geometry as Record<string, unknown> : {};
     return extractPoints(geometry);
   }) ?? [];
+  if (!allPoints.length) {
+    return {
+      minX: 0,
+      maxX: 1000,
+      minY: 0,
+      maxY: 700,
+      padX: 80,
+      padY: 80,
+      width: 1160,
+      height: 860,
+    };
+  }
   const xs = allPoints.map((point) => point[0]);
   const ys = allPoints.map((point) => point[1]);
-  const minX = Math.min(...xs, 0);
-  const maxX = Math.max(...xs, 1000);
-  const minY = Math.min(...ys, 0);
-  const maxY = Math.max(...ys, 700);
-  const pad = 80;
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const contentWidth = Math.max(1, maxX - minX);
+  const contentHeight = Math.max(1, maxY - minY);
+  const width = Math.max(900, contentWidth + 160);
+  const height = Math.max(620, contentHeight + 160);
   return {
     minX,
     maxX,
     minY,
     maxY,
-    pad,
-    width: Math.max(900, maxX - minX + pad * 2),
-    height: Math.max(620, maxY - minY + pad * 2),
+    padX: (width - contentWidth) / 2,
+    padY: (height - contentHeight) / 2,
+    width,
+    height,
   };
 }
