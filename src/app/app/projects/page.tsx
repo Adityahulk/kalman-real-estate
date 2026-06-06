@@ -19,9 +19,9 @@ export default async function ProjectsPage({ searchParams }: { searchParams: { q
       ...(city ? { city: { contains: city, mode: "insensitive" } } : {}),
     },
     include: {
-      plots: { select: { id: true, status: true } },
+      plots: { where: { archivedAt: null }, select: { id: true, status: true } },
       cadFiles: { orderBy: { createdAt: "desc" }, take: 1 },
-      _count: { select: { plots: true } },
+      _count: { select: { plots: { where: { archivedAt: null } } } },
     },
     orderBy: { updatedAt: "desc" },
   });

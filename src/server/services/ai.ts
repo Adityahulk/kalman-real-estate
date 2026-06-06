@@ -108,7 +108,7 @@ export const ownerProgressSchema = z.object({
 
 export async function generateOwnerProgressSummary(context: RequestContext, input: z.infer<typeof ownerProgressSchema>) {
   const [plot, checklist, progress] = await Promise.all([
-    prisma.plot.findFirstOrThrow({ where: { id: input.plotId, tenantId: context.tenantId }, include: { currentOwner: true } }),
+    prisma.plot.findFirstOrThrow({ where: { id: input.plotId, tenantId: context.tenantId, archivedAt: null }, include: { currentOwner: true } }),
     prisma.checklistItem.findMany({ where: { tenantId: context.tenantId, plotId: input.plotId }, orderBy: { category: "asc" } }),
     prisma.progressUpdate.findMany({ where: { tenantId: context.tenantId, visibleToOwner: true }, orderBy: { createdAt: "desc" }, take: 10 }),
   ]);

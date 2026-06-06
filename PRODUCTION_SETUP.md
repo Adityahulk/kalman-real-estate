@@ -42,9 +42,16 @@ API routes resolve tenant, user, and role from that signed session before applyi
 - `GET /api/v1/platform/overview`
 - `POST /api/v1/cad/upload`
 - `GET /api/v1/cad/:id/status`
+- `GET /api/v1/cad/:id/analysis`
+- `GET /api/v1/cad/:id/candidates`
+- `GET /api/v1/cad/:id/preview`
 - `GET /api/v1/cad/:id/scene`
+- `POST /api/v1/cad/:id/extract`
+- `POST /api/v1/cad/:id/calibration`
 - `POST /api/v1/cad/:id/review`
+- `POST /api/v1/cad/:id/review/batch`
 - `POST /api/v1/cad/:id/publish`
+- `POST /api/v1/cad/:id/publish/rollback`
 - `GET /api/v1/cad/:id/versions`
 - `POST /api/v1/cad/:id/process/retry`
 - `POST /api/v1/ownership/owners`
@@ -78,43 +85,54 @@ API routes resolve tenant, user, and role from that signed session before applyi
 - `GET /api/v1/notifications`
 - `POST /api/v1/notifications/:id/read`
 
-## What The CAD Publish Does
+## Production CAD Intelligence
 
-CAD upload creates a persisted `CadFile`, returns a presigned upload URL, and queues CAD processing. Reviewed `CadEntity` records are published into real business records:
+CAD upload stores the original file, queues inspection, and then moves through a mandatory guided workflow:
 
-- `PLOT` entities create/update `Plot` inventory.
-- Non-plot entities create `SiteAsset` records.
-- `SpatialLink` connects every published business record back to the CAD entity.
-- `CadVersion` and `AuditEvent` preserve version and publish history.
+1. `ANALYZING`: inspect pages, embedded raster images, vector paths, text, and PDF optional layers.
+2. `SETUP_REQUIRED`: confirm the real site-layout region, excluded schedules/title blocks, drawing discipline, and stated plot counts.
+3. `EXTRACTING`: run raster recognition and vector/DXF topology extraction.
+4. `CALIBRATION_REQUIRED`: confirm a known length before PDF drawing-space measurements can become square feet.
+5. `REVIEW_REQUIRED`: confirm or correct strict business candidates.
+6. `PUBLISHED`: transactionally create plots, site assets, checklist zones, spatial links, a publish batch, and audit history.
 
-The CAD worker entrypoint is `npm run worker:cad`. It uses the production Python extraction script when available:
+Raw PDF paths and DXF primitives never become ownership records directly. Plot publish is blocked when labels are invalid or duplicated, geometry is open, scale is unknown, blocking review issues remain, or the stated plot count does not reconcile without an administrator reason.
 
-- DWG: install ODA File Converter and set `ODA_CONVERTER_BIN` to the converter binary path.
-- DXF: install Python package `ezdxf`.
-- Vector PDF: install Python package `PyMuPDF`.
+The worker handles:
 
-DXF also has a JS fallback through `dxf-parser`.
+- DXF with `ezdxf`, Shapely topology, block expansion, line snapping, polygonization, and text-to-cell matching.
+- Mixed and vector PDF with PyMuPDF.
+- Raster site layouts with OpenCV and PaddleOCR, with Tesseract as a local fallback.
+- Electrical optional layers independently from plot recognition, including transformer, MPB, RMU, and cable-network candidates.
+
+Published records retain their `CadPublishBatch` and `SpatialLink` provenance. Rollback archives untouched malformed plots/assets and protects records that already have ownership, registry, documents, development, or progress activity.
 
 Local CAD dependency setup:
 
 ```bash
-python3 -m pip install --upgrade ezdxf PyMuPDF
+python3 -m pip install \
+  ezdxf==1.4.4 \
+  PyMuPDF==1.27.2.3 \
+  numpy==1.26.4 \
+  Pillow==11.0.0 \
+  Shapely==2.1.1 \
+  opencv-python-headless==4.10.0.84 \
+  paddlepaddle==2.6.2 \
+  paddleocr==2.9.1
 ```
 
-Then point the app and workers at the same Python runtime:
+Install Tesseract separately and point the worker at the same Python runtime:
 
 ```env
 PYTHON_BIN="/absolute/path/to/python3"
-ODA_CONVERTER_BIN="/absolute/path/to/ODAFileConverter"
+TESSERACT_BIN="/absolute/path/to/tesseract"
+CAD_EXTRACTION_TIMEOUT_MS="900000"
+CAD_PDF_RENDER_SCALE="2"
+CAD_CELL_OCR_LIMIT="700"
+CAD_OCR_TIMEOUT_SECONDS="600"
 ```
 
-On this Mac workspace, `ezdxf` and `PyMuPDF` are installed for:
-
-```env
-PYTHON_BIN="/opt/homebrew/Caskroom/miniforge/base/bin/python3"
-```
-
-ODA File Converter is still a host/vendor install because DWG support depends on the ODA binary. Leave `ODA_CONVERTER_BIN` empty until the converter is installed; DXF and vector PDF processing will still work.
+DWG remains optional and requires a separately licensed/configured converter. DXF and PDF do not require ODA.
 
 Check the live CAD dependency status from the app:
 
@@ -150,7 +168,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.production restart web
 The deployable production shape is split by workload:
 
 - `web`: Next.js standalone server.
-- `cad-worker`: dedicated CAD processing worker with Python, `ezdxf`, `PyMuPDF`, and optional ODA File Converter.
+- `cad-worker`: dedicated CAD processing worker with Python, `ezdxf`, PyMuPDF, OpenCV, PaddleOCR, Shapely, Tesseract, and optional ODA File Converter.
 - `document-worker`: PDF/document generation worker.
 - `ai-worker`: AI/report queue worker.
 - `postgres` and `redis`: included for single-VM production or staging. On AWS/DigitalOcean managed services, point the same env vars at managed Postgres/Redis instead.
@@ -208,6 +226,27 @@ MAX_PDF_CAD_ENTITIES="25000"
 ```
 
 If `ODA_APPIMAGE_URL` is empty, the CAD worker still supports DXF and vector PDF through Python, but DWG conversion remains disabled and `/api/v1/cad/health` will report `dwg: false`.
+
+### CAD Worker Capacity
+
+Run CAD separately from the web process. Use at least 4 GB RAM for ordinary plans and 8 GB for large mixed raster/vector sheets. Queue concurrency is intentionally one per worker so OCR and topology processing cannot exhaust the host.
+
+PaddleOCR models are downloaded while building `Dockerfile.cad-worker`, copied into the non-root runtime user home, and remain inside the image. Production processing does not depend on downloading OCR models at job time.
+
+After deploying this migration, rebuild the CAD worker instead of restarting an old image:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.production build --no-cache cad-worker web migrate
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm migrate
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --force-recreate web cad-worker
+```
+
+Verify the strict extractor locally:
+
+```bash
+npm run test:cad
+CAD_PRIVATE_FIXTURE_PDF="/private/path/to/mixed-plan.pdf" npm run test:cad
+```
 
 ### AWS / DigitalOcean Shape
 

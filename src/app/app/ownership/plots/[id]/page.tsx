@@ -8,7 +8,7 @@ export default async function LegacyPlotDetailPage({ params }: { params: { id: s
   const session = await getSessionUser();
   if (!session) return null;
   const plot = await prisma.plot.findFirst({
-    where: { id: params.id, tenantId: session.tenantId },
+    where: { id: params.id, tenantId: session.tenantId, archivedAt: null },
     select: { id: true, projectId: true },
   });
   if (!plot) notFound();

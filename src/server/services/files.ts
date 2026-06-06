@@ -142,7 +142,7 @@ function assertUploadKeyAllowed(context: RequestContext, file: FileAsset, storag
 async function assertOwnerRecord(context: RequestContext, ownerType?: string, ownerId?: string) {
   if (!ownerType || !ownerId) return;
   if (ownerType === "Plot") {
-    await prisma.plot.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
+    await prisma.plot.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId, archivedAt: null } });
     return;
   }
   if (ownerType === "Owner") {
@@ -261,7 +261,7 @@ async function ownerCanAccessFile(ownerId: string, file: FileAsset) {
     if (document && document.status !== "APPROVED" && document.status !== "ISSUED") return false;
 
     const plot = await prisma.plot.findFirst({
-      where: { id: file.ownerId, tenantId: file.tenantId, currentOwnerId: ownerId, ownerVisible: true },
+      where: { id: file.ownerId, tenantId: file.tenantId, currentOwnerId: ownerId, ownerVisible: true, archivedAt: null },
       select: { id: true },
     });
     return Boolean(plot);
@@ -275,7 +275,7 @@ async function ownerCanAccessFile(ownerId: string, file: FileAsset) {
     if (!progress || progress.parentType !== "Plot") return false;
 
     const plot = await prisma.plot.findFirst({
-      where: { id: progress.parentId, tenantId: file.tenantId, currentOwnerId: ownerId, ownerVisible: true },
+      where: { id: progress.parentId, tenantId: file.tenantId, currentOwnerId: ownerId, ownerVisible: true, archivedAt: null },
       select: { id: true },
     });
     return Boolean(plot);

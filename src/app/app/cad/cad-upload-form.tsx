@@ -41,7 +41,7 @@ export function CadUploadForm({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedFile) {
-      setMessage("Choose a DXF or vector PDF file first.");
+      setMessage("Choose a DXF or PDF drawing first.");
       return;
     }
     setLoading(true);
@@ -84,7 +84,7 @@ export function CadUploadForm({
       const lower = file.name.toLowerCase();
       if (!lower.endsWith(".dxf") && !lower.endsWith(".pdf")) {
         setSelectedFile(null);
-        setMessage("Please upload DXF for CAD extraction. Vector PDF is supported as a secondary option. DWG is disabled in this deployment.");
+        setMessage("Please upload a DXF or PDF drawing. Mixed raster/vector PDFs are supported. DWG is disabled in this deployment.");
         return;
       }
       setOriginalName(file.name);

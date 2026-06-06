@@ -15,13 +15,13 @@ export default async function AppHomePage() {
     where: { tenantId: session.tenantId },
     orderBy: { updatedAt: "desc" },
     include: {
-      plots: { select: { id: true, status: true, currentOwnerId: true } },
-      _count: { select: { plots: true } },
+      plots: { where: { archivedAt: null }, select: { id: true, status: true, currentOwnerId: true } },
+      _count: { select: { plots: { where: { archivedAt: null } } } },
     },
   });
   const plotStatus = await prisma.plot.groupBy({
     by: ["status"],
-    where: { tenantId: session.tenantId },
+    where: { tenantId: session.tenantId, archivedAt: null },
     _count: true,
   });
   const plotCounts = Object.fromEntries(plotStatus.map((item) => [item.status, item._count]));

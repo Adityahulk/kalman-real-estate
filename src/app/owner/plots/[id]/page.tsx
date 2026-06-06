@@ -23,7 +23,7 @@ export default async function OwnerPlotPage({ params }: { params: { id: string }
   if (!owner) notFound();
 
   const plot = await prisma.plot.findFirst({
-    where: { id: params.id, tenantId: session.tenantId, currentOwnerId: owner.id, ownerVisible: true },
+    where: { id: params.id, tenantId: session.tenantId, currentOwnerId: owner.id, ownerVisible: true, archivedAt: null },
     include: {
       currentOwner: true,
       checklistItems: { orderBy: { category: "asc" } },

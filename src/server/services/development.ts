@@ -13,7 +13,7 @@ export const progressSchema = z.object({
 });
 
 export async function updateSiteAssetProgress(context: RequestContext, siteAssetId: string, input: z.infer<typeof progressSchema>) {
-  await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId } });
+  await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
   if (input.photoFileIds?.length) await assertFilesInTenant(context, input.photoFileIds);
   const [asset, update] = await prisma.$transaction([
     prisma.siteAsset.update({ where: { id: siteAssetId }, data: { progressPct: input.progressPct, status: input.progressPct >= 100 ? "COMPLETED" : "IN_PROGRESS" } }),
@@ -133,11 +133,11 @@ function throwBadRequest(message: string): never {
 
 async function assertParentInTenant(context: RequestContext, parentType: string, parentId: string) {
   if (parentType === "Plot") {
-    await prisma.plot.findFirstOrThrow({ where: { id: parentId, tenantId: context.tenantId } });
+    await prisma.plot.findFirstOrThrow({ where: { id: parentId, tenantId: context.tenantId, archivedAt: null } });
     return;
   }
   if (parentType === "SiteAsset") {
-    await prisma.siteAsset.findFirstOrThrow({ where: { id: parentId, tenantId: context.tenantId } });
+    await prisma.siteAsset.findFirstOrThrow({ where: { id: parentId, tenantId: context.tenantId, archivedAt: null } });
     return;
   }
   if (parentType === "ChecklistItem") {

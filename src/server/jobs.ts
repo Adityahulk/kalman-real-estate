@@ -9,7 +9,7 @@ function queue<T>(name: string) {
   return connection ? new Queue<T>(name, { connection: connection as never }) : null;
 }
 
-export type CadProcessJob = { cadFileId: string; tenantId: string };
+export type CadProcessJob = { cadFileId: string; tenantId: string; mode?: "inspect" | "extract" };
 export type DocumentJob = { documentId: string; tenantId: string };
 export type AiReportJob = { tenantId: string; projectId: string; reportType: string };
 
@@ -19,8 +19,9 @@ export const aiQueue = queue<AiReportJob>("ai.report");
 
 export async function enqueueCadProcessing(job: CadProcessJob) {
   if (!cadQueue) return { queued: false, reason: "REDIS_URL not configured" };
-  const result = await cadQueue.add("process-cad", job, {
-    jobId: job.cadFileId,
+  const mode = job.mode ?? "inspect";
+  const result = await cadQueue.add(`process-cad-${mode}`, { ...job, mode }, {
+    jobId: `${job.cadFileId}-${mode}`,
     attempts: 3,
     backoff: { type: "exponential", delay: 10_000 },
     removeOnComplete: true,

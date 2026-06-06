@@ -10,7 +10,7 @@ export default async function UploadPlotDocumentPage({ params }: { params: { pro
   const session = await getSessionUser();
   if (!session) return null;
   const plot = await prisma.plot.findFirst({
-    where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId },
+    where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId, archivedAt: null },
     include: { project: true, currentOwner: true },
   });
   if (!plot) notFound();

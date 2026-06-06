@@ -421,6 +421,20 @@ const overpay = await request(`/api/v1/finance/invoices/${invoice.json.data.id}/
 });
 assert(overpay.response.status === 400, "invoice overpayment was allowed");
 
+const usedCadPlotCodes = new Set((await prisma.plot.findMany({
+  where: { tenantId, projectId: project.id, archivedAt: null },
+  select: { code: true },
+})).map((item) => item.code.toUpperCase()));
+let smokeCadPlotCode;
+for (let number = 1; number <= 9999; number += 1) {
+  const candidate = `S${number}`;
+  if (!usedCadPlotCodes.has(candidate)) {
+    smokeCadPlotCode = candidate;
+    break;
+  }
+}
+assert(smokeCadPlotCode, "could not allocate a valid CAD smoke plot code");
+
 const cadFile = await prisma.cadFile.create({
   data: {
     tenantId,
@@ -433,6 +447,19 @@ const cadFile = await prisma.cadFile.create({
     storageKey: `local/smoke/${stamp}.dxf`,
     version: 1,
     uploadedById: me.json.data.id,
+  },
+});
+await prisma.cadAnalysis.create({
+  data: {
+    tenantId,
+    cadFileId: cadFile.id,
+    discipline: "SITE_LAYOUT",
+    sourceKind: "DXF",
+    confirmedRegion: { x: 0, y: 0, width: 1, height: 1 },
+    expectedCounts: { total: 1 },
+    scaleCalibration: { drawingUnitsPerFoot: 1, source: "smoke-test" },
+    setupConfirmedAt: new Date(),
+    calibrationConfirmedAt: new Date(),
   },
 });
 const scene = await prisma.cadScene.create({
@@ -451,7 +478,7 @@ await prisma.cadEntity.createMany({
       tenantId,
       sceneId: scene.id,
       type: "PLOT",
-      label: `CAD-${stamp}`,
+      label: smokeCadPlotCode,
       confidence: 0.96,
       geometry: { type: "polygon", points: [[0, 0], [20, 0], [20, 20], [0, 20]], closed: true },
       measurements: { areaSqft: 400 },

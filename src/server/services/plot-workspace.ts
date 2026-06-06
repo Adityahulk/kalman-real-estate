@@ -3,7 +3,7 @@ import { RequestContext } from "../api";
 
 export async function getPlotWorkspace(context: RequestContext, plotId: string) {
   const plot = await prisma.plot.findFirstOrThrow({
-    where: { id: plotId, tenantId: context.tenantId },
+    where: { id: plotId, tenantId: context.tenantId, archivedAt: null },
     include: {
       project: true,
       currentOwner: true,

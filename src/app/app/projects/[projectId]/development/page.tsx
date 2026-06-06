@@ -13,7 +13,7 @@ export default async function ProjectDevelopmentPage({ params }: { params: { pro
 
   const [project, assets, updates, issues] = await Promise.all([
     prisma.project.findFirstOrThrow({ where: { id: params.projectId, tenantId: session.tenantId } }),
-    prisma.siteAsset.findMany({ where: { tenantId: session.tenantId, projectId: params.projectId }, orderBy: { updatedAt: "desc" } }),
+    prisma.siteAsset.findMany({ where: { tenantId: session.tenantId, projectId: params.projectId, archivedAt: null }, orderBy: { updatedAt: "desc" } }),
     prisma.progressUpdate.findMany({
       where: {
         tenantId: session.tenantId,
@@ -134,16 +134,16 @@ function Empty({ label }: { label: string }) {
 }
 
 async function plotIds(tenantId: string, projectId: string) {
-  const plots = await prisma.plot.findMany({ where: { tenantId, projectId }, select: { id: true } });
+  const plots = await prisma.plot.findMany({ where: { tenantId, projectId, archivedAt: null }, select: { id: true } });
   return plots.map((plot) => plot.id);
 }
 
 async function siteAssetIds(tenantId: string, projectId: string) {
-  const assets = await prisma.siteAsset.findMany({ where: { tenantId, projectId }, select: { id: true } });
+  const assets = await prisma.siteAsset.findMany({ where: { tenantId, projectId, archivedAt: null }, select: { id: true } });
   return assets.map((asset) => asset.id);
 }
 
 async function checklistIds(tenantId: string, projectId: string) {
-  const items = await prisma.checklistItem.findMany({ where: { tenantId, plot: { projectId } }, select: { id: true } });
+  const items = await prisma.checklistItem.findMany({ where: { tenantId, plot: { projectId, archivedAt: null } }, select: { id: true } });
   return items.map((item) => item.id);
 }

@@ -10,7 +10,7 @@ export default async function UpdateRegistryPage({ params }: { params: { project
   const session = await getSessionUser();
   if (!session) return null;
   const plot = await prisma.plot.findFirst({
-    where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId },
+    where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId, archivedAt: null },
     include: { project: true, registryRecords: { orderBy: { createdAt: "desc" }, take: 1 } },
   });
   if (!plot) notFound();

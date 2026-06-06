@@ -220,7 +220,7 @@ export async function getDocumentDownload(context: RequestContext, id: string) {
     });
     const plot = owner
       ? await prisma.plot.findFirst({
-          where: { id: document.recordId, tenantId: context.tenantId, currentOwnerId: owner.id, ownerVisible: true },
+          where: { id: document.recordId, tenantId: context.tenantId, currentOwnerId: owner.id, ownerVisible: true, archivedAt: null },
           select: { id: true },
         })
       : null;
@@ -238,7 +238,7 @@ function throwForbidden(message: string): never {
 async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string) {
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: context.tenantId } });
   const plot = await prisma.plot.findFirstOrThrow({
-    where: { id: plotId, tenantId: context.tenantId },
+    where: { id: plotId, tenantId: context.tenantId, archivedAt: null },
     include: {
       project: true,
       currentOwner: true,

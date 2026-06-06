@@ -22,14 +22,27 @@ RUN apt-get update \
     libxkbcommon-x11-0 \
     libxcb-cursor0 \
     libxcb-util1 \
+    libgomp1 \
+    tesseract-ocr \
   && rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m pip install --break-system-packages --no-cache-dir --upgrade ezdxf PyMuPDF
+RUN python3 -m pip install --break-system-packages --no-cache-dir \
+    ezdxf==1.4.4 \
+    PyMuPDF==1.27.2.3 \
+    numpy==1.26.4 \
+    Pillow==11.0.0 \
+    Shapely==2.1.1 \
+    opencv-python-headless==4.10.0.84 \
+    paddlepaddle==2.6.2 \
+    paddleocr==2.9.1
+
+RUN python3 -c "from paddleocr import PaddleOCR; PaddleOCR(use_angle_cls=True, lang='en', show_log=False)"
 
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs \
-  && mkdir -p /app/storage \
-  && chown -R nextjs:nodejs /app/storage
+  && mkdir -p /app/storage /app/.paddleocr \
+  && if [ -d /root/.paddleocr ]; then cp -R /root/.paddleocr/. /app/.paddleocr/; fi \
+  && chown -R nextjs:nodejs /app/storage /app/.paddleocr
 
 ARG ODA_APPIMAGE_URL=""
 RUN mkdir -p /opt/oda \
@@ -54,5 +67,6 @@ RUN npm ci --include=dev
 COPY --chown=nextjs:nodejs . .
 RUN npx prisma generate
 
+ENV HOME=/app
 USER nextjs
 CMD ["npm", "run", "worker:cad"]

@@ -4,75 +4,49 @@ import { CadEntityType } from "@prisma/client";
 import {
   AlertTriangle,
   Check,
+  ChevronRight,
   Eye,
-  EyeOff,
-  Focus,
-  GitBranch,
+  FileSearch,
   Layers3,
   Loader2,
-  Maximize2,
-  MousePointer2,
-  RotateCcw,
-  Search,
+  MapPinned,
+  RefreshCcw,
+  Ruler,
+  Save,
   Send,
-  Upload,
-  ZoomIn,
-  ZoomOut,
+  ShieldCheck,
+  Trash2,
+  X,
 } from "lucide-react";
-import { ChangeEvent, FormEvent, MouseEvent, PointerEvent, WheelEvent, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { CadMap, CadMapEntity } from "./cad-map";
 
 type Json = Record<string, unknown> | unknown[] | string | number | boolean | null;
-
-type Layer = {
-  id: string;
-  name: string;
-  color: string | null;
-  visible: boolean;
-  purpose: string | null;
-};
-
-type Entity = {
-  id: string;
-  layerId: string | null;
-  type: CadEntityType;
-  label: string | null;
+type Region = { x: number; y: number; width: number; height: number };
+type Layer = { id: string; name: string; color: string | null; visible: boolean; purpose: string | null; metadata?: Json };
+type Entity = CadMapEntity & {
   confidence: string | number;
-  geometry: Json;
   measurements: Json;
-  status: string;
+  validation: Json;
   sourceLayer: string | null;
-  spatialLinks: Array<{
-    id: string;
-    recordType: string;
-    recordId: string;
-    linkConfidence: string | number;
-  }>;
+  spatialLinks: Array<{ id: string; recordType: string; recordId: string; linkConfidence: string | number }>;
 };
-
 type Issue = {
   id: string;
   entityId: string | null;
   severity: string;
   code: string;
   message: string;
+  blocking: boolean;
 };
-
-type Version = {
-  id: string;
-  version: number;
-  status: string;
-  publishedAt: string | Date | null;
-};
-
 type Scene = {
   id: string;
   bounds: Json;
   layers: Layer[];
   entities: Entity[];
 };
-
 type CadFile = {
   id: string;
   originalName: string;
@@ -83,811 +57,667 @@ type CadFile = {
   projectId: string | null;
   errorMessage: string | null;
 };
-
-type BusinessLink = {
-  link: { recordType: string; recordId: string } | null;
-  record: Record<string, unknown> | null;
+type Analysis = {
+  discipline: string;
+  sourceKind: string | null;
+  pageNumber: number;
+  proposedRegion: Json;
+  confirmedRegion: Json;
+  excludedRegions: Json;
+  expectedCounts: Json;
+  scaleCalibration: Json;
+  inspection: Json;
+  setupConfirmedAt: string | Date | null;
+  calibrationConfirmedAt: string | Date | null;
+  previewArtifactKey: string | null;
 };
-
-type ViewPoint = { x: number; y: number };
-type ViewTransform = { scale: number; offset: ViewPoint };
-
-const MIN_ZOOM = 0.25;
-const MAX_ZOOM = 12;
-
-const typeStyle: Record<string, { stroke: string; fill: string; label: string }> = {
-  PLOT: { stroke: "#f4c542", fill: "rgba(244,197,66,0.22)", label: "Plot" },
-  ROAD: { stroke: "#94a3b8", fill: "rgba(148,163,184,0.24)", label: "Road" },
-  BOUNDARY: { stroke: "#e2e8f0", fill: "rgba(15,23,42,0.1)", label: "Boundary" },
-  UTILITY: { stroke: "#38bdf8", fill: "rgba(56,189,248,0.18)", label: "Utility" },
-  PARK: { stroke: "#22c55e", fill: "rgba(34,197,94,0.2)", label: "Park" },
-  GATE: { stroke: "#f59e0b", fill: "rgba(245,158,11,0.22)", label: "Gate" },
-  CLUBHOUSE: { stroke: "#a78bfa", fill: "rgba(167,139,250,0.22)", label: "Club" },
-  DRAINAGE: { stroke: "#14b8a6", fill: "rgba(20,184,166,0.18)", label: "Drain" },
-  ROOM: { stroke: "#60a5fa", fill: "rgba(96,165,250,0.18)", label: "Room" },
-  BATHROOM: { stroke: "#06b6d4", fill: "rgba(6,182,212,0.22)", label: "Bath" },
-  KITCHEN: { stroke: "#fb7185", fill: "rgba(251,113,133,0.2)", label: "Kitchen" },
-  ELECTRICAL_POINT: { stroke: "#facc15", fill: "rgba(250,204,21,0.25)", label: "Electrical" },
-  PLUMBING_LINE: { stroke: "#0ea5e9", fill: "rgba(14,165,233,0.18)", label: "Plumbing" },
-  UNKNOWN: { stroke: "#f97316", fill: "rgba(249,115,22,0.14)", label: "Unknown" },
-};
+type Version = { id: string; version: number; status: string; publishedAt: string | Date | null };
 
 export function CadWorkspace({
   cadFile,
+  analysis,
   scene,
   issues,
   versions,
 }: {
   cadFile: CadFile;
+  analysis: Analysis | null;
   scene: Scene | null;
   issues: Issue[];
   versions: Version[];
 }) {
   const router = useRouter();
-  const viewport = useMemo(() => makeViewport(scene), [scene]);
-  const [scale, setScale] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [drag, setDrag] = useState<{ pointer: ViewPoint; offset: ViewPoint } | null>(null);
-  const [selectedId, setSelectedId] = useState(scene?.entities[0]?.id ?? "");
-  const [query, setQuery] = useState("");
-  const [hiddenLayers, setHiddenLayers] = useState<Set<string>>(new Set());
-  const [mode, setMode] = useState<"review" | "live" | "compare">("review");
+  const [status, setStatus] = useState(cadFile.status);
+  const [errorMessage, setErrorMessage] = useState(cadFile.errorMessage);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
-  const [businessLink, setBusinessLink] = useState<BusinessLink | null>(null);
-  const [statusSnapshot, setStatusSnapshot] = useState({
-    status: cadFile.status,
-    errorMessage: cadFile.errorMessage,
-  });
-  const svgRef = useRef<SVGSVGElement | null>(null);
-  const transformRef = useRef<ViewTransform>({ scale: 1, offset: { x: 0, y: 0 } });
-
-  const visibleEntities = useMemo(() => {
-    if (!scene) return [];
-    const normalizedQuery = query.trim().toLowerCase();
-    return scene.entities.filter((entity) => {
-      if (entity.layerId && hiddenLayers.has(entity.layerId)) return false;
-      if (mode === "live" && cadFile.status === "PUBLISHED" && !entity.spatialLinks.length) return false;
-      if (mode === "review" && entity.status === "REJECTED") return false;
-      if (!normalizedQuery) return true;
-      return `${entity.label ?? ""} ${entity.type} ${entity.sourceLayer ?? ""}`.toLowerCase().includes(normalizedQuery);
-    });
-  }, [cadFile.status, hiddenLayers, mode, query, scene]);
-
-  const selected = scene?.entities.find((entity) => entity.id === selectedId) ?? visibleEntities[0] ?? null;
-  const selectedIssues = selected ? issues.filter((issue) => issue.entityId === selected.id) : [];
-  const confirmedCount = scene?.entities.filter((entity) => entity.status === "CONFIRMED").length ?? 0;
-  const effectiveStatus = statusSnapshot.status;
 
   useEffect(() => {
-    setStatusSnapshot({ status: cadFile.status, errorMessage: cadFile.errorMessage });
-  }, [cadFile.errorMessage, cadFile.id, cadFile.status]);
+    setStatus(cadFile.status);
+    setErrorMessage(cadFile.errorMessage);
+  }, [cadFile.errorMessage, cadFile.status]);
 
   useEffect(() => {
-    if (scene || ["FAILED", "REVIEW_REQUIRED", "PUBLISHED"].includes(effectiveStatus)) return;
-    const timer = window.setInterval(() => {
-      fetch(`/api/v1/cad/${cadFile.id}/status`)
-        .then((response) => response.json())
-        .then((body) => {
-          if (!body.ok) return;
-          const next = {
-            status: String(body.data.status),
-            errorMessage: body.data.errorMessage as string | null,
-          };
-          setStatusSnapshot(next);
-          if (["FAILED", "REVIEW_REQUIRED", "PUBLISHED"].includes(next.status)) router.refresh();
-        })
-        .catch(() => undefined);
-    }, 3000);
+    if (["SETUP_REQUIRED", "CALIBRATION_REQUIRED", "REVIEW_REQUIRED", "PUBLISHED", "FAILED"].includes(status)) return;
+    const timer = window.setInterval(async () => {
+      const response = await fetch(`/api/v1/cad/${cadFile.id}/status`);
+      const body = await response.json().catch(() => null);
+      if (!body?.ok) return;
+      setStatus(body.data.status);
+      setErrorMessage(body.data.errorMessage);
+      if (["SETUP_REQUIRED", "CALIBRATION_REQUIRED", "REVIEW_REQUIRED", "PUBLISHED", "FAILED"].includes(body.data.status)) router.refresh();
+    }, 2500);
     return () => window.clearInterval(timer);
-  }, [cadFile.id, effectiveStatus, router, scene]);
+  }, [cadFile.id, router, status]);
 
-  useEffect(() => {
-    if (!selected) {
-      setBusinessLink(null);
-      return;
+  async function retry() {
+    setLoading(true);
+    const response = await fetch(`/api/v1/cad/${cadFile.id}/process/retry`, { method: "POST" });
+    const body = await response.json().catch(() => null);
+    setLoading(false);
+    setMessage(response.ok ? "CAD processing queued again." : body?.error ?? "Retry failed.");
+    if (response.ok) {
+      setStatus("UPLOADED");
+      router.refresh();
     }
-    const hasLink = selected.spatialLinks.length > 0;
-    if (!hasLink) {
-      setBusinessLink(null);
-      return;
-    }
-    let cancelled = false;
-    fetch(`/api/v1/cad/entities/${selected.id}/link`)
-      .then((response) => response.json())
-      .then((body) => {
-        if (!cancelled) setBusinessLink(body.ok ? body.data : null);
-      })
-      .catch(() => {
-        if (!cancelled) setBusinessLink(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selected]);
-
-  function toggleLayer(id: string) {
-    setHiddenLayers((current) => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
   }
 
-  function fit() {
-    updateTransform(1, { x: 0, y: 0 });
+  if (status === "FAILED") {
+    return (
+      <StatePanel icon={<AlertTriangle size={24} />} title="CAD processing stopped" detail={errorMessage ?? "The worker could not inspect this drawing."}>
+        <button className="btn-primary" onClick={retry} disabled={loading}>
+          {loading ? <Loader2 className="animate-spin" size={17} /> : <RefreshCcw size={17} />}
+          Retry safely
+        </button>
+      </StatePanel>
+    );
   }
 
-  function onWheel(event: WheelEvent<SVGSVGElement>) {
+  if (!analysis || !["SETUP_REQUIRED", "CALIBRATION_REQUIRED", "REVIEW_REQUIRED", "PUBLISHED"].includes(status)) {
+    return (
+      <StatePanel icon={<Loader2 className="animate-spin" size={24} />} title={statusTitle(status)} detail={statusHelp(status)}>
+        <ProcessingSteps status={status} />
+        {message ? <Notice text={message} /> : null}
+      </StatePanel>
+    );
+  }
+
+  if (status === "SETUP_REQUIRED") {
+    return <DrawingSetup cadFile={cadFile} analysis={analysis} />;
+  }
+
+  if (status === "CALIBRATION_REQUIRED") {
+    return <Calibration cadFile={cadFile} analysis={analysis} scene={scene} />;
+  }
+
+  return (
+    <CandidateReview
+      cadFile={{ ...cadFile, status }}
+      analysis={analysis}
+      scene={scene}
+      issues={issues}
+      versions={versions}
+    />
+  );
+}
+
+function DrawingSetup({ cadFile, analysis }: { cadFile: CadFile; analysis: Analysis }) {
+  const router = useRouter();
+  const initial = regionValue(analysis.confirmedRegion) ?? regionValue(analysis.proposedRegion) ?? { x: 0, y: 0, width: 1, height: 1 };
+  const [region, setRegion] = useState(initial);
+  const [discipline, setDiscipline] = useState(analysis.discipline === "AUTO" ? "MIXED" : analysis.discipline);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const expected = objectValue(analysis.expectedCounts);
+  const [expectedCounts, setExpectedCounts] = useState({
+    total: String(expected.total ?? ""),
+    residential: String(expected.residential ?? ""),
+    commercial: String(expected.commercial ?? ""),
+    ews: String(expected.ews ?? ""),
+  });
+  const inspection = objectValue(analysis.inspection);
+
+  async function submit(event: FormEvent) {
     event.preventDefault();
-    const anchor = clientToSvgPoint(event.clientX, event.clientY);
-    if (!anchor) return;
-    const factor = Math.exp(-event.deltaY * 0.0015);
-    zoomAt(transformRef.current.scale * factor, anchor);
-  }
-
-  function onPointerDown(event: PointerEvent<SVGSVGElement>) {
-    if ((event.target as Element).closest("[data-entity]")) return;
-    const pointer = clientToSvgPoint(event.clientX, event.clientY);
-    if (!pointer) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setDrag({ pointer, offset: transformRef.current.offset });
-  }
-
-  function onPointerMove(event: PointerEvent<SVGSVGElement>) {
-    if (!drag) return;
-    const pointer = clientToSvgPoint(event.clientX, event.clientY);
-    if (!pointer) return;
-    updateTransform(transformRef.current.scale, {
-      x: drag.offset.x + pointer.x - drag.pointer.x,
-      y: drag.offset.y + pointer.y - drag.pointer.y,
+    setLoading(true);
+    setMessage("");
+    const response = await fetch(`/api/v1/cad/${cadFile.id}/extract`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        discipline,
+        region,
+        excludedRegions: Array.isArray(analysis.excludedRegions) ? analysis.excludedRegions : [],
+        expectedCounts: Object.fromEntries(
+          Object.entries(expectedCounts)
+            .filter(([, value]) => value !== "")
+            .map(([key, value]) => [key, Number(value)]),
+        ),
+      }),
     });
-  }
-
-  function onPointerUp(event?: PointerEvent<SVGSVGElement>) {
-    if (event?.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
+    const body = await response.json().catch(() => null);
+    setLoading(false);
+    if (!response.ok) {
+      setMessage(body?.error ?? "Could not start extraction.");
+      return;
     }
-    setDrag(null);
+    setMessage("Drawing setup confirmed. Safe candidate extraction is running.");
+    router.refresh();
   }
 
-  function updateTransform(nextScale: number, nextOffset: ViewPoint) {
-    const transform = {
-      scale: Number(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextScale)).toFixed(3)),
-      offset: nextOffset,
-    };
-    transformRef.current = transform;
-    setScale(transform.scale);
-    setOffset(transform.offset);
-  }
+  return (
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <section className="overflow-hidden rounded-lg border border-slate-200 bg-slate-900 shadow-card">
+        <div className="flex items-center justify-between border-b border-white/10 px-4 py-3 text-white">
+          <div>
+            <div className="text-xs uppercase tracking-wide text-slate-400">Step 1 of 3</div>
+            <h2 className="mt-1 font-semibold">Confirm the actual site drawing</h2>
+          </div>
+          <span className="chip bg-white/10 text-white">{analysis.sourceKind?.replaceAll("_", " ")}</span>
+        </div>
+        <div className="relative max-h-[72vh] overflow-auto bg-slate-800 p-4">
+          {analysis.previewArtifactKey ? (
+            <div className="relative mx-auto w-fit max-w-full">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img className="block max-h-[68vh] max-w-full select-none object-contain" src={`/api/v1/cad/${cadFile.id}/preview`} alt="CAD source preview" />
+              <div
+                className="pointer-events-none absolute border-2 border-gold-400 bg-gold-400/10 shadow-[0_0_0_9999px_rgba(2,6,23,0.52)]"
+                style={{ left: `${region.x * 100}%`, top: `${region.y * 100}%`, width: `${region.width * 100}%`, height: `${region.height * 100}%` }}
+              />
+            </div>
+          ) : (
+            <div className="flex min-h-[520px] items-center justify-center text-sm text-slate-300">Vector drawing detected. The full drawing extent will be used.</div>
+          )}
+        </div>
+      </section>
 
-  function zoomAt(nextScale: number, anchor: ViewPoint) {
-    const current = transformRef.current;
-    const clampedScale = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextScale));
-    if (clampedScale === current.scale) return;
-    const ratio = clampedScale / current.scale;
-    updateTransform(clampedScale, {
-      x: anchor.x - (anchor.x - current.offset.x) * ratio,
-      y: anchor.y - (anchor.y - current.offset.y) * ratio,
+      <form onSubmit={submit} className="space-y-4">
+        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-card">
+          <div className="flex items-center gap-2"><FileSearch size={18} /><h2 className="font-semibold">Drawing setup</h2></div>
+          <label className="mt-4 block">
+            <span className="label">Drawing type</span>
+            <select className="input" value={discipline} onChange={(event) => setDiscipline(event.target.value)}>
+              <option value="MIXED">Site layout + electrical</option>
+              <option value="SITE_LAYOUT">Site layout</option>
+              <option value="ELECTRICAL">Electrical plan</option>
+              <option value="ARCHITECTURAL">Architectural plan</option>
+            </select>
+          </label>
+          {analysis.previewArtifactKey ? (
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <RegionInput label="Left" value={region.x} allowZero onChange={(value) => setRegion((current) => ({ ...current, x: Math.min(value, 1 - current.width) }))} />
+              <RegionInput label="Top" value={region.y} allowZero onChange={(value) => setRegion((current) => ({ ...current, y: Math.min(value, 1 - current.height) }))} />
+              <RegionInput label="Width" value={region.width} onChange={(value) => setRegion((current) => ({ ...current, width: Math.min(value, 1 - current.x) }))} />
+              <RegionInput label="Height" value={region.height} onChange={(value) => setRegion((current) => ({ ...current, height: Math.min(value, 1 - current.y) }))} />
+            </div>
+          ) : null}
+        </section>
+
+        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-card">
+          <h3 className="font-semibold">Detected drawing facts</h3>
+          <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+            <Metric label="Pages" value={String(inspection.pageCount ?? 1)} />
+            <Metric label="Vector paths" value={String(firstPageValue(inspection, "vectorPathCount") ?? 0)} />
+            <Metric label="Total plots stated" value={String(expected.total ?? "Not found")} />
+            <Metric label="Residential" value={String(expected.residential ?? "Not found")} />
+            <Metric label="Commercial" value={String(expected.commercial ?? "Not found")} />
+            <Metric label="EWS" value={String(expected.ews ?? "Not found")} />
+          </dl>
+          <div className="mt-4 border-t border-slate-200 pt-4">
+            <div className="text-sm font-medium">Confirm schedule counts</div>
+            <p className="mt-1 text-xs leading-5 text-slate-500">Correct these values if OCR could not read the drawing schedule. They become a blocking publish reconciliation check.</p>
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              {Object.entries(expectedCounts).map(([key, value]) => (
+                <label key={key}><span className="label capitalize">{key}</span><input className="input" type="number" min="0" value={value} onChange={(event) => setExpectedCounts((current) => ({ ...current, [key]: event.target.value }))} /></label>
+              ))}
+            </div>
+          </div>
+        </section>
+        {message ? <Notice text={message} error={!message.includes("confirmed")} /> : null}
+        <button className="btn-primary w-full justify-center" disabled={loading}>
+          {loading ? <Loader2 className="animate-spin" size={17} /> : <ChevronRight size={17} />}
+          Confirm region and extract
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function Calibration({ cadFile, analysis, scene }: { cadFile: CadFile; analysis: Analysis; scene: Scene | null }) {
+  const router = useRouter();
+  const bounds = boundsValue(scene?.bounds, analysis);
+  const imageRect = imageRectValue(analysis.inspection);
+  const [points, setPoints] = useState<Array<[number, number]>>([]);
+  const [drawingDistance, setDrawingDistance] = useState("");
+  const [knownLengthFeet, setKnownLengthFeet] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const mapPoints = useCallback((next: Array<[number, number]>) => {
+    setPoints(next);
+    if (next.length === 2) setDrawingDistance(String(Number(Math.hypot(next[1][0] - next[0][0], next[1][1] - next[0][1]).toFixed(4))));
+  }, []);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    const response = await fetch(`/api/v1/cad/${cadFile.id}/calibration`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ drawingDistance: Number(drawingDistance), knownLengthFeet: Number(knownLengthFeet), source: "MANUAL" }),
     });
+    const body = await response.json().catch(() => null);
+    setLoading(false);
+    setMessage(response.ok ? "Scale confirmed. Candidate review is ready." : body?.error ?? "Calibration failed.");
+    if (response.ok) router.refresh();
   }
 
-  function zoomFromToolbar(factor: number) {
-    const svg = svgRef.current;
-    const rect = svg?.getBoundingClientRect();
-    const anchor = rect ? clientToSvgPoint(rect.left + rect.width / 2, rect.top + rect.height / 2) : null;
-    zoomAt(transformRef.current.scale * factor, anchor ?? {
-      x: viewport.width / 2,
-      y: viewport.height / 2,
-    });
-  }
+  return (
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-card">
+        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+          <div><div className="text-xs uppercase tracking-wide text-slate-500">Step 2 of 3</div><h2 className="mt-1 font-semibold">Confirm drawing scale</h2></div>
+          <span className="text-sm text-slate-500">Click two ends of a known dimension</span>
+        </div>
+        <CadMap
+          cadFileId={cadFile.id}
+          entities={scene?.entities ?? []}
+          bounds={bounds}
+          imageRect={imageRect}
+          showPreview={Boolean(analysis.previewArtifactKey)}
+          hiddenLayerIds={new Set()}
+          onCalibrationPoints={mapPoints}
+        />
+      </section>
+      <form onSubmit={submit} className="h-fit rounded-lg border border-slate-200 bg-white p-5 shadow-card">
+        <div className="flex items-center gap-2"><Ruler size={18} /><h2 className="font-semibold">Known measurement</h2></div>
+        <p className="mt-2 text-sm leading-6 text-slate-600">Choose a clearly printed road width or plot side, then enter its real length in feet.</p>
+        <label className="mt-4 block"><span className="label">Drawing distance</span><input className="input" type="number" step="any" min="0.0001" value={drawingDistance} onChange={(event) => setDrawingDistance(event.target.value)} required /></label>
+        <label className="mt-4 block"><span className="label">Real length (feet)</span><input className="input" type="number" step="any" min="0.01" value={knownLengthFeet} onChange={(event) => setKnownLengthFeet(event.target.value)} placeholder="Example: 40" required /></label>
+        <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
+          {points.length === 2 ? `Selected points: ${points[0].map((value) => value.toFixed(1)).join(", ")} to ${points[1].map((value) => value.toFixed(1)).join(", ")}` : "Select two points on the drawing, or enter the drawing distance manually."}
+        </div>
+        {message ? <Notice text={message} error={!message.includes("confirmed")} /> : null}
+        <button className="btn-primary mt-4 w-full justify-center" disabled={loading}>
+          {loading ? <Loader2 className="animate-spin" size={17} /> : <Check size={17} />}
+          Confirm scale
+        </button>
+      </form>
+    </div>
+  );
+}
 
-  function clientToSvgPoint(clientX: number, clientY: number) {
-    const svg = svgRef.current;
-    const matrix = svg?.getScreenCTM();
-    if (!svg || !matrix) return null;
-    const point = svg.createSVGPoint();
-    point.x = clientX;
-    point.y = clientY;
-    const transformed = point.matrixTransform(matrix.inverse());
-    return { x: transformed.x, y: transformed.y };
-  }
+function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFile: CadFile; analysis: Analysis; scene: Scene | null; issues: Issue[]; versions: Version[] }) {
+  const router = useRouter();
+  const [selectedId, setSelectedId] = useState(scene?.entities.find((entity) => entity.status !== "REJECTED")?.id ?? "");
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [hiddenLayers, setHiddenLayers] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState<"ALL" | "PLOT" | "ELECTRICAL" | "ISSUES">("ALL");
+  const [query, setQuery] = useState("");
+  const [draftGeometry, setDraftGeometry] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [overrideReason, setOverrideReason] = useState("");
+  const entities = scene?.entities ?? [];
+  const selected = entities.find((entity) => entity.id === selectedId) ?? null;
+  const selectedMeasurements = objectValue(selected?.measurements ?? null);
+  const bounds = boundsValue(scene?.bounds, analysis);
+  const imageRect = imageRectValue(analysis.inspection);
+  const unresolvedBlocking = issues.filter((issue) => issue.blocking);
+  const nonCountBlocking = unresolvedBlocking.filter((issue) => issue.code !== "PLOT_COUNT_MISMATCH" && (!issue.entityId || entities.find((entity) => entity.id === issue.entityId)?.status === "CONFIRMED"));
+  const confirmedCount = entities.filter((entity) => entity.status === "CONFIRMED").length;
+  const confirmedPlotCount = entities.filter((entity) => entity.type === "PLOT" && entity.status === "CONFIRMED").length;
+  const expectedPlotCountValue = objectValue(analysis.expectedCounts).total;
+  const expectedPlotCount = typeof expectedPlotCountValue === "number" ? expectedPlotCountValue : undefined;
+  const countMismatch = unresolvedBlocking.some((issue) => issue.code === "PLOT_COUNT_MISMATCH")
+    || (expectedPlotCount !== undefined && confirmedPlotCount > 0 && confirmedPlotCount !== expectedPlotCount);
+  const visible = useMemo(() => entities.filter((entity) => {
+    if (query && !`${entity.label ?? ""} ${entity.type} ${entity.sourceLayer ?? ""}`.toLowerCase().includes(query.toLowerCase())) return false;
+    if (filter === "PLOT") return entity.type === "PLOT";
+    if (filter === "ELECTRICAL") return entity.type === "UTILITY" || entity.type === "ELECTRICAL_POINT";
+    if (filter === "ISSUES") return issues.some((issue) => issue.entityId === entity.id);
+    return true;
+  }), [entities, filter, issues, query]);
+
+  const selectEntity = useCallback((id: string) => {
+    setSelectedId(id);
+    setDraftGeometry(null);
+  }, []);
+  const geometryChanged = useCallback((id: string, geometry: Record<string, unknown>) => {
+    if (id === selectedId) setDraftGeometry(geometry);
+  }, [selectedId]);
 
   async function saveSelected(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selected) return;
     setLoading(true);
     const form = new FormData(event.currentTarget);
-    const payload = {
-      entities: [
-        {
-          entityId: selected.id,
-          label: String(form.get("label") ?? selected.label ?? ""),
-          type: String(form.get("type") ?? selected.type),
-          status: String(form.get("status") ?? selected.status),
-        },
-      ],
-      resolvedIssueIds: selectedIssues.filter((issue) => form.get(`issue:${issue.id}`) === "on").map((issue) => issue.id),
-    };
     const response = await fetch(`/api/v1/cad/${cadFile.id}/review`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        entities: [{
+          entityId: selected.id,
+          label: form.get("label"),
+          type: form.get("type"),
+          status: form.get("status"),
+          geometry: draftGeometry ?? selected.geometry,
+        }],
+        resolvedIssueIds: issues.filter((issue) => issue.entityId === selected.id).map((issue) => issue.id),
+      }),
     });
-    const body = await response.json();
+    const body = await response.json().catch(() => null);
     setLoading(false);
-    setMessage(response.ok ? "Selected entity review saved." : body.error ?? "Review failed");
-    router.refresh();
+    setMessage(response.ok ? "Candidate saved." : body?.error ?? "Candidate update failed.");
+    if (response.ok) router.refresh();
+  }
+
+  async function batch(status: "CONFIRMED" | "REJECTED" | "SUGGESTED") {
+    if (!checkedIds.size) return;
+    setLoading(true);
+    const ids = [...checkedIds];
+    const response = await fetch(`/api/v1/cad/${cadFile.id}/review/batch`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        entityIds: ids,
+        status,
+        resolvedIssueIds: status === "CONFIRMED" ? [] : issues.filter((issue) => issue.entityId && ids.includes(issue.entityId)).map((issue) => issue.id),
+      }),
+    });
+    const body = await response.json().catch(() => null);
+    setLoading(false);
+    setMessage(response.ok ? `${ids.length} candidates marked ${status.toLowerCase()}.` : body?.error ?? "Batch review failed.");
+    if (response.ok) {
+      setCheckedIds(new Set());
+      router.refresh();
+    }
   }
 
   async function publish() {
     setLoading(true);
-    const response = await fetch(`/api/v1/cad/${cadFile.id}/publish`, { method: "POST" });
-    const body = await response.json();
-    setLoading(false);
-    setMessage(
-      response.ok
-        ? `Published ${body.data.plots.length} plots, ${body.data.assets.length} assets, and ${body.data.checklistItems.length} zones.`
-        : body.error ?? "Publish failed",
-    );
-    router.refresh();
-  }
-
-  async function retry() {
-    setLoading(true);
-    const response = await fetch(`/api/v1/cad/${cadFile.id}/process/retry`, { method: "POST" });
-    const body = await response.json();
-    setLoading(false);
-    setMessage(response.ok ? "CAD processing has been queued again." : body.error ?? "Retry failed");
-    router.refresh();
-  }
-
-  async function replaceFile(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    const lower = file.name.toLowerCase();
-    if (!lower.endsWith(".dxf") && !lower.endsWith(".pdf")) {
-      setMessage("Choose a DXF or vector PDF file.");
-      return;
-    }
-
-    setLoading(true);
-    setMessage("Uploading the replacement CAD file...");
-    const form = new FormData();
-    form.set("file", file);
-    const response = await fetch(`/api/v1/cad/${cadFile.id}/file`, {
-      method: "PUT",
-      body: form,
+    const response = await fetch(`/api/v1/cad/${cadFile.id}/publish`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ overrideReason: countMismatch ? overrideReason : undefined }),
     });
-    const body = await readApiResponse(response);
+    const body = await response.json().catch(() => null);
     setLoading(false);
-    if (!response.ok) {
-      setMessage(body.error ?? "Replacement upload failed.");
-      return;
-    }
-    setStatusSnapshot({ status: body.data.cadFile.status, errorMessage: null });
-    setMessage(
-      body.data.queue?.queued
-        ? "Replacement file uploaded. CAD processing has been queued."
-        : `Replacement file uploaded, but the worker queue is unavailable: ${body.data.queue?.reason ?? "unknown reason"}.`,
-    );
-    router.refresh();
+    setMessage(response.ok ? `Published ${body.data.plots.length} plots and ${body.data.assets.length} site assets.` : body?.error ?? "Publish failed.");
+    if (response.ok) router.refresh();
   }
 
-  if (!scene) {
-    return (
-      <div className="rounded-xl border border-slate-200 bg-white p-8 shadow-card">
-        <div className="mx-auto max-w-2xl text-center">
-          <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg bg-amber-50 text-amber-700">
-            {effectiveStatus === "FAILED" ? <AlertTriangle size={22} /> : <Loader2 className="animate-spin" size={22} />}
-          </div>
-          <h2 className="mt-4 text-xl font-semibold">{statusTitle(effectiveStatus)}</h2>
-          <p className="mt-2 text-sm leading-6 text-slate-600">{statusHelp(effectiveStatus)}</p>
-          {statusSnapshot.errorMessage ? <div className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{statusSnapshot.errorMessage}</div> : null}
-          <div className="mt-6 grid gap-2 text-left text-sm md:grid-cols-5">
-            {["UPLOADED", "CONVERTING", "PARSING", "EXTRACTING", "REVIEW_REQUIRED"].map((status) => (
-              <div key={status} className={`rounded-lg border px-3 py-2 ${cadStatusRank(effectiveStatus) >= cadStatusRank(status) ? "border-gold-300 bg-gold-50 text-navy-950" : "border-slate-200 bg-slate-50 text-slate-500"}`}>
-                {status.replaceAll("_", " ")}
-              </div>
-            ))}
-          </div>
-          {message ? <div className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
-          {effectiveStatus === "FAILED" || effectiveStatus === "UPLOADED" ? (
-            <div className="mt-6 flex flex-wrap justify-center gap-3">
-              <button className="btn-primary" onClick={retry} disabled={loading}>
-                {loading ? <Loader2 className="animate-spin" size={17} /> : <RotateCcw size={17} />}
-                Retry processing
-              </button>
-              <label className="btn-outline cursor-pointer">
-                <Upload size={17} />
-                Re-upload CAD file
-                <input className="sr-only" type="file" accept=".dxf,.pdf" onChange={replaceFile} disabled={loading} />
-              </label>
-            </div>
-          ) : null}
-        </div>
-      </div>
+  async function rollback() {
+    setLoading(true);
+    const previewResponse = await fetch(`/api/v1/cad/${cadFile.id}/publish/rollback`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirm: false }),
+    });
+    const previewBody = await previewResponse.json().catch(() => null);
+    if (!previewResponse.ok) {
+      setLoading(false);
+      setMessage(previewBody?.error ?? "Rollback preview failed.");
+      return;
+    }
+    const preview = previewBody.data.preview;
+    const safeCount = preview.safePlots.length + preview.safeAssets.length + preview.safeChecklistItems.length;
+    const protectedCount = preview.protectedPlots.length + preview.protectedAssets.length + preview.protectedChecklistItems.length;
+    const reason = window.prompt(
+      `${safeCount} untouched CAD-created records can be removed from active use. ${protectedCount} records are protected because they contain business activity.\n\nEnter the rollback reason to continue:`,
     );
+    if (!reason) {
+      setLoading(false);
+      return;
+    }
+    const response = await fetch(`/api/v1/cad/${cadFile.id}/publish/rollback`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ confirm: true, reason }),
+    });
+    const body = await response.json().catch(() => null);
+    setLoading(false);
+    setMessage(response.ok
+      ? body.data.result.partial
+        ? "Untouched CAD-created records were removed. Records with business activity remain protected."
+        : "Untouched CAD-created records were removed and the drawing was queued for safe reinspection."
+      : body?.error ?? "Rollback failed.");
+    if (response.ok) router.refresh();
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-slate-950 shadow-2xl">
-      <div className="flex min-h-[calc(100vh-9rem)] flex-col xl:grid xl:grid-cols-[280px_1fr_360px]">
-        <aside className="border-b border-white/10 bg-slate-900/95 p-4 text-white xl:border-b-0 xl:border-r">
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-card">
+      <header className="border-b border-slate-200 bg-white px-4 py-3">
+        <div className="flex flex-col justify-between gap-3 xl:flex-row xl:items-center">
           <div>
-            <div className="text-xs uppercase tracking-wide text-slate-400">CAD Workspace</div>
-            <h2 className="mt-1 truncate text-lg font-semibold">{cadFile.originalName}</h2>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <span className="chip bg-white/10 text-slate-200">{cadFile.status.replaceAll("_", " ")}</span>
-              <span className="chip bg-white/10 text-slate-200">v{cadFile.version}</span>
+            <div className="text-xs uppercase tracking-wide text-slate-500">{cadFile.status === "PUBLISHED" ? "Published spatial records" : "Step 3 of 3 · Candidate review"}</div>
+            <div className="mt-1 flex flex-wrap items-center gap-2">
+              <h2 className="font-semibold">{cadFile.originalName}</h2>
+              <span className="chip bg-slate-100 text-slate-700">{cadFile.status.replaceAll("_", " ")}</span>
+              <span className="chip bg-amber-50 text-amber-800">{unresolvedBlocking.length} blocking</span>
+              <span className="chip bg-emerald-50 text-emerald-800">{confirmedCount} confirmed</span>
             </div>
           </div>
-
-          <div className="mt-5 grid grid-cols-3 overflow-hidden rounded-lg border border-white/10 text-xs">
-            {(["review", "live", "compare"] as const).map((item) => (
-              <button
-                key={item}
-                className={`px-2 py-2 capitalize ${mode === item ? "bg-gold-shine text-navy-950" : "bg-slate-950 text-slate-300 hover:bg-white/10"}`}
-                onClick={() => setMode(item)}
-              >
-                {item}
+          <div className="flex flex-wrap gap-2">
+            {cadFile.status === "PUBLISHED" ? (
+              <button className="btn-outline text-rose-700" onClick={rollback} disabled={loading}><Trash2 size={16} /> Roll back CAD publish</button>
+            ) : (
+              <button className="btn-gold" onClick={publish} disabled={loading || confirmedCount === 0 || nonCountBlocking.length > 0 || (countMismatch && overrideReason.trim().length < 10)}>
+                {loading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
+                Publish reviewed records
               </button>
+            )}
+          </div>
+        </div>
+        {countMismatch && cadFile.status !== "PUBLISHED" ? (
+          <label className="mt-3 block max-w-3xl">
+            <span className="label">Plot-count override reason</span>
+            <input className="input" value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} placeholder="Explain why the confirmed plot count intentionally differs from the drawing schedule." />
+          </label>
+        ) : null}
+        {message ? <Notice text={message} error={message.includes("failed") || message.includes("Resolve")} /> : null}
+      </header>
+
+      <div className="grid min-h-[720px] xl:grid-cols-[280px_minmax(0,1fr)_350px]">
+        <aside className="border-r border-slate-200 bg-slate-50 p-4">
+          <label className="block"><span className="label">Search candidates</span><input className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Plot number, layer, type" /></label>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            {(["ALL", "PLOT", "ELECTRICAL", "ISSUES"] as const).map((item) => (
+              <button key={item} className={`rounded-md border px-2 py-2 text-xs font-medium ${filter === item ? "border-navy-900 bg-navy-900 text-white" : "border-slate-200 bg-white text-slate-600"}`} onClick={() => setFilter(item)}>{item}</button>
             ))}
           </div>
-
-          <label className="mt-5 block">
-            <span className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-slate-400"><Search size={14} /> Search</span>
-            <input
-              className="w-full rounded-lg border border-white/10 bg-slate-950 px-3 py-2 text-sm text-white outline-none ring-gold-400 focus:ring-1"
-              placeholder="Plot, layer, utility..."
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </label>
-
-          <div className="mt-5">
-            <div className="mb-2 flex items-center justify-between text-xs font-medium uppercase tracking-wide text-slate-400">
-              <span className="flex items-center gap-2"><Layers3 size={14} /> Layers</span>
-              <span>{scene.layers.length}</span>
-            </div>
-            <div className="max-h-64 space-y-2 overflow-auto pr-1">
-              {scene.layers.map((layer) => {
-                const hidden = hiddenLayers.has(layer.id);
-                const count = scene.entities.filter((entity) => entity.layerId === layer.id || entity.sourceLayer === layer.name).length;
-                return (
-                  <button
-                    key={layer.id}
-                    className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-left text-sm ${hidden ? "border-white/5 bg-slate-950/60 text-slate-500" : "border-white/10 bg-white/5 text-slate-100"}`}
-                    onClick={() => toggleLayer(layer.id)}
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate">{layer.name}</span>
-                      <span className="text-xs text-slate-500">{layer.purpose ?? "Unclassified"} · {count}</span>
-                    </span>
-                    {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mt-5">
-            <div className="mb-2 flex items-center justify-between text-xs font-medium uppercase tracking-wide text-slate-400">
-              <span className="flex items-center gap-2"><AlertTriangle size={14} /> Review Queue</span>
-              <span>{issues.length}</span>
-            </div>
-            <div className="max-h-48 space-y-2 overflow-auto pr-1">
-              {issues.map((issue) => (
-                <button
-                  key={issue.id}
-                  className="w-full rounded-lg border border-amber-400/20 bg-amber-400/10 p-2 text-left text-xs text-amber-100"
-                  onClick={() => issue.entityId && setSelectedId(issue.entityId)}
-                >
-                  <span className="font-medium">{issue.code}</span>
-                  <span className="mt-1 block text-amber-100/80">{issue.message}</span>
+          <div className="mt-4 flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-semibold"><Layers3 size={15} /> Layers</h3><span className="text-xs text-slate-500">{scene?.layers.length ?? 0}</span></div>
+          <div className="mt-2 space-y-2">
+            {scene?.layers.map((layer) => {
+              const hidden = hiddenLayers.has(layer.id);
+              return (
+                <button key={layer.id} className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm ${hidden ? "border-slate-200 bg-slate-100 text-slate-400" : "border-slate-200 bg-white"}`} onClick={() => setHiddenLayers((current) => toggleSet(current, layer.id))}>
+                  <span className="min-w-0"><span className="block truncate">{layer.name}</span><span className="text-xs text-slate-500">{layer.purpose ?? "Unclassified"}</span></span>
+                  <Eye size={15} />
                 </button>
+              );
+            })}
+          </div>
+          <div className="mt-5 border-t border-slate-200 pt-4">
+            <div className="flex items-center justify-between text-sm font-semibold"><span>Review queue</span><span>{visible.length}</span></div>
+            <div className="mt-2 max-h-[380px] space-y-1 overflow-auto">
+              {visible.map((entity) => (
+                <label key={entity.id} className={`flex cursor-pointer items-start gap-2 rounded-md border p-2 ${selectedId === entity.id ? "border-gold-400 bg-gold-50" : "border-transparent hover:bg-white"}`}>
+                  <input className="mt-1" type="checkbox" checked={checkedIds.has(entity.id)} onChange={() => setCheckedIds((current) => toggleSet(current, entity.id))} />
+                  <button type="button" className="min-w-0 flex-1 text-left" onClick={() => selectEntity(entity.id)}>
+                    <span className="block truncate text-sm font-medium">{entity.label ?? "Unlabelled"}</span>
+                    <span className="text-xs text-slate-500">{entity.type.replaceAll("_", " ")} · {Math.round(Number(entity.confidence) * 100)}% · {entity.status}</span>
+                  </button>
+                </label>
               ))}
-              {!issues.length ? <div className="rounded-lg bg-white/5 p-3 text-xs text-slate-400">No unresolved warnings.</div> : null}
             </div>
+            {checkedIds.size ? (
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button className="btn-primary h-9 px-2 text-xs" onClick={() => batch("CONFIRMED")} disabled={loading}><Check size={14} /> Confirm</button>
+                <button className="btn-outline h-9 px-2 text-xs" onClick={() => batch("REJECTED")} disabled={loading}><X size={14} /> Reject</button>
+              </div>
+            ) : null}
           </div>
         </aside>
 
-        <section className="relative min-h-[620px] overflow-hidden bg-[#020617]">
-          <div className="absolute left-4 right-4 top-4 z-10 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-2 rounded-lg border border-white/10 bg-slate-950/80 p-1 text-white backdrop-blur">
-              <ToolbarButton label="Zoom in" onClick={() => zoomFromToolbar(1.25)}><ZoomIn size={16} /></ToolbarButton>
-              <ToolbarButton label="Zoom out" onClick={() => zoomFromToolbar(0.8)}><ZoomOut size={16} /></ToolbarButton>
-              <ToolbarButton label="Fit" onClick={fit}><Maximize2 size={16} /></ToolbarButton>
-              <span className="px-2 text-xs text-slate-300">{Math.round(scale * 100)}%</span>
-            </div>
-            <div className="rounded-lg border border-white/10 bg-slate-950/80 px-3 py-2 text-xs text-slate-300 backdrop-blur">
-              {visibleEntities.length} visible / {scene.entities.length} extracted
-            </div>
-          </div>
-
-          <svg
-            ref={svgRef}
-            className="h-full min-h-[620px] w-full cursor-grab touch-none active:cursor-grabbing"
-            viewBox={`0 0 ${viewport.width} ${viewport.height}`}
-            onWheel={onWheel}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            onPointerCancel={onPointerUp}
-          >
-            <defs>
-              <pattern id="cad-grid" width="40" height="40" patternUnits="userSpaceOnUse">
-                <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(148,163,184,0.12)" strokeWidth="1" />
-              </pattern>
-              <filter id="selected-glow" x="-50%" y="-50%" width="200%" height="200%">
-                <feDropShadow dx="0" dy="0" stdDeviation="4" floodColor="#f4c542" floodOpacity="0.9" />
-              </filter>
-            </defs>
-            <rect width={viewport.width} height={viewport.height} fill="#020617" />
-            <rect width={viewport.width} height={viewport.height} fill="url(#cad-grid)" />
-            <g transform={`translate(${offset.x} ${offset.y}) scale(${scale}) translate(${viewport.padX} ${viewport.padY})`}>
-              {visibleEntities.map((entity) => (
-                <EntityShape
-                  key={entity.id}
-                  entity={entity}
-                  viewport={viewport}
-                  selected={entity.id === selected?.id}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setSelectedId(entity.id);
-                  }}
-                />
-              ))}
-            </g>
-          </svg>
-
-          <div className="absolute bottom-4 left-4 rounded-lg border border-white/10 bg-slate-950/80 p-3 text-white backdrop-blur">
-            <div className="mb-2 text-xs uppercase tracking-wide text-slate-400">Minimap</div>
-            <svg viewBox={`0 0 ${viewport.width} ${viewport.height}`} className="h-28 w-44 rounded bg-slate-900">
-              <g transform={`translate(${viewport.padX} ${viewport.padY})`}>
-                {visibleEntities.map((entity) => (
-                  <EntityShape key={entity.id} entity={entity} viewport={viewport} minimap selected={entity.id === selected?.id} />
-                ))}
-              </g>
-            </svg>
+        <section className="relative min-h-[620px] overflow-hidden">
+          <CadMap
+            cadFileId={cadFile.id}
+            entities={entities}
+            bounds={bounds}
+            imageRect={imageRect}
+            showPreview={Boolean(analysis.previewArtifactKey)}
+            hiddenLayerIds={hiddenLayers}
+            selectedId={selectedId}
+            onSelect={selectEntity}
+            editable={cadFile.status !== "PUBLISHED" && Boolean(selected)}
+            onGeometryChange={geometryChanged}
+          />
+          <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-slate-200 bg-white/95 px-3 py-2 text-xs text-slate-600 shadow">
+            Scroll to zoom at the cursor · Drag to pan · Drag selected plot vertices to correct geometry
           </div>
         </section>
 
-        <aside className="border-t border-white/10 bg-white p-4 xl:border-l xl:border-t-0">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-xs uppercase tracking-wide text-slate-500">Selected Entity</div>
-              <h2 className="mt-1 text-lg font-semibold">{selected?.label ?? selected?.type ?? "Nothing selected"}</h2>
-            </div>
-            <MousePointer2 className="text-slate-400" size={20} />
-          </div>
-
+        <aside className="border-l border-slate-200 p-4">
           {selected ? (
-            <form key={selected.id} onSubmit={saveSelected} className="mt-5 space-y-4">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <Info label="Type" value={selected.type.replaceAll("_", " ")} />
-                  <Info label="Status" value={selected.status} />
-                  <Info label="Layer" value={selected.sourceLayer ?? "Unknown"} />
-                  <Info label="Confidence" value={`${Math.round(Number(selected.confidence) * 100)}%`} />
-                  <Info label="Area" value={measurement(selected.measurements, "areaSqft")} />
-                  <Info label="Length" value={measurement(selected.measurements, "length")} />
-                </div>
+            <form key={selected.id} onSubmit={saveSelected} className="space-y-4">
+              <div><div className="text-xs uppercase tracking-wide text-slate-500">Selected candidate</div><h2 className="mt-1 text-lg font-semibold">{selected.label ?? selected.type}</h2></div>
+              <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-50 p-3 text-sm">
+                <Metric label="Confidence" value={`${Math.round(Number(selected.confidence) * 100)}%`} />
+                <Metric label="Layer" value={selected.sourceLayer ?? "-"} />
+                <Metric label="Status" value={selected.status} />
+                <Metric label="Issues" value={String(issues.filter((issue) => issue.entityId === selected.id).length)} />
+                {selected.type === "PLOT" ? <Metric label="Geometry area" value={formatArea(selectedMeasurements.calculatedAreaSqft ?? selectedMeasurements.areaSqft)} /> : null}
+                {selected.type === "PLOT" ? <Metric label="Printed area" value={formatArea(selectedMeasurements.printedAreaSqft)} /> : null}
               </div>
-
-              <label className="block">
-                <span className="label">Label</span>
-                <input className="input" name="label" defaultValue={selected.label ?? ""} />
-              </label>
-              <label className="block">
-                <span className="label">Entity type</span>
-                <select className="input" name="type" defaultValue={selected.type}>
-                  {Object.values(CadEntityType).map((type) => <option key={type} value={type}>{type.replaceAll("_", " ")}</option>)}
-                </select>
-              </label>
-              <label className="block">
-                <span className="label">Review status</span>
-                <select className="input" name="status" defaultValue={selected.status}>
-                  <option value="CONFIRMED">CONFIRMED</option>
-                  <option value="SUGGESTED">SUGGESTED</option>
-                  <option value="REJECTED">REJECTED</option>
-                </select>
-              </label>
-
-              {selectedIssues.length ? (
-                <div className="rounded-lg bg-amber-50 p-3">
-                  <div className="text-sm font-medium text-amber-900">Warnings for this entity</div>
-                  <div className="mt-2 space-y-2">
-                    {selectedIssues.map((issue) => (
-                      <label key={issue.id} className="flex items-start gap-2 text-sm text-amber-800">
-                        <input className="mt-1" name={`issue:${issue.id}`} type="checkbox" />
-                        <span>{issue.message}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-
-              {message ? <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
-
-              <BusinessRecordPanel cadFile={cadFile} selected={selected} businessLink={businessLink} />
-
-              <div className="grid grid-cols-2 gap-3">
-                <button className="btn-primary" disabled={loading}>
-                  {loading ? <Loader2 className="animate-spin" size={17} /> : <Check size={17} />}
-                  Save
-                </button>
-                <button type="button" className="btn-gold" onClick={publish} disabled={loading || cadFile.status === "PUBLISHED" || confirmedCount === 0}>
-                  <Send size={17} />
-                  {cadFile.status === "PUBLISHED" ? "Published" : "Publish"}
-                </button>
-              </div>
-              <Link
-                className="btn-outline w-full"
-                href={childCadHref(cadFile, selected, businessLink)}
-              >
-                <Focus size={17} />
-                Upload child CAD for this {selected.type.replaceAll("_", " ").toLowerCase()}
-              </Link>
-            </form>
-          ) : (
-            <div className="mt-6 rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">
-              Click an entity on the CAD map to inspect it.
-            </div>
-          )}
-
-          <div className="mt-6 border-t border-slate-200 pt-5">
-            <div className="mb-3 flex items-center gap-2 text-sm font-semibold"><GitBranch size={16} /> Versions</div>
-            <div className="space-y-2">
-              {versions.map((version) => (
-                <div key={version.id} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-sm">
-                  <span>v{version.version}</span>
-                  <span className="text-slate-500">{version.status}</span>
+              <label className="block"><span className="label">Label / plot number</span><input className="input" name="label" defaultValue={selected.label ?? ""} /></label>
+              <label className="block"><span className="label">Business type</span><select className="input" name="type" defaultValue={selected.type}>{Object.values(CadEntityType).map((type) => <option key={type} value={type}>{type.replaceAll("_", " ")}</option>)}</select></label>
+              <label className="block"><span className="label">Review decision</span><select className="input" name="status" defaultValue={selected.status}><option value="SUGGESTED">Needs review</option><option value="CONFIRMED">Confirmed</option><option value="REJECTED">Rejected</option></select></label>
+              {issues.filter((issue) => issue.entityId === selected.id).map((issue) => (
+                <div key={issue.id} className={`rounded-md border p-3 text-sm ${issue.blocking ? "border-rose-200 bg-rose-50 text-rose-800" : "border-amber-200 bg-amber-50 text-amber-800"}`}>
+                  <div className="font-medium">{issue.code.replaceAll("_", " ")}</div><div className="mt-1 text-xs">{issue.message}</div>
                 </div>
               ))}
-              {!versions.length ? <div className="text-sm text-slate-500">No published version yet.</div> : null}
+              {draftGeometry ? <Notice text="Boundary edited on the map. Save this candidate to keep the change." /> : null}
+              {cadFile.status !== "PUBLISHED" ? <button className="btn-primary w-full justify-center" disabled={loading}><Save size={16} /> Save candidate</button> : null}
+              {selected.spatialLinks[0] && cadFile.projectId ? <BusinessLink projectId={cadFile.projectId} link={selected.spatialLinks[0]} /> : null}
+            </form>
+          ) : <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">Select a candidate on the map or in the review queue.</div>}
+
+          <div className="mt-6 border-t border-slate-200 pt-4">
+            <h3 className="flex items-center gap-2 text-sm font-semibold"><ShieldCheck size={16} /> Publish checks</h3>
+            <div className="mt-2 space-y-2">
+              {issues.filter((issue) => !issue.entityId).map((issue) => (
+                <div key={issue.id} className={`rounded-md p-3 text-xs ${issue.blocking ? "bg-rose-50 text-rose-800" : "bg-amber-50 text-amber-800"}`}>{issue.message}</div>
+              ))}
+              {expectedPlotCount !== undefined && confirmedPlotCount !== expectedPlotCount ? (
+                <div className="rounded-md bg-rose-50 p-3 text-xs text-rose-800">
+                  {confirmedPlotCount} of {expectedPlotCount} scheduled plots are currently confirmed.
+                </div>
+              ) : null}
+              {!issues.filter((issue) => !issue.entityId).length && !countMismatch ? <div className="rounded-md bg-emerald-50 p-3 text-xs text-emerald-800">No drawing-level validation issues.</div> : null}
             </div>
           </div>
+          {versions.length ? <div className="mt-5 text-xs text-slate-500">Published versions: {versions.map((version) => `v${version.version}`).join(", ")}</div> : null}
         </aside>
       </div>
     </div>
   );
 }
 
-function childScopeFor(type: CadEntityType) {
-  if (type === "PLOT") return "PLOT";
-  if (type === "ROOM" || type === "KITCHEN" || type === "BATHROOM") return "ROOM";
-  return "SITE_ASSET";
+function BusinessLink({ projectId, link }: { projectId: string; link: Entity["spatialLinks"][number] }) {
+  const href = link.recordType === "Plot"
+    ? `/app/projects/${projectId}/plots/${link.recordId}`
+    : link.recordType === "SiteAsset"
+      ? `/app/projects/${projectId}/development`
+      : `/app/projects/${projectId}`;
+  return <Link className="btn-outline w-full justify-center" href={href}><MapPinned size={16} /> Open {link.recordType.toLowerCase()} workspace</Link>;
 }
 
-function childCadHref(cadFile: CadFile, selected: Entity, businessLink: BusinessLink | null) {
-  const linked = businessLink?.link;
-  if (linked?.recordType === "Plot" && cadFile.projectId) return `/app/projects/${cadFile.projectId}/plots/${linked.recordId}?tab=child-cad`;
-  const parentType = linked?.recordType === "Plot" ? "PLOT" : linked?.recordType === "SiteAsset" ? "SITE_ASSET" : childScopeFor(selected.type);
-  const parentId = linked?.recordId ?? selected.id;
-  return cadFile.projectId
-    ? `/app/projects/${cadFile.projectId}/cad?parentType=${parentType}&parentId=${parentId}`
-    : `/app/cad?parentType=${parentType}&parentId=${parentId}`;
+function StatePanel({ icon, title, detail, children }: { icon: React.ReactNode; title: string; detail: string; children?: React.ReactNode }) {
+  return <div className="rounded-lg border border-slate-200 bg-white p-10 text-center shadow-card"><div className="mx-auto flex h-12 w-12 items-center justify-center rounded-lg bg-amber-50 text-amber-700">{icon}</div><h2 className="mt-4 text-xl font-semibold">{title}</h2><p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-600">{detail}</p><div className="mt-6">{children}</div></div>;
 }
 
-function BusinessRecordPanel({ cadFile, selected, businessLink }: { cadFile: CadFile; selected: Entity; businessLink: BusinessLink | null }) {
-  const link = businessLink?.link ?? selected.spatialLinks[0] ?? null;
-  if (!link) {
-    return (
-      <div className="rounded-lg border border-dashed border-slate-200 p-3 text-sm text-slate-500">
-        This entity is not published into a live business record yet.
-      </div>
-    );
-  }
+function ProcessingSteps({ status }: { status: string }) {
+  const steps = ["UPLOADED", "ANALYZING", "SETUP_REQUIRED", "EXTRACTING", "CALIBRATION_REQUIRED", "REVIEW_REQUIRED"];
+  const rank = steps.indexOf(status);
+  return <div className="mx-auto mt-6 grid max-w-4xl gap-2 text-left text-xs md:grid-cols-6">{steps.map((step, index) => <div key={step} className={`rounded-md border px-3 py-2 ${index <= rank ? "border-gold-300 bg-gold-50 text-navy-950" : "border-slate-200 bg-slate-50 text-slate-500"}`}>{step.replaceAll("_", " ")}</div>)}</div>;
+}
 
-  const record = businessLink?.record ?? {};
-  const href =
-    link.recordType === "Plot" && cadFile.projectId
-      ? `/app/projects/${cadFile.projectId}/plots/${link.recordId}`
-      : link.recordType === "SiteAsset" && cadFile.projectId
-        ? `/app/projects/${cadFile.projectId}/development`
-        : link.recordType === "ChecklistItem" && cadFile.projectId && typeof record.plotId === "string"
-          ? `/app/projects/${cadFile.projectId}/plots/${record.plotId}?tab=development`
-          : null;
+function RegionInput({ label, value, allowZero = false, onChange }: { label: string; value: number; allowZero?: boolean; onChange: (value: number) => void }) {
+  const minimum = allowZero ? 0 : 0.01;
+  return <label><span className="label">{label} (%)</span><input className="input" type="number" min={allowZero ? "0" : "1"} max="100" step="1" value={Math.round(value * 100)} onChange={(event) => onChange(Math.max(minimum, Number(event.target.value) / 100))} /></label>;
+}
 
-  return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-      <div className="text-xs uppercase tracking-wide text-slate-500">Live record</div>
-      <div className="mt-1 font-medium">{link.recordType}</div>
-      {link.recordType === "Plot" ? (
-        <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-slate-600">
-          <Info label="Plot" value={String(record.code ?? record.label ?? link.recordId)} />
-          <Info label="Status" value={String(record.status ?? "-")} />
-          <Info label="Owner" value={String((record.currentOwner as Record<string, unknown> | undefined)?.name ?? "Company")} />
-          <Info label="Documents" value={String(record.documentCount ?? 0)} />
-        </div>
-      ) : null}
-      {href ? <Link className="btn-primary mt-3 h-9 w-full px-3 text-xs" href={href}>Open {link.recordType.toLowerCase()} workspace</Link> : null}
-    </div>
-  );
+function Metric({ label, value }: { label: string; value: string }) {
+  return <div><dt className="text-xs text-slate-500">{label}</dt><dd className="mt-1 truncate font-medium text-slate-900">{value}</dd></div>;
+}
+
+function Notice({ text, error = false }: { text: string; error?: boolean }) {
+  return <div className={`mt-3 rounded-md px-3 py-2 text-sm ${error ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{text}</div>;
 }
 
 function statusTitle(status: string) {
-  if (status === "FAILED") return "CAD processing failed";
-  if (status === "UPLOADED") return "CAD uploaded and queued";
-  if (status === "CONVERTING") return "Converting CAD";
-  if (status === "PARSING") return "Parsing CAD geometry";
-  if (status === "EXTRACTING") return "Extracting plots and site assets";
-  return "Preparing CAD scene";
+  if (status === "UPLOADED") return "CAD file stored";
+  if (status === "CONVERTING") return "Converting drawing";
+  if (status === "PARSING" || status === "ANALYZING") return "Inspecting drawing structure";
+  if (status === "EXTRACTING") return "Extracting safe business candidates";
+  return "Preparing CAD intelligence";
 }
 
 function statusHelp(status: string) {
-  if (status === "FAILED") return "The original file is saved. Fix the issue below and retry processing.";
-  if (status === "UPLOADED") return "The file is stored and waiting for the CAD worker. This screen will show the map once extraction finishes.";
-  if (status === "CONVERTING") return "The CAD worker is preparing the file for geometry extraction.";
-  if (status === "PARSING") return "Layers, polylines, labels, and dimensions are being parsed.";
-  if (status === "EXTRACTING") return "The system is classifying plots, roads, boundaries, utilities, and labels.";
-  return "The visualization is being prepared.";
+  if (status === "UPLOADED") return "The file is safely stored and waiting for the dedicated CAD worker.";
+  if (status === "ANALYZING") return "The worker is separating raster layout content, vector layers, schedules, legends, and title blocks.";
+  if (status === "EXTRACTING") return "Plot cells, labels, roads, site assets, and electrical networks are being extracted into a review-only scene.";
+  return "This page refreshes automatically when the next review step is ready.";
 }
 
-function cadStatusRank(status: string) {
-  return ["UPLOADED", "CONVERTING", "PARSING", "EXTRACTING", "REVIEW_REQUIRED", "PUBLISHED"].indexOf(status);
+function regionValue(value: Json): Region | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const region = value as Record<string, unknown>;
+  return ["x", "y", "width", "height"].every((key) => typeof region[key] === "number")
+    ? { x: region.x as number, y: region.y as number, width: region.width as number, height: region.height as number }
+    : null;
 }
 
-async function readApiResponse(response: Response) {
-  const text = await response.text();
-  try {
-    return JSON.parse(text);
-  } catch {
-    return {
-      ok: false,
-      error: response.status === 413
-        ? "The CAD file is larger than the server upload limit."
-        : `CAD request failed with HTTP ${response.status}.`,
-    };
+function objectValue(value: Json): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function firstPageValue(inspection: Record<string, unknown>, key: string) {
+  const pages = inspection.pages;
+  if (!Array.isArray(pages) || !pages[0] || typeof pages[0] !== "object") return undefined;
+  return (pages[0] as Record<string, unknown>)[key];
+}
+
+function imageRectValue(inspectionValue: Json) {
+  const inspection = objectValue(inspectionValue);
+  const previewImage = objectValue(inspection.previewImage as Json);
+  const recognitionImage = objectValue(inspection.recognitionImage as Json);
+  const largestImage = objectValue(inspection.largestImage as Json);
+  const rect = previewImage.rect ?? recognitionImage.rect ?? largestImage.rect;
+  return Array.isArray(rect) ? rect.filter((value): value is number => typeof value === "number") : null;
+}
+
+function boundsValue(value: Json | undefined, analysis: Analysis) {
+  const bounds = objectValue(value ?? null);
+  if (["minX", "minY", "maxX", "maxY"].every((key) => typeof bounds[key] === "number")) {
+    return { minX: bounds.minX as number, minY: bounds.minY as number, maxX: bounds.maxX as number, maxY: bounds.maxY as number };
   }
-}
-
-function ToolbarButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button title={label} className="rounded-md p-2 text-slate-200 hover:bg-white/10 hover:text-white" onClick={onClick}>
-      {children}
-    </button>
-  );
-}
-
-function EntityShape({
-  entity,
-  viewport,
-  selected,
-  minimap = false,
-  onClick,
-}: {
-  entity: Entity;
-  viewport: ReturnType<typeof makeViewport>;
-  selected: boolean;
-  minimap?: boolean;
-  onClick?: (event: MouseEvent<SVGGElement>) => void;
-}) {
-  const style = typeStyle[entity.type] ?? typeStyle.UNKNOWN;
-  const geometry = entity.geometry && typeof entity.geometry === "object" ? entity.geometry as Record<string, unknown> : {};
-  const points = expandRectPoints(geometry, extractPoints(geometry));
-  const mapped = points.map(([x, y]) => [x - viewport.minX, viewport.maxY - y] as [number, number]);
-  const strokeDasharray = Number(entity.confidence) < 0.55 || entity.status === "SUGGESTED" ? "8 6" : undefined;
-  const opacity = entity.status === "REJECTED" ? 0.28 : 1;
-  const strokeWidth = minimap ? 3 : selected ? 3.2 : 1.7;
-  const filter = selected && !minimap ? "url(#selected-glow)" : undefined;
-
-  if (!mapped.length) return null;
-
-  const textPoint = mapped[0];
-  const isPointOnly = geometry.type === "text" || mapped.length === 1;
-  const isClosed = geometry.closed === true || geometry.type === "rect" || geometry.type === "polygon";
-  const path = isClosed
-    ? `M ${mapped.map((point) => point.join(" ")).join(" L ")} Z`
-    : `M ${mapped.map((point) => point.join(" ")).join(" L ")}`;
-
-  return (
-    <g data-entity={entity.id} onClick={onClick} className="cursor-pointer" opacity={opacity} filter={filter}>
-      {!isPointOnly ? (
-        <path
-          d={path}
-          fill={isClosed ? style.fill : "none"}
-          stroke={selected ? "#f8fafc" : style.stroke}
-          strokeWidth={strokeWidth}
-          strokeDasharray={strokeDasharray}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      ) : null}
-      {!minimap && (
-        <>
-          <circle cx={textPoint[0]} cy={textPoint[1]} r={selected ? 4 : 2.5} fill={selected ? "#f8fafc" : style.stroke} />
-          <text x={textPoint[0] + 7} y={textPoint[1] - 7} fill="#e2e8f0" fontSize="12" paintOrder="stroke" stroke="#020617" strokeWidth="4">
-            {entity.label ?? style.label}
-          </text>
-          <text x={textPoint[0] + 7} y={textPoint[1] + 8} fill="#94a3b8" fontSize="9" paintOrder="stroke" stroke="#020617" strokeWidth="3">
-            {style.label} · {Math.round(Number(entity.confidence) * 100)}%
-          </text>
-        </>
-      )}
-    </g>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <div className="text-xs uppercase tracking-wide text-slate-500">{label}</div>
-      <div className="mt-1 truncate font-medium text-navy-950">{value}</div>
-    </div>
-  );
-}
-
-function measurement(value: Json, key: string) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return "-";
-  const raw = (value as Record<string, unknown>)[key];
-  if (typeof raw !== "number") return "-";
-  return `${Math.round(raw).toLocaleString("en-IN")}${key === "areaSqft" ? " sq ft" : ""}`;
-}
-
-function extractPoints(geometry: Record<string, unknown>): [number, number][] {
-  const rawPoints = geometry.points;
-  if (Array.isArray(rawPoints)) {
-    return rawPoints
-      .filter((point): point is [number, number] => Array.isArray(point) && typeof point[0] === "number" && typeof point[1] === "number")
-      .map((point) => [point[0], point[1]]);
+  const inspection = objectValue(analysis.inspection);
+  const pageBounds = inspection.pageBounds;
+  if (Array.isArray(pageBounds) && pageBounds.length === 4 && pageBounds.every((item) => typeof item === "number")) {
+    return { minX: pageBounds[0], minY: pageBounds[1], maxX: pageBounds[2], maxY: pageBounds[3] };
   }
-  const rawPoint = geometry.point;
-  if (Array.isArray(rawPoint) && typeof rawPoint[0] === "number" && typeof rawPoint[1] === "number") {
-    return [[rawPoint[0], rawPoint[1]]];
-  }
-  return [];
+  return { minX: 0, minY: 0, maxX: 1000, maxY: 1000 };
 }
 
-function expandRectPoints(geometry: Record<string, unknown>, points: [number, number][]) {
-  if (geometry.type !== "rect" || points.length !== 2) return points;
-  const [a, b] = points;
-  return [
-    [a[0], a[1]],
-    [b[0], a[1]],
-    [b[0], b[1]],
-    [a[0], b[1]],
-  ] as [number, number][];
+function toggleSet(current: Set<string>, id: string) {
+  const next = new Set(current);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  return next;
 }
 
-function makeViewport(scene: Scene | null) {
-  const allPoints = scene?.entities.flatMap((entity) => {
-    const geometry = entity.geometry && typeof entity.geometry === "object" ? entity.geometry as Record<string, unknown> : {};
-    return extractPoints(geometry);
-  }) ?? [];
-  if (!allPoints.length) {
-    return {
-      minX: 0,
-      maxX: 1000,
-      minY: 0,
-      maxY: 700,
-      padX: 80,
-      padY: 80,
-      width: 1160,
-      height: 860,
-    };
-  }
-  const xs = allPoints.map((point) => point[0]);
-  const ys = allPoints.map((point) => point[1]);
-  const minX = Math.min(...xs);
-  const maxX = Math.max(...xs);
-  const minY = Math.min(...ys);
-  const maxY = Math.max(...ys);
-  const contentWidth = Math.max(1, maxX - minX);
-  const contentHeight = Math.max(1, maxY - minY);
-  const width = Math.max(900, contentWidth + 160);
-  const height = Math.max(620, contentHeight + 160);
-  return {
-    minX,
-    maxX,
-    minY,
-    maxY,
-    padX: (width - contentWidth) / 2,
-    padY: (height - contentHeight) / 2,
-    width,
-    height,
-  };
+function formatArea(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)} sq ft` : "Not available";
 }

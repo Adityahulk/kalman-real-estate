@@ -1,4 +1,5 @@
 import "../styles/globals.css";
+import "ol/ol.css";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {

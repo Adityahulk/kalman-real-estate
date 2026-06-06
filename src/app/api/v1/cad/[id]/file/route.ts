@@ -10,7 +10,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     const context = await getRequestContext(request, "cad.upload");
     const form = await request.formData();
     const file = form.get("file");
-    if (!(file instanceof File)) throwBadRequest("Choose a DXF or vector PDF file.");
+    if (!(file instanceof File)) throwBadRequest("Choose a DXF or PDF drawing.");
     const maxBytes = Number(process.env.MAX_CAD_UPLOAD_MB ?? 100) * 1024 * 1024;
     if (file.size <= 0) throwBadRequest("The selected CAD file is empty.");
     if (file.size > maxBytes) throwBadRequest(`CAD files must be smaller than ${process.env.MAX_CAD_UPLOAD_MB ?? 100} MB.`);
@@ -21,7 +21,7 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
       : lower.endsWith(".pdf")
         ? CadFormat.VECTOR_PDF
         : null;
-    if (!format) throwBadRequest("Only DXF and vector PDF files are supported in this deployment.");
+    if (!format) throwBadRequest("Only DXF and PDF drawings are supported in this deployment.");
 
     return ok(await replaceCadFile(context, params.id, {
       bytes: Buffer.from(await file.arrayBuffer()),

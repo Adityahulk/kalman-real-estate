@@ -20,7 +20,7 @@ export default async function NewAllotmentPage({
   if (!project) notFound();
   const [plots, owners] = await Promise.all([
     prisma.plot.findMany({
-      where: { tenantId: session.tenantId, projectId: project.id, status: PlotStatus.COMPANY_OWNED },
+      where: { tenantId: session.tenantId, projectId: project.id, status: PlotStatus.COMPANY_OWNED, archivedAt: null },
       orderBy: { code: "asc" },
       select: { id: true, code: true, areaSqft: true, priceInr: true },
     }),

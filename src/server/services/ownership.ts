@@ -40,7 +40,7 @@ export const allotPlotSchema = z.object({
 
 export async function allotPlot(context: RequestContext, plotId: string, input: z.infer<typeof allotPlotSchema>) {
   const result = await prisma.$transaction(async (tx) => {
-    const before = await tx.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId } });
+    const before = await tx.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
     await tx.owner.findFirstOrThrow({ where: { id: input.ownerId, tenantId: context.tenantId } });
     const plot = await tx.plot.update({
       where: { id: plotId },
@@ -77,7 +77,7 @@ export const transferPlotSchema = z.object({
 
 export async function transferPlot(context: RequestContext, plotId: string, input: z.infer<typeof transferPlotSchema>) {
   const result = await prisma.$transaction(async (tx) => {
-    const before = await tx.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId } });
+    const before = await tx.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
     await tx.owner.findFirstOrThrow({ where: { id: input.buyerOwnerId, tenantId: context.tenantId } });
     const plot = await tx.plot.update({
       where: { id: plotId },
@@ -111,7 +111,7 @@ export const registrySchema = z.object({
 });
 
 export async function updateRegistry(context: RequestContext, plotId: string, input: z.infer<typeof registrySchema>) {
-  await prisma.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId } });
+  await prisma.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
   const result = await prisma.$transaction(async (tx) => {
     const registry = await tx.registryRecord.create({
       data: {
@@ -137,7 +137,7 @@ export async function updateRegistry(context: RequestContext, plotId: string, in
 
 export async function getPlotAudit(context: RequestContext, plotId: string) {
   const [plot, ownership, registry, audit] = await Promise.all([
-    prisma.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId }, include: { currentOwner: true } }),
+    prisma.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null }, include: { currentOwner: true } }),
     prisma.ownershipRecord.findMany({ where: { tenantId: context.tenantId, plotId }, include: { owner: true }, orderBy: { effectiveAt: "asc" } }),
     prisma.registryRecord.findMany({ where: { tenantId: context.tenantId, plotId }, orderBy: { createdAt: "asc" } }),
     prisma.auditEvent.findMany({ where: { tenantId: context.tenantId, entityType: "Plot", entityId: plotId }, orderBy: { createdAt: "asc" } }),

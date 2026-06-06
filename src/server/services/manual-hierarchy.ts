@@ -99,7 +99,7 @@ export const manualPlotZoneSchema = z.object({
 });
 
 export async function createManualPlotZone(context: RequestContext, plotId: string, input: z.infer<typeof manualPlotZoneSchema>) {
-  const plot = await prisma.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId } });
+  const plot = await prisma.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
   const item = await prisma.checklistItem.create({
     data: {
       tenantId: context.tenantId,

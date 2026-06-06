@@ -21,7 +21,7 @@ export default async function ProjectOwnershipPage({
   const status = searchParams.status as PlotStatus | undefined;
   const owner = searchParams.owner?.trim();
   const allProjectPlots = await prisma.plot.findMany({
-    where: { tenantId: session.tenantId, projectId: project.id },
+    where: { tenantId: session.tenantId, projectId: project.id, archivedAt: null },
     select: { id: true, status: true, currentOwnerId: true },
   });
 
@@ -29,6 +29,7 @@ export default async function ProjectOwnershipPage({
     where: {
       tenantId: session.tenantId,
       projectId: project.id,
+      archivedAt: null,
       ...(status ? { status } : {}),
       ...(q
         ? {

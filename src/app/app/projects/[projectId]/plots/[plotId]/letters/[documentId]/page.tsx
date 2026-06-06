@@ -10,7 +10,7 @@ export default async function LetterStudioPage({ params }: { params: { projectId
   if (!session) return null;
   const [plot, document] = await Promise.all([
     prisma.plot.findFirst({
-      where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId },
+      where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId, archivedAt: null },
       include: { project: true, currentOwner: true },
     }),
     prisma.generatedDocument.findFirst({

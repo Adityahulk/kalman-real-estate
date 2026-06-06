@@ -11,7 +11,7 @@ export async function POST(request: NextRequest) {
     if (request.headers.get("content-type")?.includes("multipart/form-data")) {
       const form = await request.formData();
       const file = form.get("file");
-      if (!(file instanceof File)) throwBadRequest("Choose a DXF or vector PDF file.");
+      if (!(file instanceof File)) throwBadRequest("Choose a DXF or PDF drawing.");
       const maxBytes = Number(process.env.MAX_CAD_UPLOAD_MB ?? 100) * 1024 * 1024;
       if (file.size <= 0) throwBadRequest("The selected CAD file is empty.");
       if (file.size > maxBytes) {
@@ -46,7 +46,7 @@ function parseCadFormat(value: string, fileName: string) {
   const inferred = lower.endsWith(".pdf") ? CadFormat.VECTOR_PDF : lower.endsWith(".dxf") ? CadFormat.DXF : null;
   const requested = Object.values(CadFormat).includes(value as CadFormat) ? value as CadFormat : inferred;
   if (!requested || (requested !== CadFormat.DXF && requested !== CadFormat.VECTOR_PDF)) {
-    throwBadRequest("Only DXF and vector PDF files are supported in this deployment.");
+    throwBadRequest("Only DXF and PDF drawings are supported in this deployment.");
   }
   if (requested === CadFormat.DXF && !lower.endsWith(".dxf")) throwBadRequest("The selected file must use the .dxf extension.");
   if (requested === CadFormat.VECTOR_PDF && !lower.endsWith(".pdf")) throwBadRequest("The selected file must use the .pdf extension.");

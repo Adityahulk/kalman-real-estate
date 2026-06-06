@@ -19,7 +19,7 @@ export default async function DocumentsPage() {
   const plotIds = documents.filter((document) => document.recordType === "Plot").map((document) => document.recordId);
   const plots = plotIds.length
     ? await prisma.plot.findMany({
-        where: { tenantId: session.tenantId, id: { in: plotIds } },
+        where: { tenantId: session.tenantId, id: { in: plotIds }, archivedAt: null },
         select: { id: true, code: true, projectId: true, project: { select: { name: true } } },
       })
     : [];

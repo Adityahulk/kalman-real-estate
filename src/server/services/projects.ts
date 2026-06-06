@@ -109,7 +109,7 @@ export async function getProjectWorkspace(context: RequestContext, projectId: st
     openIssues,
   ] = await Promise.all([
     prisma.project.findFirstOrThrow({ where: { id: projectId, tenantId: context.tenantId } }),
-    prisma.plot.groupBy({ by: ["status"], where: { tenantId: context.tenantId, projectId }, _count: true }),
+    prisma.plot.groupBy({ by: ["status"], where: { tenantId: context.tenantId, projectId, archivedAt: null }, _count: true }),
     prisma.cadFile.findFirst({
       where: { tenantId: context.tenantId, projectId, parentType: "PROJECT" },
       orderBy: { createdAt: "desc" },
@@ -119,12 +119,12 @@ export async function getProjectWorkspace(context: RequestContext, projectId: st
     prisma.registryRecord.count({
       where: {
         tenantId: context.tenantId,
-        plot: { projectId },
+        plot: { projectId, archivedAt: null },
         NOT: { status: { in: ["Completed", "COMPLETED", "Registered", "REGISTERED"] } },
       },
     }),
     prisma.ownershipRecord.findMany({
-      where: { tenantId: context.tenantId, kind: "TRANSFER", plot: { projectId } },
+      where: { tenantId: context.tenantId, kind: "TRANSFER", plot: { projectId, archivedAt: null } },
       include: { plot: true, owner: true },
       orderBy: { effectiveAt: "desc" },
       take: 6,
@@ -140,11 +140,12 @@ export async function getProjectWorkspace(context: RequestContext, projectId: st
       orderBy: { createdAt: "desc" },
       take: 10,
     }),
-    prisma.siteAsset.groupBy({ by: ["status"], where: { tenantId: context.tenantId, projectId }, _count: true }),
+    prisma.siteAsset.groupBy({ by: ["status"], where: { tenantId: context.tenantId, projectId, archivedAt: null }, _count: true }),
     prisma.siteAsset.findMany({
       where: {
         tenantId: context.tenantId,
         projectId,
+        archivedAt: null,
         deadline: { lt: new Date() },
         status: { notIn: ["COMPLETED", "DONE"] },
       },
@@ -184,7 +185,7 @@ export async function getProjectWorkspace(context: RequestContext, projectId: st
   });
   const docPlotIds = new Set(projectFiles.filter((file) => file.documentType).map((file) => file.ownerId));
   const ownedPlots = await prisma.plot.findMany({
-    where: { tenantId: context.tenantId, projectId, currentOwnerId: { not: null } },
+    where: { tenantId: context.tenantId, projectId, currentOwnerId: { not: null }, archivedAt: null },
     select: { id: true },
   });
   const calculatedMissingDocuments = ownedPlots.filter((plot) => !docPlotIds.has(plot.id)).length;
@@ -210,7 +211,7 @@ export async function getProjectReportCsv(context: RequestContext, projectId: st
     where: { id: projectId, tenantId: context.tenantId },
   });
   const plots = await prisma.plot.findMany({
-    where: { tenantId: context.tenantId, projectId },
+    where: { tenantId: context.tenantId, projectId, archivedAt: null },
     include: {
       currentOwner: true,
       ownershipRecords: {
@@ -259,18 +260,18 @@ function csvCell(value: unknown) {
 }
 
 async function plotIdsForProject(tenantId: string, projectId: string) {
-  const plots = await prisma.plot.findMany({ where: { tenantId, projectId }, select: { id: true } });
+  const plots = await prisma.plot.findMany({ where: { tenantId, projectId, archivedAt: null }, select: { id: true } });
   return plots.map((plot) => plot.id);
 }
 
 async function siteAssetIdsForProject(tenantId: string, projectId: string) {
-  const assets = await prisma.siteAsset.findMany({ where: { tenantId, projectId }, select: { id: true } });
+  const assets = await prisma.siteAsset.findMany({ where: { tenantId, projectId, archivedAt: null }, select: { id: true } });
   return assets.map((asset) => asset.id);
 }
 
 async function checklistIdsForProject(tenantId: string, projectId: string) {
   const items = await prisma.checklistItem.findMany({
-    where: { tenantId, plot: { projectId } },
+    where: { tenantId, plot: { projectId, archivedAt: null } },
     select: { id: true },
   });
   return items.map((item) => item.id);

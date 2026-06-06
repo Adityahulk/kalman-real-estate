@@ -20,6 +20,7 @@ export default async function OwnershipPage({
     prisma.plot.findMany({
       where: {
         tenantId: session.tenantId,
+        archivedAt: null,
         ...(searchParams.projectId ? { projectId: searchParams.projectId } : {}),
         ...(searchParams.status ? { status: searchParams.status as PlotStatus } : {}),
         ...(searchParams.owner ? { currentOwner: { name: { contains: searchParams.owner, mode: "insensitive" } } } : {}),

@@ -6,7 +6,7 @@ export async function getPlatformOverview(context: RequestContext) {
     await Promise.all([
       prisma.tenant.findUnique({ where: { id: context.tenantId } }),
       prisma.project.findMany({ where: { tenantId: context.tenantId }, orderBy: { updatedAt: "desc" }, take: 8 }),
-      prisma.plot.groupBy({ by: ["status"], where: { tenantId: context.tenantId }, _count: true }),
+      prisma.plot.groupBy({ by: ["status"], where: { tenantId: context.tenantId, archivedAt: null }, _count: true }),
       prisma.cadFile.groupBy({ by: ["status"], where: { tenantId: context.tenantId }, _count: true }),
       prisma.generatedDocument.count({ where: { tenantId: context.tenantId } }),
       prisma.issue.count({ where: { tenantId: context.tenantId, status: "OPEN" } }),

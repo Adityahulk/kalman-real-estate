@@ -21,7 +21,7 @@ export default async function OwnerPortalPage() {
 
   const plots = owner
     ? await prisma.plot.findMany({
-        where: { tenantId: session.tenantId, currentOwnerId: owner.id, ownerVisible: true },
+        where: { tenantId: session.tenantId, currentOwnerId: owner.id, ownerVisible: true, archivedAt: null },
         include: { currentOwner: true, checklistItems: true },
         orderBy: { code: "asc" },
       })

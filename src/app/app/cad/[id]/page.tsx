@@ -17,6 +17,7 @@ export default async function CadReviewPage({ params }: { params: { id: string }
         take: 1,
         include: { layers: true, entities: { orderBy: { createdAt: "asc" }, include: { spatialLinks: true } } },
       },
+      analysis: true,
       reviewIssues: { where: { resolved: false }, orderBy: { createdAt: "desc" } },
       versions: { orderBy: { version: "desc" } },
     },
@@ -50,6 +51,20 @@ export default async function CadReviewPage({ params }: { params: { id: string }
           projectId: cadFile.projectId,
           errorMessage: cadFile.errorMessage,
         }}
+        analysis={cadFile.analysis ? {
+          discipline: cadFile.analysis.discipline,
+          sourceKind: cadFile.analysis.sourceKind,
+          pageNumber: cadFile.analysis.pageNumber,
+          proposedRegion: cadFile.analysis.proposedRegion,
+          confirmedRegion: cadFile.analysis.confirmedRegion,
+          excludedRegions: cadFile.analysis.excludedRegions,
+          expectedCounts: cadFile.analysis.expectedCounts,
+          scaleCalibration: cadFile.analysis.scaleCalibration,
+          inspection: cadFile.analysis.inspection,
+          setupConfirmedAt: cadFile.analysis.setupConfirmedAt,
+          calibrationConfirmedAt: cadFile.analysis.calibrationConfirmedAt,
+          previewArtifactKey: cadFile.analysis.previewArtifactKey,
+        } : null}
         scene={scene ? {
           id: scene.id,
           bounds: scene.bounds,
@@ -62,6 +77,7 @@ export default async function CadReviewPage({ params }: { params: { id: string }
             confidence: entity.confidence.toString(),
             geometry: entity.geometry,
             measurements: entity.measurements,
+            validation: entity.validation,
             status: entity.status,
             sourceLayer: entity.sourceLayer,
             spatialLinks: entity.spatialLinks.map((link) => ({
@@ -72,7 +88,14 @@ export default async function CadReviewPage({ params }: { params: { id: string }
             })),
           })),
         } : null}
-        issues={cadFile.reviewIssues}
+        issues={cadFile.reviewIssues.map((issue) => ({
+          id: issue.id,
+          entityId: issue.entityId,
+          severity: issue.severity,
+          code: issue.code,
+          message: issue.message,
+          blocking: issue.blocking,
+        }))}
         versions={cadFile.versions.map((version) => ({
           id: version.id,
           version: version.version,
