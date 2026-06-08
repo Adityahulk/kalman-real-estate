@@ -4,6 +4,7 @@ import { CadEntityType } from "@prisma/client";
 import {
   AlertTriangle,
   Check,
+  ChevronDown,
   ChevronRight,
   Eye,
   FileSearch,
@@ -56,6 +57,7 @@ type CadFile = {
   version: number;
   projectId: string | null;
   errorMessage: string | null;
+  processingLog: Json;
 };
 type Analysis = {
   discipline: string;
@@ -89,6 +91,10 @@ export function CadWorkspace({
   const router = useRouter();
   const [status, setStatus] = useState(cadFile.status);
   const [errorMessage, setErrorMessage] = useState(cadFile.errorMessage);
+  const initialProcessing = objectValue(cadFile.processingLog);
+  const [processingStage, setProcessingStage] = useState(typeof initialProcessing.stage === "string" ? initialProcessing.stage : null);
+  const [progressLabel, setProgressLabel] = useState(typeof initialProcessing.progressLabel === "string" ? initialProcessing.progressLabel : null);
+  const [elapsedMs, setElapsedMs] = useState(Number(initialProcessing.elapsedMs ?? 0));
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -105,10 +111,19 @@ export function CadWorkspace({
       if (!body?.ok) return;
       setStatus(body.data.status);
       setErrorMessage(body.data.errorMessage);
+      setProcessingStage(body.data.stage);
+      setProgressLabel(body.data.progressLabel);
+      setElapsedMs(Number(body.data.elapsedMs ?? 0));
       if (["SETUP_REQUIRED", "CALIBRATION_REQUIRED", "REVIEW_REQUIRED", "PUBLISHED", "FAILED"].includes(body.data.status)) router.refresh();
     }, 2500);
     return () => window.clearInterval(timer);
   }, [cadFile.id, router, status]);
+
+  useEffect(() => {
+    if (["SETUP_REQUIRED", "CALIBRATION_REQUIRED", "REVIEW_REQUIRED", "PUBLISHED", "FAILED"].includes(status)) return;
+    const timer = window.setInterval(() => setElapsedMs((current) => current + 1000), 1000);
+    return () => window.clearInterval(timer);
+  }, [status]);
 
   async function retry() {
     setLoading(true);
@@ -135,7 +150,12 @@ export function CadWorkspace({
 
   if (!analysis || !["SETUP_REQUIRED", "CALIBRATION_REQUIRED", "REVIEW_REQUIRED", "PUBLISHED"].includes(status)) {
     return (
-      <StatePanel icon={<Loader2 className="animate-spin" size={24} />} title={statusTitle(status)} detail={statusHelp(status)}>
+      <StatePanel icon={<Loader2 className="animate-spin" size={24} />} title={progressLabel ?? statusTitle(status)} detail={statusHelp(status)}>
+        <div className="mx-auto mt-4 flex w-fit items-center gap-3 rounded-md bg-slate-50 px-4 py-2 text-xs text-slate-600">
+          <span>{processingStage?.replaceAll("_", " ") ?? status.replaceAll("_", " ")}</span>
+          <span className="h-3 w-px bg-slate-300" />
+          <span>{formatElapsed(elapsedMs)}</span>
+        </div>
         <ProcessingSteps status={status} />
         {message ? <Notice text={message} /> : null}
       </StatePanel>
@@ -351,6 +371,8 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
   const [selectedId, setSelectedId] = useState(scene?.entities.find((entity) => entity.status !== "REJECTED")?.id ?? "");
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [hiddenLayers, setHiddenLayers] = useState<Set<string>>(new Set());
+  const [layersExpanded, setLayersExpanded] = useState(true);
+  const [reviewExpanded, setReviewExpanded] = useState(true);
   const [filter, setFilter] = useState<"ALL" | "PLOT" | "ELECTRICAL" | "ISSUES">("ALL");
   const [query, setQuery] = useState("");
   const [draftGeometry, setDraftGeometry] = useState<Record<string, unknown> | null>(null);
@@ -485,7 +507,7 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
   }
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-card">
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-card xl:flex xl:h-[calc(100dvh-13rem)] xl:min-h-[560px] xl:flex-col">
       <header className="border-b border-slate-200 bg-white px-4 py-3">
         <div className="flex flex-col justify-between gap-3 xl:flex-row xl:items-center">
           <div>
@@ -517,29 +539,45 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
         {message ? <Notice text={message} error={message.includes("failed") || message.includes("Resolve")} /> : null}
       </header>
 
-      <div className="grid min-h-[720px] xl:grid-cols-[280px_minmax(0,1fr)_350px]">
-        <aside className="border-r border-slate-200 bg-slate-50 p-4">
+      <div className="grid min-h-[720px] xl:min-h-0 xl:flex-1 xl:grid-cols-[280px_minmax(0,1fr)_350px]">
+        <aside className="border-r border-slate-200 bg-slate-50 p-4 xl:flex xl:min-h-0 xl:flex-col xl:overflow-hidden">
           <label className="block"><span className="label">Search candidates</span><input className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Plot number, layer, type" /></label>
           <div className="mt-3 grid grid-cols-2 gap-2">
             {(["ALL", "PLOT", "ELECTRICAL", "ISSUES"] as const).map((item) => (
               <button key={item} className={`rounded-md border px-2 py-2 text-xs font-medium ${filter === item ? "border-navy-900 bg-navy-900 text-white" : "border-slate-200 bg-white text-slate-600"}`} onClick={() => setFilter(item)}>{item}</button>
             ))}
           </div>
-          <div className="mt-4 flex items-center justify-between"><h3 className="flex items-center gap-2 text-sm font-semibold"><Layers3 size={15} /> Layers</h3><span className="text-xs text-slate-500">{scene?.layers.length ?? 0}</span></div>
-          <div className="mt-2 space-y-2">
-            {scene?.layers.map((layer) => {
-              const hidden = hiddenLayers.has(layer.id);
-              return (
-                <button key={layer.id} className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm ${hidden ? "border-slate-200 bg-slate-100 text-slate-400" : "border-slate-200 bg-white"}`} onClick={() => setHiddenLayers((current) => toggleSet(current, layer.id))}>
-                  <span className="min-w-0"><span className="block truncate">{layer.name}</span><span className="text-xs text-slate-500">{layer.purpose ?? "Unclassified"}</span></span>
-                  <Eye size={15} />
-                </button>
-              );
-            })}
-          </div>
-          <div className="mt-5 border-t border-slate-200 pt-4">
-            <div className="flex items-center justify-between text-sm font-semibold"><span>Review queue</span><span>{visible.length}</span></div>
-            <div className="mt-2 max-h-[380px] space-y-1 overflow-auto">
+          <section className="mt-4 shrink-0 border-t border-slate-200 pt-3">
+            <button type="button" className="flex w-full items-center justify-between text-left xl:pointer-events-none" onClick={() => setLayersExpanded((current) => !current)}>
+              <h3 className="flex items-center gap-2 text-sm font-semibold"><Layers3 size={15} /> Layers <span className="font-normal text-slate-500">{scene?.layers.length ?? 0}</span></h3>
+              <ChevronDown className={`transition-transform xl:hidden ${layersExpanded ? "rotate-180" : ""}`} size={16} />
+            </button>
+            <div className={`${layersExpanded ? "block" : "hidden"} xl:block`}>
+              <div className="mt-2 flex items-center gap-2 text-xs">
+                <button type="button" className="text-navy-800 hover:underline" onClick={() => setHiddenLayers(new Set())}>Show all</button>
+                <span className="text-slate-300">|</span>
+                <button type="button" className="text-slate-600 hover:underline" onClick={() => setHiddenLayers(new Set((scene?.layers ?? []).map((layer) => layer.id)))}>Hide all</button>
+              </div>
+              <div className="mt-2 max-h-48 space-y-1 overflow-y-auto pr-1 xl:max-h-[24dvh]">
+                {scene?.layers.map((layer) => {
+                  const hidden = hiddenLayers.has(layer.id);
+                  return (
+                    <button key={layer.id} className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left text-sm ${hidden ? "border-slate-200 bg-slate-100 text-slate-400" : "border-slate-200 bg-white"}`} onClick={() => setHiddenLayers((current) => toggleSet(current, layer.id))}>
+                      <span className="min-w-0"><span className="block truncate">{layer.name}</span><span className="block truncate text-xs text-slate-500">{layer.purpose ?? "Unclassified"}</span></span>
+                      <Eye size={15} />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </section>
+          <section className="mt-4 border-t border-slate-200 pt-3 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
+            <button type="button" className="flex w-full items-center justify-between text-left xl:pointer-events-none" onClick={() => setReviewExpanded((current) => !current)}>
+              <span className="text-sm font-semibold">Review queue <span className="font-normal text-slate-500">{visible.length}</span></span>
+              <ChevronDown className={`transition-transform xl:hidden ${reviewExpanded ? "rotate-180" : ""}`} size={16} />
+            </button>
+            <div className={`${reviewExpanded ? "mt-2 flex" : "hidden"} max-h-[420px] min-h-0 flex-col xl:mt-2 xl:flex xl:max-h-none xl:flex-1`}>
+              <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
               {visible.map((entity) => (
                 <label key={entity.id} className={`flex cursor-pointer items-start gap-2 rounded-md border p-2 ${selectedId === entity.id ? "border-gold-400 bg-gold-50" : "border-transparent hover:bg-white"}`}>
                   <input className="mt-1" type="checkbox" checked={checkedIds.has(entity.id)} onChange={() => setCheckedIds((current) => toggleSet(current, entity.id))} />
@@ -549,17 +587,18 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
                   </button>
                 </label>
               ))}
-            </div>
-            {checkedIds.size ? (
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <button className="btn-primary h-9 px-2 text-xs" onClick={() => batch("CONFIRMED")} disabled={loading}><Check size={14} /> Confirm</button>
-                <button className="btn-outline h-9 px-2 text-xs" onClick={() => batch("REJECTED")} disabled={loading}><X size={14} /> Reject</button>
               </div>
-            ) : null}
-          </div>
+              {checkedIds.size ? (
+                <div className="mt-3 grid shrink-0 grid-cols-2 gap-2">
+                  <button className="btn-primary h-9 px-2 text-xs" onClick={() => batch("CONFIRMED")} disabled={loading}><Check size={14} /> Confirm</button>
+                  <button className="btn-outline h-9 px-2 text-xs" onClick={() => batch("REJECTED")} disabled={loading}><X size={14} /> Reject</button>
+                </div>
+              ) : null}
+            </div>
+          </section>
         </aside>
 
-        <section className="relative min-h-[620px] overflow-hidden">
+        <section className="relative min-h-[620px] overflow-hidden xl:min-h-0">
           <CadMap
             cadFileId={cadFile.id}
             entities={entities}
@@ -577,7 +616,7 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
           </div>
         </section>
 
-        <aside className="border-l border-slate-200 p-4">
+        <aside className="border-l border-slate-200 p-4 xl:min-h-0 xl:overflow-y-auto">
           {selected ? (
             <form key={selected.id} onSubmit={saveSelected} className="space-y-4">
               <div><div className="text-xs uppercase tracking-wide text-slate-500">Selected candidate</div><h2 className="mt-1 text-lg font-semibold">{selected.label ?? selected.type}</h2></div>
@@ -720,4 +759,11 @@ function toggleSet(current: Set<string>, id: string) {
 
 function formatArea(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(2)} sq ft` : "Not available";
+}
+
+function formatElapsed(value: number) {
+  const totalSeconds = Math.max(0, Math.floor(value / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes ? `${minutes}m ${String(seconds).padStart(2, "0")}s` : `${seconds}s`;
 }

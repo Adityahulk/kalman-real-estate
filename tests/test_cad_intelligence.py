@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 MODULE_PATH = Path(__file__).parents[1] / "src" / "workers" / "cad-python" / "cad_intelligence.py"
@@ -45,6 +46,34 @@ class CadIntelligenceTests(unittest.TestCase):
         self.assertEqual(cad.inverse_rotated_point([49, 0], 90, 100, 50), [0.0, 0.0])
         self.assertEqual(cad.inverse_rotated_point([49, 99], 90, 100, 50), [99.0, 0.0])
         self.assertEqual(cad.inverse_rotated_point([0, 0], 180, 100, 50), [99.0, 49.0])
+
+    def test_working_image_is_bounded_and_coordinates_map_back_to_native_space(self):
+        try:
+            import numpy as np
+        except ImportError:
+            self.skipTest("numpy is not installed")
+        image = np.zeros((4000, 8000, 3), dtype=np.uint8)
+        with patch.dict(os.environ, {
+            "CAD_MAX_WORKING_PIXELS": "8000000",
+            "CAD_MAX_WORKING_DIMENSION": "4000",
+        }):
+            working, native_scale_x, native_scale_y = cad.bounded_working_image(image)
+        self.assertLessEqual(working.shape[0] * working.shape[1], 8_000_000)
+        self.assertLessEqual(max(working.shape[:2]), 4000)
+        self.assertAlmostEqual(working.shape[1] * native_scale_x, image.shape[1], delta=1)
+        self.assertAlmostEqual(working.shape[0] * native_scale_y, image.shape[0], delta=1)
+
+    def test_working_point_mapping_preserves_native_pdf_alignment(self):
+        point = cad.working_point_to_page(
+            [500, 250],
+            2,
+            2,
+            [100, 200, 2100, 1200],
+            [4000, 2000],
+            [0, 0, 800, 400],
+        )
+        self.assertAlmostEqual(point[0], 220.0)
+        self.assertAlmostEqual(point[1], 140.0)
 
     def test_dxf_topology_emits_review_candidates_not_confirmed_records(self):
         try:

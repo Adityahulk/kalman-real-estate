@@ -1,8 +1,9 @@
 import "@/server/load-env";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
-import { tmpdir } from "node:os";
+import { tmpdir, totalmem } from "node:os";
 import { promisify } from "node:util";
 import { CadEntityType, CadStatus, InsightSeverity, Prisma, PrismaClient } from "@prisma/client";
 import { Worker } from "bullmq";
@@ -62,7 +63,26 @@ type AnalysisWriteData = {
   rawArtifactKey: string;
 };
 
+type CadProgress = {
+  stage: string;
+  label: string;
+  timestamp?: string;
+};
+
+class CadProcessError extends Error {
+  constructor(
+    message: string,
+    readonly code: string,
+    readonly details: { exitCode?: number | null; signal?: NodeJS.Signals | null; diagnosticTail?: string[] } = {},
+  ) {
+    super(message);
+    this.name = "CadProcessError";
+  }
+}
+
 async function processCad(job: CadJob) {
+  const startedAt = new Date();
+  await assertWorkerCapacity();
   const mode = job.mode ?? "inspect";
   const cadFile = await prisma.cadFile.findFirstOrThrow({
     where: { id: job.cadFileId, tenantId: job.tenantId },
@@ -71,10 +91,32 @@ async function processCad(job: CadJob) {
   const status = mode === "inspect"
     ? cadFile.format === "DWG" ? CadStatus.CONVERTING : CadStatus.ANALYZING
     : CadStatus.EXTRACTING;
-  await prisma.cadFile.update({ where: { id: cadFile.id }, data: { status, errorMessage: null } });
+  await prisma.cadFile.update({
+    where: { id: cadFile.id },
+    data: {
+      status,
+      errorMessage: null,
+      processingLog: {
+        mode,
+        stage: "loading_file",
+        progressLabel: "Loading the stored drawing",
+        startedAt: startedAt.toISOString(),
+        heartbeatAt: startedAt.toISOString(),
+        elapsedMs: 0,
+      },
+    },
+  });
 
   const buffer = await getObjectResilient(cadFile.storageKey);
-  const working = await runCadIntelligence(cadFile.format, cadFile.originalName, buffer, mode, cadFile.analysis);
+  const working = await runCadIntelligence(
+    job,
+    cadFile.format,
+    cadFile.originalName,
+    buffer,
+    mode,
+    cadFile.analysis,
+    startedAt,
+  );
   try {
     const artifactKeys = await persistArtifacts(job, cadFile.id, working.dir, working.result);
     const rawArtifact = await persistRawArtifact(job, cadFile.id, mode, working.result);
@@ -306,11 +348,13 @@ async function createAggregateIssues(
 }
 
 async function runCadIntelligence(
+  job: CadJob,
   format: string,
   originalName: string,
   buffer: Buffer,
   mode: "inspect" | "extract",
   analysis: Prisma.CadAnalysisGetPayload<Record<string, never>> | null,
+  startedAt: Date,
 ) {
   const dir = await mkdtemp(join(tmpdir(), "kalman-cad-v2-"));
   try {
@@ -329,25 +373,182 @@ async function runCadIntelligence(
     const optionsPath = join(dir, "options.json");
     await writeFile(optionsPath, JSON.stringify({ analysis: serializeAnalysis(analysis) }));
     const script = join(process.cwd(), "src/workers/cad-python/cad_intelligence.py");
-    const { stdout } = await execFileAsync(process.env.PYTHON_BIN ?? "python3", [
+    const stdout = await runPythonExtractor(job, startedAt, process.env.PYTHON_BIN ?? "python3", [
       script,
       extractorPath,
       extractorFormat,
       mode,
       optionsPath,
       dir,
-    ], {
-      maxBuffer: Number(process.env.CAD_EXTRACTOR_MAX_OUTPUT_MB ?? 100) * 1024 * 1024,
-      timeout: Number(process.env.CAD_EXTRACTION_TIMEOUT_MS ?? 900_000),
-    });
-    const result = JSON.parse(stdout) as ExtractionResult;
+    ]);
+    let result: ExtractionResult;
+    try {
+      result = JSON.parse(stdout) as ExtractionResult;
+    } catch {
+      throw new CadProcessError("CAD intelligence worker returned unreadable output.", "INVALID_WORKER_OUTPUT");
+    }
     if (!Array.isArray(result.layers) || !Array.isArray(result.entities)) {
-      throw new Error("CAD intelligence worker returned an invalid result");
+      throw new CadProcessError("CAD intelligence worker returned an invalid result.", "INVALID_WORKER_OUTPUT");
     }
     return { result, dir };
   } catch (error) {
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
     throw error;
+  }
+}
+
+async function runPythonExtractor(job: CadJob, startedAt: Date, command: string, args: string[]) {
+  const maxOutputBytes = Number(process.env.CAD_EXTRACTOR_MAX_OUTPUT_MB ?? 100) * 1024 * 1024;
+  const timeoutMs = Number(process.env.CAD_EXTRACTION_TIMEOUT_MS ?? 1_800_000);
+  const diagnosticTail: string[] = [];
+  let stderrBuffer = "";
+  let outputBytes = 0;
+  let timedOut = false;
+  let outputExceeded = false;
+  let progressWrites = Promise.resolve();
+  let currentProgress: CadProgress = { stage: "loading_drawing", label: "Loading drawing" };
+
+  const child = spawn(command, args, {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      OMP_NUM_THREADS: "1",
+      OPENBLAS_NUM_THREADS: "1",
+      MKL_NUM_THREADS: "1",
+      NUMEXPR_NUM_THREADS: "1",
+      VECLIB_MAXIMUM_THREADS: "1",
+    },
+  });
+  const stdoutChunks: Buffer[] = [];
+  child.stdout.on("data", (chunk: Buffer) => {
+    outputBytes += chunk.length;
+    if (outputBytes > maxOutputBytes) {
+      outputExceeded = true;
+      child.kill("SIGKILL");
+      return;
+    }
+    stdoutChunks.push(chunk);
+  });
+  child.stderr.on("data", (chunk: Buffer) => {
+    stderrBuffer += chunk.toString("utf8");
+    const lines = stderrBuffer.split(/\r?\n/);
+    stderrBuffer = lines.pop() ?? "";
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (trimmed.startsWith("CAD_PROGRESS ")) {
+        try {
+          const progress = JSON.parse(trimmed.slice("CAD_PROGRESS ".length)) as CadProgress;
+          currentProgress = progress;
+          progressWrites = progressWrites.then(() => persistCadProgress(job, startedAt, progress));
+        } catch {
+          appendDiagnostic(diagnosticTail, trimmed);
+        }
+      } else {
+        appendDiagnostic(diagnosticTail, sanitizeDiagnostic(trimmed));
+      }
+    }
+  });
+
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    child.kill("SIGTERM");
+    setTimeout(() => child.kill("SIGKILL"), 5_000).unref();
+  }, timeoutMs);
+  const heartbeat = setInterval(() => {
+    progressWrites = progressWrites.then(() => persistCadProgress(job, startedAt, currentProgress));
+  }, 15_000);
+
+  const result = await new Promise<{ exitCode: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", (exitCode, signal) => resolve({ exitCode, signal }));
+  }).finally(() => {
+    clearTimeout(timeout);
+    clearInterval(heartbeat);
+  });
+  if (stderrBuffer.trim()) appendDiagnostic(diagnosticTail, sanitizeDiagnostic(stderrBuffer.trim()));
+  await progressWrites.catch(() => undefined);
+
+  if (timedOut) {
+    throw new CadProcessError("CAD processing exceeded the allowed processing time.", "EXTRACTION_TIMEOUT", {
+      ...result,
+      diagnosticTail,
+    });
+  }
+  if (outputExceeded) {
+    throw new CadProcessError("CAD extraction produced more data than the worker can safely process.", "OUTPUT_LIMIT", {
+      ...result,
+      diagnosticTail,
+    });
+  }
+  if (result.exitCode !== 0) {
+    throw new CadProcessError("CAD extraction process exited unexpectedly.", classifyExitFailure(result.signal, diagnosticTail), {
+      ...result,
+      diagnosticTail,
+    });
+  }
+  return Buffer.concat(stdoutChunks).toString("utf8");
+}
+
+async function persistCadProgress(job: CadJob, startedAt: Date, progress: CadProgress) {
+  const heartbeatAt = new Date();
+  await prisma.cadFile.updateMany({
+    where: { id: job.cadFileId, tenantId: job.tenantId },
+    data: {
+      processingLog: {
+        mode: job.mode ?? "inspect",
+        stage: progress.stage,
+        progressLabel: progress.label,
+        startedAt: startedAt.toISOString(),
+        heartbeatAt: heartbeatAt.toISOString(),
+        elapsedMs: heartbeatAt.getTime() - startedAt.getTime(),
+      },
+    },
+  });
+}
+
+function appendDiagnostic(lines: string[], line: string) {
+  if (!line) return;
+  lines.push(line.slice(0, 1_000));
+  if (lines.length > 20) lines.splice(0, lines.length - 20);
+}
+
+function sanitizeDiagnostic(value: string) {
+  return value
+    .replace(/\/tmp\/kalman-cad-v2-[^\s/'"]+/g, "[temporary-file]")
+    .replace(/\/app\/src\/workers\/cad-python\/cad_intelligence\.py/g, "CAD extractor");
+}
+
+function classifyExitFailure(signal: NodeJS.Signals | null, diagnostics: string[]) {
+  const text = diagnostics.join("\n").toLowerCase();
+  if (signal === "SIGKILL" || text.includes("out of memory") || text.includes("cannot allocate memory")) return "MEMORY_LIMIT";
+  if (text.includes("libgl.so") || text.includes("no module named") || text.includes("importerror")) return "DEPENDENCY_MISSING";
+  if (text.includes("cannot open broken document") || text.includes("filedataerror") || text.includes("syntaxerror")) return "INVALID_DRAWING";
+  if (text.includes("does not intersect") || text.includes("no safe business candidates")) return "DRAWING_REGION_EMPTY";
+  return "EXTRACTOR_FAILED";
+}
+
+async function workerMemory() {
+  const cgroupPath = "/sys/fs/cgroup/memory.max";
+  const value = await readFile(cgroupPath, "utf8").catch(() => "max");
+  const trimmed = value.trim();
+  const limitBytes = trimmed && trimmed !== "max" && Number.isFinite(Number(trimmed))
+    ? Number(trimmed)
+    : totalmem();
+  return {
+    limitBytes,
+    limitMb: Math.round(limitBytes / 1024 / 1024),
+    minimumMb: Number(process.env.CAD_MIN_MEMORY_MB ?? 2_800),
+  };
+}
+
+async function assertWorkerCapacity() {
+  const memory = await workerMemory();
+  if (memory.limitMb < memory.minimumMb) {
+    throw new CadProcessError(
+      `CAD processing requires at least ${memory.minimumMb} MB of worker memory; this container has ${memory.limitMb} MB.`,
+      "INSUFFICIENT_MEMORY",
+    );
   }
 }
 
@@ -508,13 +709,32 @@ new Worker<CadJob>(
     try {
       await processCad(job.data);
     } catch (error) {
-      const message = extractionErrorMessage(error);
+      const failure = extractionFailure(error);
+      const previous = await prisma.cadFile.findFirst({
+        where: { id: job.data.cadFileId, tenantId: job.data.tenantId },
+        select: { processingLog: true },
+      });
+      const previousLog = jsonObject(previous?.processingLog);
+      const startedAt = typeof previousLog.startedAt === "string" ? new Date(previousLog.startedAt) : null;
+      const failedAt = new Date();
       await prisma.cadFile.updateMany({
         where: { id: job.data.cadFileId, tenantId: job.data.tenantId },
         data: {
           status: CadStatus.FAILED,
-          errorMessage: message,
-          processingLog: { failedAt: new Date().toISOString(), mode: job.data.mode ?? "inspect", error: message },
+          errorMessage: failure.message,
+          processingLog: {
+            startedAt: startedAt && !Number.isNaN(startedAt.getTime()) ? startedAt.toISOString() : undefined,
+            failedAt: failedAt.toISOString(),
+            heartbeatAt: failedAt.toISOString(),
+            elapsedMs: startedAt && !Number.isNaN(startedAt.getTime()) ? failedAt.getTime() - startedAt.getTime() : undefined,
+            mode: job.data.mode ?? "inspect",
+            stage: "failed",
+            progressLabel: "CAD processing stopped",
+            failureCode: failure.code,
+            exitCode: failure.exitCode,
+            signal: failure.signal,
+            diagnosticTail: failure.diagnosticTail,
+          },
         },
       });
       throw error;
@@ -523,16 +743,75 @@ new Worker<CadJob>(
   { connection: connection as never, concurrency: 1 },
 );
 
-console.log("CAD intelligence worker listening on cad.process");
+const initialHealth = await cadWorkerHealth();
+await connection.set("kalman:cad-worker:health", JSON.stringify(initialHealth), "EX", 120);
+setInterval(async () => {
+  await connection.set("kalman:cad-worker:health", JSON.stringify(await cadWorkerHealth()), "EX", 120).catch(() => undefined);
+}, 60_000).unref();
 
-function extractionErrorMessage(error: unknown) {
-  const value = error as { stderr?: unknown; message?: unknown };
-  const stderr = typeof value?.stderr === "string" ? value.stderr : "";
-  const runtimeLine = stderr.split(/\r?\n/).map((line) => line.trim()).reverse().find((line) => line.startsWith("RuntimeError:"));
-  if (runtimeLine) return runtimeLine.replace(/^RuntimeError:\s*/, "");
-  if (typeof value?.message === "string") {
-    if (value.message.includes("timed out")) return "CAD extraction timed out. Reduce the drawing region or split the drawing and retry.";
-    return value.message.split(/\r?\n/)[0];
+console.log("CAD intelligence worker listening on cad.process", initialHealth);
+
+function extractionFailure(error: unknown) {
+  if (error instanceof CadProcessError) {
+    return {
+      code: error.code,
+      message: failureMessage(error.code, error.message),
+      exitCode: error.details.exitCode,
+      signal: error.details.signal,
+      diagnosticTail: error.details.diagnosticTail ?? [],
+    };
   }
-  return "CAD extraction failed";
+  const value = error as { stderr?: unknown; message?: unknown; code?: unknown };
+  const stderr = typeof value?.stderr === "string" ? value.stderr : "";
+  const diagnostics = stderr.split(/\r?\n/).map((line) => sanitizeDiagnostic(line.trim())).filter(Boolean).slice(-20);
+  const rawMessage = typeof value?.message === "string" ? value.message : "";
+  let code = typeof value?.code === "string" && value.code === "ENOENT" ? "DEPENDENCY_MISSING" : "EXTRACTOR_FAILED";
+  if (rawMessage.includes("No safe business candidates") || rawMessage.includes("does not intersect")) code = "DRAWING_REGION_EMPTY";
+  if (rawMessage.includes("invalid result") || rawMessage.includes("unreadable output")) code = "INVALID_WORKER_OUTPUT";
+  if (typeof value?.message === "string") {
+    if (value.message.includes("timed out")) {
+      return { code: "EXTRACTION_TIMEOUT", message: failureMessage("EXTRACTION_TIMEOUT"), diagnosticTail: diagnostics };
+    }
+  }
+  return { code, message: failureMessage(code), diagnosticTail: diagnostics };
+}
+
+function failureMessage(code: string, fallback?: string) {
+  if (code === "INSUFFICIENT_MEMORY") return fallback ?? "The CAD worker does not have enough memory for this drawing.";
+  if (code === "MEMORY_LIMIT") return "The CAD worker reached its memory limit. Increase worker memory or reduce the confirmed drawing region, then retry.";
+  if (code === "EXTRACTION_TIMEOUT") return "CAD processing took longer than the configured limit. Retry after confirming a tighter drawing region.";
+  if (code === "DEPENDENCY_MISSING") return "The CAD worker is missing a required PDF/OCR dependency. Rebuild the CAD worker image and retry.";
+  if (code === "INVALID_DRAWING") return "The PDF is corrupt, encrypted, or unsupported. Export an unlocked vector or mixed PDF and retry.";
+  if (code === "DRAWING_REGION_EMPTY") return "No usable site drawing was found in the confirmed region. Adjust the drawing region and retry.";
+  if (code === "OUTPUT_LIMIT") return "The drawing produced too much extraction data. Reduce the drawing region or split the plan and retry.";
+  if (code === "INVALID_WORKER_OUTPUT") return "The CAD worker completed but returned an invalid result. Rebuild the CAD worker image and retry.";
+  return "CAD processing failed inside the extraction worker. Review the worker diagnostics and retry.";
+}
+
+function jsonObject(value: Prisma.JsonValue | null | undefined) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+async function cadWorkerHealth() {
+  const python = process.env.PYTHON_BIN ?? "python3";
+  const dependency = await execFileAsync(python, ["-c", "import fitz, cv2, paddleocr, ezdxf, shapely"]).then(
+    () => ({ ok: true as const }),
+    (error) => ({ ok: false as const, error: sanitizeDiagnostic(error instanceof Error ? error.message : "Dependency check failed") }),
+  );
+  const tesseract = await execFileAsync(process.env.TESSERACT_BIN ?? "tesseract", ["--version"]).then(
+    () => ({ ok: true as const }),
+    (error) => ({ ok: false as const, error: sanitizeDiagnostic(error instanceof Error ? error.message : "Tesseract check failed") }),
+  );
+  const memory = await workerMemory();
+  const paddleHome = join(process.env.HOME ?? "/app", ".paddleocr");
+  return {
+    ready: dependency.ok && tesseract.ok && memory.limitMb >= memory.minimumMb,
+    checkedAt: new Date().toISOString(),
+    dependencies: {
+      pythonCadStack: dependency,
+      tesseract,
+      paddleModels: { ok: existsSync(paddleHome), path: paddleHome },
+    },
+    memory,
+  };
 }

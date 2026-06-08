@@ -1,6 +1,7 @@
 import { access } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import IORedis from "ioredis";
 
 const execFileAsync = promisify(execFile);
 
@@ -31,8 +32,10 @@ export async function getCadDependencyHealth() {
         error: error instanceof Error ? error.message : "ODA converter not reachable",
       }))
     : { ok: false as const, error: "ODA_CONVERTER_BIN is not configured" };
+  const worker = await getWorkerHealth();
 
   return {
+    worker,
     python: { command: python, ...(await commandOk(python, ["--version"])) },
     ezdxf,
     pymupdf,
@@ -48,4 +51,23 @@ export async function getCadDependencyHealth() {
       mixedPdf: pymupdf.ok && opencv.ok && shapely.ok && (paddleocr.ok || tesseract.ok),
     },
   };
+}
+
+async function getWorkerHealth() {
+  if (!process.env.REDIS_URL) return { ready: false, error: "REDIS_URL is not configured" };
+  const redis = new IORedis(process.env.REDIS_URL, {
+    lazyConnect: true,
+    maxRetriesPerRequest: 1,
+    connectTimeout: 3_000,
+  });
+  try {
+    await redis.connect();
+    const raw = await redis.get("kalman:cad-worker:health");
+    if (!raw) return { ready: false, error: "CAD worker heartbeat is not available" };
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch (error) {
+    return { ready: false, error: error instanceof Error ? error.message : "CAD worker health is unavailable" };
+  } finally {
+    redis.disconnect();
+  }
 }

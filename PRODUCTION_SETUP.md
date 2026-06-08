@@ -126,10 +126,13 @@ Install Tesseract separately and point the worker at the same Python runtime:
 ```env
 PYTHON_BIN="/absolute/path/to/python3"
 TESSERACT_BIN="/absolute/path/to/tesseract"
-CAD_EXTRACTION_TIMEOUT_MS="900000"
+CAD_EXTRACTION_TIMEOUT_MS="1800000"
 CAD_PDF_RENDER_SCALE="2"
+CAD_MAX_WORKING_PIXELS="30000000"
+CAD_MAX_WORKING_DIMENSION="6500"
 CAD_CELL_OCR_LIMIT="700"
 CAD_OCR_TIMEOUT_SECONDS="600"
+CAD_MIN_MEMORY_MB="2800"
 ```
 
 DWG remains optional and requires a separately licensed/configured converter. DXF and PDF do not require ODA.
@@ -220,7 +223,12 @@ docker compose -f docker-compose.prod.yml --env-file .env.production build cad-w
 ODA_CONVERTER_BIN="/opt/oda/ODAFileConverter"
 PYTHON_BIN="/usr/bin/python3"
 MAX_CAD_UPLOAD_MB="100"
-CAD_EXTRACTION_TIMEOUT_MS="300000"
+CAD_EXTRACTION_TIMEOUT_MS="1800000"
+CAD_MAX_WORKING_PIXELS="30000000"
+CAD_MAX_WORKING_DIMENSION="6500"
+CAD_CELL_OCR_LIMIT="700"
+CAD_OCR_TIMEOUT_SECONDS="600"
+CAD_MIN_MEMORY_MB="2800"
 CAD_EXTRACTOR_MAX_OUTPUT_MB="100"
 MAX_PDF_CAD_ENTITIES="25000"
 ```
@@ -229,7 +237,20 @@ If `ODA_APPIMAGE_URL` is empty, the CAD worker still supports DXF and vector PDF
 
 ### CAD Worker Capacity
 
-Run CAD separately from the web process. Use at least 4 GB RAM for ordinary plans and 8 GB for large mixed raster/vector sheets. Queue concurrency is intentionally one per worker so OCR and topology processing cannot exhaust the host.
+Run CAD separately from the web process. The minimum single-droplet target is 2 vCPU, 4 GB RAM, and 4 GB swap. Use 8 GB RAM for frequent large mixed raster/vector sheets. The CAD container is limited to 3 GB RAM with controlled swap allowance, and queue concurrency is intentionally one so OCR and topology processing cannot exhaust the host.
+
+Create 4 GB swap before processing large plans:
+
+```bash
+sudo fallocate -l 4G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+free -h
+```
+
+The worker refuses new extraction jobs when its cgroup memory limit is below `CAD_MIN_MEMORY_MB`. This produces a clear capacity error before opening a large PDF.
 
 PaddleOCR models are downloaded while building `Dockerfile.cad-worker`, copied into the non-root runtime user home, and remain inside the image. Production processing does not depend on downloading OCR models at job time.
 

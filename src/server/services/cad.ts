@@ -166,7 +166,7 @@ export async function completeCadUpload(context: RequestContext, id: string, inp
 }
 
 export async function getCadStatus(context: RequestContext, id: string) {
-  return prisma.cadFile.findFirstOrThrow({
+  const cadFile = await prisma.cadFile.findFirstOrThrow({
     where: { id, tenantId: context.tenantId },
     select: {
       id: true,
@@ -177,6 +177,18 @@ export async function getCadStatus(context: RequestContext, id: string) {
       updatedAt: true,
     },
   });
+  const log = jsonRecord(cadFile.processingLog);
+  const startedAt = typeof log.startedAt === "string" ? new Date(log.startedAt) : null;
+  return {
+    ...cadFile,
+    stage: typeof log.stage === "string" ? log.stage : null,
+    progressLabel: typeof log.progressLabel === "string" ? log.progressLabel : null,
+    latestHeartbeat: typeof log.heartbeatAt === "string" ? log.heartbeatAt : null,
+    failureCode: typeof log.failureCode === "string" ? log.failureCode : null,
+    elapsedMs: startedAt && !Number.isNaN(startedAt.getTime())
+      ? Math.max(Number(log.elapsedMs ?? 0), Date.now() - startedAt.getTime())
+      : Number(log.elapsedMs ?? 0),
+  };
 }
 
 export async function getCadScene(context: RequestContext, id: string) {

@@ -154,7 +154,7 @@ export function CadMap({
     };
   }, [bounds.maxX, bounds.maxY, bounds.minX, bounds.minY, cadFileId, editable, entities, hiddenLayerIds, imageRect, onCalibrationPoints, onGeometryChange, onSelect, selectedId, showPreview]);
 
-  return <div ref={target} className="h-full min-h-[560px] w-full bg-slate-100" />;
+  return <div ref={target} className="h-full min-h-[560px] w-full bg-slate-100 xl:min-h-0" />;
 }
 
 function featureFromEntity(entity: CadMapEntity, axisMaxY: number) {

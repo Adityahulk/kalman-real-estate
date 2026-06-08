@@ -50,6 +50,7 @@ export default async function CadReviewPage({ params }: { params: { id: string }
           version: cadFile.version,
           projectId: cadFile.projectId,
           errorMessage: cadFile.errorMessage,
+          processingLog: cadFile.processingLog,
         }}
         analysis={cadFile.analysis ? {
           discipline: cadFile.analysis.discipline,

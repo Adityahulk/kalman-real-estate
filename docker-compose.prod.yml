@@ -58,15 +58,31 @@ services:
     environment:
       PYTHON_BIN: /usr/bin/python3
       ODA_CONVERTER_BIN: ${ODA_CONVERTER_BIN:-}
-      CAD_EXTRACTION_TIMEOUT_MS: ${CAD_EXTRACTION_TIMEOUT_MS:-900000}
+      CAD_EXTRACTION_TIMEOUT_MS: ${CAD_EXTRACTION_TIMEOUT_MS:-1800000}
       CAD_PDF_RENDER_SCALE: ${CAD_PDF_RENDER_SCALE:-2}
+      CAD_MAX_WORKING_PIXELS: ${CAD_MAX_WORKING_PIXELS:-30000000}
+      CAD_MAX_WORKING_DIMENSION: ${CAD_MAX_WORKING_DIMENSION:-6500}
       CAD_CELL_OCR_LIMIT: ${CAD_CELL_OCR_LIMIT:-700}
       CAD_OCR_TIMEOUT_SECONDS: ${CAD_OCR_TIMEOUT_SECONDS:-600}
+      CAD_MIN_MEMORY_MB: ${CAD_MIN_MEMORY_MB:-2800}
       CAD_EXTRACTOR_MAX_OUTPUT_MB: ${CAD_EXTRACTOR_MAX_OUTPUT_MB:-100}
       MAX_PDF_CAD_ENTITIES: ${MAX_PDF_CAD_ENTITIES:-25000}
       TESSERACT_BIN: /usr/bin/tesseract
+      OMP_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+      VECLIB_MAXIMUM_THREADS: "1"
     volumes:
       - storage_data:/app/storage
+    mem_limit: 3g
+    memswap_limit: 4g
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c 'import fitz, cv2, paddleocr, ezdxf, shapely' && tesseract --version >/dev/null"]
+      interval: 60s
+      timeout: 30s
+      retries: 3
+      start_period: 90s
 
   document-worker:
     build:

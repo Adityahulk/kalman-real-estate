@@ -12,8 +12,18 @@ import os
 import re
 import subprocess
 import sys
+import gc
 from collections import defaultdict
 from pathlib import Path
+
+for thread_variable in (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+):
+    os.environ.setdefault(thread_variable, "1")
 
 
 PLOT_LABEL = re.compile(
@@ -29,6 +39,21 @@ REJECTED_PLOT_WORDS = {
     "LAYOUT",
     "LAYOUT PLAN",
 }
+
+PROGRESS_PREFIX = "CAD_PROGRESS "
+
+
+def report_progress(stage, label, **metadata):
+    print(
+        PROGRESS_PREFIX + json.dumps({
+            "stage": stage,
+            "label": label,
+            "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+            **metadata,
+        }),
+        file=sys.stderr,
+        flush=True,
+    )
 
 
 def safe_json(path):
@@ -413,30 +438,36 @@ def deduplicate_ocr(items):
 def ocr_with_rotations(image, artifact_dir):
     import cv2
 
-    engine = create_paddle_engine()
     all_items = []
-    engines_used = []
     height, width = image.shape[:2]
     for rotation in (0, 90):
         rotated = image if rotation == 0 else cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
-        items = ocr_with_paddle(rotated, engine)
-        engine_name = "paddleocr"
-        if not items:
-            path = Path(artifact_dir, f"ocr-{rotation}.png")
-            cv2.imwrite(str(path), rotated)
-            items = ocr_with_tesseract(path)
-            engine_name = "tesseract"
-        engines_used.append(engine_name)
+        path = Path(artifact_dir, f"ocr-{rotation}.png")
+        cv2.imwrite(str(path), rotated)
+        items = ocr_with_tesseract(path)
+        path.unlink(missing_ok=True)
         for item in items:
             item = {**item, "box": [
                 inverse_rotated_point(point, rotation, width, height)
                 for point in item["box"]
             ]}
             all_items.append(item)
-    return deduplicate_ocr(all_items), "+".join(sorted(set(engines_used))), engine
+        if rotation:
+            del rotated
+            gc.collect()
+    return deduplicate_ocr(all_items), "tesseract"
 
 
-def enrich_unlabelled_cells_with_paddle(image, cells, ocr_items, engine, expected_total):
+def enrich_unlabelled_cells_with_paddle(
+    working_image,
+    native_image,
+    cells,
+    ocr_items,
+    engine,
+    expected_total,
+    native_scale_x=1.0,
+    native_scale_y=1.0,
+):
     if engine is None:
         return ocr_items
     import cv2
@@ -452,7 +483,7 @@ def enrich_unlabelled_cells_with_paddle(image, cells, ocr_items, engine, expecte
         containing = [(index, cell) for index, cell in enumerate(cells) if point_in_bbox(center, cell["bbox"], padding=3)]
         if containing:
             occupied.add(min(containing, key=lambda value: value[1]["area"])[0])
-    page_area = image.shape[0] * image.shape[1]
+    page_area = working_image.shape[0] * working_image.shape[1]
     occupied_areas = sorted(cells[index]["area"] for index in occupied)
     median_area = occupied_areas[len(occupied_areas) // 2] if occupied_areas else None
     unresolved = [
@@ -472,11 +503,13 @@ def enrich_unlabelled_cells_with_paddle(image, cells, ocr_items, engine, expecte
     unresolved = unresolved[:min(configured_limit, recovery_target)]
     enriched = list(ocr_items)
     for _, cell in unresolved:
-        x0, y0, x1, y1 = cell["bbox"]
-        padding = 4
-        x0, y0 = max(0, x0 - padding), max(0, y0 - padding)
-        x1, y1 = min(image.shape[1], x1 + padding), min(image.shape[0], y1 + padding)
-        crop = image[y0:y1, x0:x1]
+        work_x0, work_y0, work_x1, work_y1 = cell["bbox"]
+        padding = 6
+        native_x0 = max(0, int(work_x0 * native_scale_x) - padding)
+        native_y0 = max(0, int(work_y0 * native_scale_y) - padding)
+        native_x1 = min(native_image.shape[1], int(math.ceil(work_x1 * native_scale_x)) + padding)
+        native_y1 = min(native_image.shape[0], int(math.ceil(work_y1 * native_scale_y)) + padding)
+        crop = native_image[native_y0:native_y1, native_x0:native_x1]
         if crop.size == 0:
             continue
         scale = max(2.0, min(4.0, 160 / max(crop.shape[0], crop.shape[1], 1)))
@@ -484,8 +517,13 @@ def enrich_unlabelled_cells_with_paddle(image, cells, ocr_items, engine, expecte
         for item in ocr_with_paddle(enlarged, engine):
             enriched.append({
                 **item,
-                "box": [[x0 + point[0] / scale, y0 + point[1] / scale] for point in item["box"]],
+                "box": [[
+                    (native_x0 + point[0] / scale) / native_scale_x,
+                    (native_y0 + point[1] / scale) / native_scale_y,
+                ] for point in item["box"]],
             })
+        del crop
+        del enlarged
     return deduplicate_ocr(enriched)
 
 
@@ -643,6 +681,35 @@ def load_recognition_image(doc, page, image_info):
     return image
 
 
+def bounded_working_image(image):
+    import cv2
+
+    cv2.setNumThreads(1)
+    height, width = image.shape[:2]
+    max_pixels = max(1, int(os.environ.get("CAD_MAX_WORKING_PIXELS", "30000000")))
+    max_dimension = max(512, int(os.environ.get("CAD_MAX_WORKING_DIMENSION", "6500")))
+    scale = min(
+        1.0,
+        max_dimension / max(width, height),
+        math.sqrt(max_pixels / max(1, width * height)),
+    )
+    if scale >= 0.999:
+        return image.copy(), 1.0, 1.0
+    working_width = max(1, int(round(width * scale)))
+    working_height = max(1, int(round(height * scale)))
+    working = cv2.resize(image, (working_width, working_height), interpolation=cv2.INTER_AREA)
+    return working, width / working_width, height / working_height
+
+
+def working_point_to_page(point, native_scale_x, native_scale_y, crop, image_size, image_rect):
+    return image_point_to_page(
+        [point[0] * native_scale_x, point[1] * native_scale_y],
+        crop,
+        image_size,
+        image_rect,
+    )
+
+
 def printed_area_near(label_item, ocr_items):
     center = [
         sum(point[0] for point in label_item["box"]) / len(label_item["box"]),
@@ -668,6 +735,7 @@ def printed_area_near(label_item, ocr_items):
 def extract_raster_plots(doc, page, analysis, artifact_dir):
     import cv2
 
+    report_progress("extracting_raster", "Extracting the site layout image")
     inspection = analysis.get("inspection") or {}
     image_info = inspection.get("recognitionImage") or {}
     image = load_recognition_image(doc, page, image_info)
@@ -680,20 +748,37 @@ def extract_raster_plots(doc, page, analysis, artifact_dir):
     x0, y0, x1, y1 = page_region_to_image_crop(region, page.rect, image_rect, [width, height])
     if x1 <= x0 or y1 <= y0:
         return [], {"ocrCount": 0, "cellCount": 0, "reason": "Confirmed drawing region does not intersect the raster site plan"}
-    crop_image = image[y0:y1, x0:x1]
+    native_crop = image[y0:y1, x0:x1].copy()
+    del image
     for excluded in analysis.get("excludedRegions") or []:
         ex0, ey0, ex1, ey1 = page_region_to_image_crop(excluded, page.rect, image_rect, [width, height])
         ex0, ey0 = max(x0, ex0), max(y0, ey0)
         ex1, ey1 = min(x1, ex1), min(y1, ey1)
         if ex1 > ex0 and ey1 > ey0:
-            crop_image[ey0 - y0:ey1 - y0, ex0 - x0:ex1 - x0] = 255
+            native_crop[ey0 - y0:ey1 - y0, ex0 - x0:ex1 - x0] = 255
+    working_image, native_scale_x, native_scale_y = bounded_working_image(native_crop)
     crop_path = Path(artifact_dir, "recognition-region.png")
-    cv2.imwrite(str(crop_path), crop_image)
+    cv2.imwrite(str(crop_path), working_image)
 
     expected_total = (analysis.get("expectedCounts") or {}).get("total")
-    cells = contour_cells(crop_image)
-    ocr_items, ocr_engine, paddle_engine = ocr_with_rotations(crop_image, artifact_dir)
-    ocr_items = enrich_unlabelled_cells_with_paddle(crop_image, cells, ocr_items, paddle_engine, expected_total)
+    report_progress("detecting_boundaries", "Detecting plot boundaries")
+    cells = contour_cells(working_image)
+    report_progress("reading_labels", "Reading plot labels")
+    ocr_items, ocr_engine = ocr_with_rotations(working_image, artifact_dir)
+    report_progress("recovering_labels", "Recovering unreadable plot labels")
+    paddle_engine = create_paddle_engine()
+    ocr_items = enrich_unlabelled_cells_with_paddle(
+        working_image,
+        native_crop,
+        cells,
+        ocr_items,
+        paddle_engine,
+        expected_total,
+        native_scale_x,
+        native_scale_y,
+    )
+    del paddle_engine
+    gc.collect()
 
     cell_candidates = defaultdict(list)
     for item in ocr_items:
@@ -734,7 +819,14 @@ def extract_raster_plots(doc, page, analysis, artifact_dir):
         center = selected["center"]
         cell = cells[cell_index]
         page_points = [
-            image_point_to_page(point, [x0, y0, x1, y1], [width, height], image_rect)
+            working_point_to_page(
+                point,
+                native_scale_x,
+                native_scale_y,
+                [x0, y0, x1, y1],
+                [width, height],
+                image_rect,
+            )
             for point in cell["points"]
         ]
         if page_points[0] != page_points[-1]:
@@ -793,7 +885,14 @@ def extract_raster_plots(doc, page, analysis, artifact_dir):
                 continue
             selected_missing.append(cell)
             page_points = [
-                image_point_to_page(point, [x0, y0, x1, y1], [width, height], image_rect)
+                working_point_to_page(
+                    point,
+                    native_scale_x,
+                    native_scale_y,
+                    [x0, y0, x1, y1],
+                    [width, height],
+                    image_rect,
+                )
                 for point in cell["points"]
             ]
             if page_points[0] != page_points[-1]:
@@ -826,13 +925,20 @@ def extract_raster_plots(doc, page, analysis, artifact_dir):
             entity["validation"]["blockingCodes"].append("DUPLICATE_OCR_LABEL")
             entity["confidence"] = min(entity["confidence"], 0.55)
 
-    return candidates, {
+    metadata = {
         "ocrEngine": ocr_engine,
         "ocrCount": len(ocr_items),
         "cellCount": len(cells),
         "candidateCount": len(candidates),
         "recognitionArtifact": crop_path.name,
+        "nativeSize": {"width": native_crop.shape[1], "height": native_crop.shape[0]},
+        "workingSize": {"width": working_image.shape[1], "height": working_image.shape[0]},
+        "nativeScale": {"x": native_scale_x, "y": native_scale_y},
     }
+    del native_crop
+    del working_image
+    gc.collect()
+    return candidates, metadata
 
 
 def pdf_drawing_points(drawing):
@@ -977,7 +1083,9 @@ def extract_pdf(source, options, artifact_dir):
     page_number = max(1, int(analysis.get("pageNumber") or 1))
     page = doc[page_number - 1]
     plots, raster_metadata = extract_raster_plots(doc, page, analysis, artifact_dir)
+    report_progress("extracting_electrical", "Extracting electrical layers")
     electrical, layer_metadata = extract_pdf_electrical(page)
+    report_progress("validating_candidates", "Validating extracted candidates")
     layers = [{"name": "Raster plot candidates", "purpose": "PLOT", "metadata": {"source": "raster-recognition"}}]
     layers.extend(layer_metadata)
     return {
@@ -1130,12 +1238,14 @@ def main():
     artifact_dir = sys.argv[5] if len(sys.argv) > 5 else str(source.parent)
     Path(artifact_dir).mkdir(parents=True, exist_ok=True)
 
+    report_progress("loading_drawing", "Loading drawing")
     if mode == "inspect":
         result = inspect_pdf(source, artifact_dir) if fmt == "VECTOR_PDF" else inspect_dxf(source)
     elif mode == "extract":
         result = extract_pdf(source, options, artifact_dir) if fmt == "VECTOR_PDF" else extract_dxf(source, options)
     else:
         raise RuntimeError(f"Unsupported CAD intelligence mode: {mode}")
+    report_progress("finalizing", "Finalizing CAD analysis")
     print(json.dumps(result))
 
 
