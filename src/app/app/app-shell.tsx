@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Bell,
   Bot,
   Building2,
   ChartNoAxesCombined,
@@ -13,14 +12,14 @@ import {
   FileStack,
   Gauge,
   Hammer,
-  Layers3,
   LogOut,
-  Map,
   Menu,
+  MoreVertical,
   Plus,
+  Settings,
   Users,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 
 type ShellProject = {
@@ -36,14 +35,13 @@ type ShellUser = {
   tenantName: string;
 };
 
-type ShellNotification = {
+type ShellFirm = {
   id: string;
-  title: string;
+  name: string;
 };
 
 const moduleNav = [
-  { key: "workspace", label: "Workspace", icon: Gauge },
-  { key: "cad", label: "CAD Map", icon: Map },
+  { key: "workspace", label: "Project details", icon: Gauge },
   { key: "ownership", label: "Ownership", icon: Users },
   { key: "development", label: "Development", icon: Hammer },
 ];
@@ -52,25 +50,29 @@ const globalNav = [
   { href: "/app/marketing", label: "Marketing", icon: Clapperboard },
   { href: "/app/finance", label: "Cost + BOQ", icon: ChartNoAxesCombined },
   { href: "/app/ai", label: "AI Insights", icon: Bot },
-  { href: "/app/notifications", label: "Notifications", icon: Bell },
 ];
 
 export function AppShell({
   children,
   user,
   projects,
-  notifications,
+  firms,
+  activeFirmId,
 }: {
   children: React.ReactNode;
   user: ShellUser;
   projects: ShellProject[];
-  notifications: ShellNotification[];
+  firms: ShellFirm[];
+  activeFirmId: string;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [fallbackProjectId, setFallbackProjectId] = useState("");
+  const [firmMenuOpen, setFirmMenuOpen] = useState(false);
+  const [switchingFirmId, setSwitchingFirmId] = useState("");
+  const firmMenuRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const stored = window.localStorage.getItem("kalman-sidebar-collapsed");
@@ -79,11 +81,19 @@ export function AppShell({
     if (storedProject) setFallbackProjectId(storedProject);
   }, []);
 
+  useEffect(() => {
+    function onPointerDown(event: PointerEvent) {
+      if (!firmMenuRef.current || firmMenuRef.current.contains(event.target as Node)) return;
+      setFirmMenuOpen(false);
+    }
+    if (firmMenuOpen) document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [firmMenuOpen]);
+
   const selectedProjectId = useMemo(() => {
     const match = pathname.match(/^\/app\/projects\/([^/]+)/);
     return match?.[1] ?? "";
   }, [pathname]);
-  const isCommandCenter = pathname === "/app";
   useEffect(() => {
     if (!selectedProjectId) return;
     window.localStorage.setItem("kalman-selected-project-id", selectedProjectId);
@@ -97,7 +107,7 @@ export function AppShell({
     });
   }
 
-  const selectedProject = projects.find((project) => project.id === (selectedProjectId || (isCommandCenter ? "" : fallbackProjectId))) ?? null;
+  const selectedProject = projects.find((project) => project.id === (selectedProjectId || fallbackProjectId)) ?? null;
   const sidebarWidth = collapsed ? "lg:pl-20" : "lg:pl-72";
 
   function projectHref(key: string) {
@@ -113,8 +123,25 @@ export function AppShell({
     router.push(`/app/projects/${projectId}`);
   }
 
+  async function switchFirm(tenantId: string) {
+    if (!tenantId || tenantId === activeFirmId || switchingFirmId) return;
+    setSwitchingFirmId(tenantId);
+    const response = await fetch("/api/v1/firms/select", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tenantId }),
+    });
+    setSwitchingFirmId("");
+    if (!response.ok) return;
+    window.localStorage.removeItem("kalman-selected-project-id");
+    setFallbackProjectId("");
+    setFirmMenuOpen(false);
+    router.push("/app");
+    router.refresh();
+  }
+
   return (
-    <div className="min-h-screen bg-slate-50 text-navy-950">
+    <div className="h-screen overflow-hidden bg-slate-50 text-navy-950">
       <button
         className="fixed left-4 top-4 z-50 rounded-lg border border-slate-200 bg-white p-2 shadow-sm lg:hidden"
         onClick={() => setMobileOpen((value) => !value)}
@@ -128,37 +155,15 @@ export function AppShell({
           collapsed ? "w-20" : "w-72"
         } ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
       >
-        <button
-          className="absolute -right-3 top-6 z-50 hidden h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:bg-slate-50 lg:flex"
-          onClick={toggleCollapsed}
-          type="button"
-          title={collapsed ? "Expand navigation" : "Minimize navigation"}
-          aria-label={collapsed ? "Expand navigation" : "Minimize navigation"}
-        >
-          {collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
-        </button>
-        <div className={`flex h-16 items-center gap-3 border-b border-slate-200 ${collapsed ? "justify-center px-2" : "px-4"}`}>
-          <div className="flex min-w-0 items-center gap-3">
-            <Link href="/app" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-navy-900 text-white">
-              <Building2 size={19} />
-            </Link>
-            {!collapsed ? (
-              <div className="min-w-0">
-                <div className="truncate text-sm font-semibold">{user.tenantName}</div>
-                <div className="truncate text-xs text-slate-500">{user.role.replaceAll("_", " ")}</div>
-              </div>
-            ) : null}
-          </div>
+        <div className="flex h-16 items-center gap-3 border-b border-slate-200 px-4">
+          <Link href="/app" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-navy-200 bg-navy-100 text-navy-900">
+            <Building2 size={19} />
+          </Link>
           {!collapsed ? (
-            <button
-              className="ml-auto rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-navy-900 lg:hidden"
-              onClick={toggleCollapsed}
-              type="button"
-              title="Minimize navigation"
-              aria-label="Minimize navigation"
-            >
-              <ChevronLeft size={17} />
-            </button>
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold">WIDESTATE OS</div>
+              <div className="truncate text-xs text-slate-500">{user.tenantName}</div>
+            </div>
           ) : null}
         </div>
 
@@ -214,12 +219,24 @@ export function AppShell({
         <div className="absolute bottom-0 left-0 right-0 space-y-2 border-t border-slate-200 p-3">
           <Link
             className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 ${collapsed ? "justify-center" : ""}`}
+            href="/app/settings/firm-details"
+            title="Settings"
+          >
+            <Settings size={17} />
+            {!collapsed ? "Settings" : null}
+          </Link>
+          <Link
+            className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 ${collapsed ? "justify-center" : ""}`}
             href="/app/documents"
             title="Document archive"
           >
             <FileStack size={17} />
             {!collapsed ? "Document archive" : null}
           </Link>
+          <button className="btn-ghost h-9 w-full justify-center px-2" onClick={toggleCollapsed} type="button">
+            {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
+            {!collapsed ? "Collapse" : null}
+          </button>
           <form action="/api/v1/auth/logout" method="post">
             <button className={`btn-ghost h-9 w-full px-2 ${collapsed ? "justify-center" : "justify-start"}`}>
               <LogOut size={17} />
@@ -229,16 +246,39 @@ export function AppShell({
         </div>
       </aside>
 
-      <div className={`transition-all ${sidebarWidth}`}>
+      <div className={`h-screen overflow-hidden transition-all ${sidebarWidth}`}>
         <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 px-4 pl-16 backdrop-blur lg:px-8">
-          <div className="flex min-w-0 items-center gap-2 text-sm text-slate-600">
-            <Layers3 size={17} />
-            <span className="truncate">{selectedProject ? `${selectedProject.name} · ${selectedProject.city}` : "Select or create a project"}</span>
+          <div className="relative flex min-w-0 items-center gap-2" ref={firmMenuRef}>
+            <div className="truncate text-sm font-semibold text-navy-950">Welcome to {user.tenantName}</div>
+            <button className="btn-ghost h-9 w-9 px-0 text-slate-500" type="button" onClick={() => setFirmMenuOpen((value) => !value)} title="Change firm">
+              <MoreVertical size={18} />
+            </button>
+            {firmMenuOpen ? (
+              <div className="absolute left-0 top-11 z-30 w-72 rounded-xl border border-slate-200 bg-white p-2 shadow-card">
+                <div className="px-2 py-1 text-xs font-medium uppercase tracking-wide text-slate-500">Select firm</div>
+                <div className="mt-1 space-y-1">
+                  {firms.map((firm) => (
+                    <button
+                      className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm ${
+                        firm.id === activeFirmId ? "bg-navy-100 text-navy-900" : "text-slate-700 hover:bg-slate-50"
+                      }`}
+                      key={firm.id}
+                      type="button"
+                      onClick={() => void switchFirm(firm.id)}
+                    >
+                      <span className="truncate">{firm.name}</span>
+                      {switchingFirmId === firm.id ? <span className="text-xs text-slate-500">Opening...</span> : null}
+                    </button>
+                  ))}
+                </div>
+                <Link className="mt-2 flex items-center gap-2 rounded-lg border border-dashed border-slate-300 px-3 py-2 text-sm font-medium text-navy-800 hover:bg-slate-50" href="/firms">
+                  <Plus size={15} />
+                  Add new firm
+                </Link>
+              </div>
+            ) : null}
           </div>
           <div className="flex items-center gap-4">
-            <div className="hidden min-w-56 text-xs text-slate-500 md:block">
-              {notifications[0]?.title ?? "No pending notifications"}
-            </div>
             <div className="text-right text-sm">
               <div className="font-medium">{user.name}</div>
               <div className="text-xs text-slate-500">{user.email}</div>
@@ -274,7 +314,7 @@ function ShellLink({
   );
   const className = `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
     collapsed ? "justify-center" : ""
-  } ${active ? "bg-navy-900 text-white" : "text-slate-700 hover:bg-slate-100 hover:text-navy-950"} ${
+  } ${active ? "border border-navy-200 bg-navy-100 text-navy-900" : "text-slate-700 hover:bg-slate-100 hover:text-navy-950"} ${
     disabled ? "pointer-events-none opacity-40" : ""
   }`;
 

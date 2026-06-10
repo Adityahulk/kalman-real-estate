@@ -187,25 +187,31 @@ enum AuditAction {
 }
 
 model Tenant {
-  id           String   @id @default(cuid())
-  name         String
-  slug         String   @unique
-  region       String?
-  gstin        String?
-  pan          String?
-  contactEmail String?
-  contactPhone String?
-  logoFileId   String?
-  letterhead   Json?
-  crmUrl       String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                String   @id @default(cuid())
+  name              String
+  slug              String   @unique
+  region            String?
+  gstin             String?
+  pan               String?
+  contactEmail      String?
+  contactPhone      String?
+  logoFileId        String?
+  logoDataUrl       String?
+  address           String?
+  authorizedPersons Json?
+  editKeyHash       String?
+  customFields      Json?
+  letterhead        Json?
+  crmUrl            String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   users       User[]
   projects    Project[]
   owners      Owner[]
   files       FileAsset[]
   auditEvents AuditEvent[]
+  memberships UserFirmMembership[]
 }
 
 model User {
@@ -221,10 +227,41 @@ model User {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  tenant             Tenant?      @relation(fields: [tenantId], references: [id])
-  createdAuditEvents AuditEvent[] @relation("AuditActor")
+  tenant             Tenant?              @relation(fields: [tenantId], references: [id])
+  firmMemberships    UserFirmMembership[]
+  firmCustomFields   FirmCustomField[]
+  createdAuditEvents AuditEvent[]         @relation("AuditActor")
 
   @@index([tenantId, role])
+}
+
+model FirmCustomField {
+  id          String   @id @default(cuid())
+  ownerUserId String
+  label       String
+  key         String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  owner User @relation(fields: [ownerUserId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerUserId, key])
+  @@index([ownerUserId])
+}
+
+model UserFirmMembership {
+  id        String   @id @default(cuid())
+  userId    String
+  tenantId  String
+  role      Role
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tenantId])
+  @@index([tenantId])
 }
 
 model Project {

@@ -7,24 +7,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const session = await getSessionUser();
   if (!session) redirect("/login");
 
-  const [user, notifications, projects] = await Promise.all([
+  const [user, tenant, projects, memberships] = await Promise.all([
     prisma.user.findUnique({
       where: { id: session.id },
-      include: { tenant: true },
+      select: { name: true, email: true },
     }),
-    prisma.notification.findMany({
-      where: {
-        tenantId: session.tenantId,
-        status: "PENDING",
-        OR: [{ userId: session.id }, { userId: null }],
-      },
-      orderBy: { createdAt: "desc" },
-      take: 3,
-    }),
+    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true } }),
     prisma.project.findMany({
       where: { tenantId: session.tenantId },
       orderBy: { updatedAt: "desc" },
       select: { id: true, name: true, city: true },
+    }),
+    prisma.userFirmMembership.findMany({
+      where: { userId: session.id },
+      include: { tenant: { select: { id: true, name: true } } },
+      orderBy: { createdAt: "asc" },
     }),
   ]);
 
@@ -34,10 +31,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         name: user?.name ?? session.email,
         email: user?.email ?? session.email,
         role: session.role,
-        tenantName: user?.tenant?.name ?? "Builder Workspace",
+        tenantName: tenant?.name ?? "Builder Workspace",
       }}
       projects={projects}
-      notifications={notifications.map((notification) => ({ id: notification.id, title: notification.title }))}
+      firms={memberships.map((membership) => membership.tenant)}
+      activeFirmId={session.tenantId}
     >
       {children}
     </AppShell>

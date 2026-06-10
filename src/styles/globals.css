@@ -7,8 +7,13 @@
 
 @layer base {
   :root {
-    --background: #ffffff;
-    --foreground: #0B1B3B;
+    --background: #F6F8FA;
+    --surface: #FFFFFF;
+    --primary: #2D5986;
+    --accent: #5A8A6E;
+    --primary-tint: #E8F0F7;
+    --foreground: #1A1A2E;
+    --muted: #6B7A8D;
   }
   html, body {
     background: var(--background);
@@ -22,13 +27,13 @@
 
 @layer components {
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-500 focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none;
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-300 focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none;
   }
   .btn-primary {
-    @apply btn bg-navy-900 text-white hover:bg-navy-800 shadow-sm;
+    @apply btn border border-navy-500 bg-navy-500 text-white hover:bg-navy-600 shadow-sm;
   }
   .btn-gold {
-    @apply btn bg-gold-shine text-navy-950 hover:brightness-105 shadow-sm font-semibold;
+    @apply btn border border-gold-500 bg-gold-500 text-white hover:bg-gold-600 shadow-sm font-semibold;
   }
   .btn-outline {
     @apply btn border border-slate-200 bg-white text-navy-900 hover:bg-slate-50;
@@ -37,13 +42,13 @@
     @apply btn text-navy-900 hover:bg-slate-100;
   }
   .card {
-    @apply rounded-xl border border-slate-200 bg-white shadow-card;
+    @apply rounded-xl border border-slate-200 bg-white shadow-sm;
   }
   .chip {
     @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium;
   }
   .input {
-    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-gold-500 focus:outline-none focus:ring-1 focus:ring-gold-500;
+    @apply w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm shadow-sm focus:border-navy-300 focus:outline-none focus:ring-1 focus:ring-navy-300;
   }
   .label {
     @apply mb-1 block text-xs font-medium text-slate-600;
@@ -56,8 +61,8 @@
 /* Scrollbar */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
-::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+::-webkit-scrollbar-thumb { background: #C4CFD8; border-radius: 999px; }
+::-webkit-scrollbar-thumb:hover { background: #94A3B1; }
 
 /* Print styles for letters */
 @media print {

@@ -48,7 +48,7 @@ export async function generateDocument(context: RequestContext, input: z.infer<t
   const pdf = await buildGeneratedDocumentPdf({
     title: input.type.replaceAll("_", " ").toUpperCase(),
     number: document.number,
-    tenantName: tenant?.name ?? "Kalman Estate OS",
+    tenantName: tenant?.name ?? "WIDESTATE OS",
     body: [
       `Generated from live ${input.recordType} record ${input.recordId}.`,
       ...Object.entries(input.data).map(([key, value]) => `${key}: ${String(value)}`),

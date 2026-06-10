@@ -41,6 +41,9 @@ export const allotPlotSchema = z.object({
 export async function allotPlot(context: RequestContext, plotId: string, input: z.infer<typeof allotPlotSchema>) {
   const result = await prisma.$transaction(async (tx) => {
     const before = await tx.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
+    if (before.currentOwnerId) {
+      throwBadRequest("This plot already has an owner. Use transfer instead.");
+    }
     await tx.owner.findFirstOrThrow({ where: { id: input.ownerId, tenantId: context.tenantId } });
     const plot = await tx.plot.update({
       where: { id: plotId },
@@ -78,6 +81,9 @@ export const transferPlotSchema = z.object({
 export async function transferPlot(context: RequestContext, plotId: string, input: z.infer<typeof transferPlotSchema>) {
   const result = await prisma.$transaction(async (tx) => {
     const before = await tx.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
+    if (!before.currentOwnerId || before.status === PlotStatus.COMPANY_OWNED) {
+      throwBadRequest("Company-owned plots cannot be transferred. Record the first allotment instead.");
+    }
     await tx.owner.findFirstOrThrow({ where: { id: input.buyerOwnerId, tenantId: context.tenantId } });
     const plot = await tx.plot.update({
       where: { id: plotId },
@@ -143,4 +149,10 @@ export async function getPlotAudit(context: RequestContext, plotId: string) {
     prisma.auditEvent.findMany({ where: { tenantId: context.tenantId, entityType: "Plot", entityId: plotId }, orderBy: { createdAt: "asc" } }),
   ]);
   return { plot, ownership, registry, audit };
+}
+
+function throwBadRequest(message: string): never {
+  const error = new Error(message);
+  error.name = "BadRequestError";
+  throw error;
 }

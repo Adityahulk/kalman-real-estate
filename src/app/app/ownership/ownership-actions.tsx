@@ -82,7 +82,7 @@ export function CreateOwnerForm() {
 
 export function AllotPlotForm({ plots, owners }: { plots: PlotOption[]; owners: OwnerOption[] }) {
   const [plotId, setPlotId] = useState(plots[0]?.id ?? "");
-  const [ownerId, setOwnerId] = useState(owners[0]?.id ?? "");
+  const [ownerId, setOwnerId] = useState("");
   const [amountInr, setAmountInr] = useState("0");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -114,6 +114,7 @@ export function AllotPlotForm({ plots, owners }: { plots: PlotOption[]; owners: 
         <label>
           <span className="label">Owner</span>
           <select className="input" value={ownerId} onChange={(event) => setOwnerId(event.target.value)}>
+            <option value="">Select owner intentionally</option>
             {owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
           </select>
         </label>
@@ -133,7 +134,7 @@ export function AllotPlotForm({ plots, owners }: { plots: PlotOption[]; owners: 
 
 export function TransferPlotForm({ plots, owners }: { plots: PlotOption[]; owners: OwnerOption[] }) {
   const [plotId, setPlotId] = useState(plots[0]?.id ?? "");
-  const [buyerOwnerId, setBuyerOwnerId] = useState(owners[0]?.id ?? "");
+  const [buyerOwnerId, setBuyerOwnerId] = useState("");
   const [amountInr, setAmountInr] = useState("0");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -155,7 +156,7 @@ export function TransferPlotForm({ plots, owners }: { plots: PlotOption[]; owner
     <form onSubmit={submit} className="card p-5">
       <h2 className="font-semibold">Transfer plot</h2>
       <label className="mt-4 block"><span className="label">Plot</span><select className="input" value={plotId} onChange={(event) => setPlotId(event.target.value)}>{plots.map((plot) => <option key={plot.id} value={plot.id}>{plot.code}</option>)}</select></label>
-      <label className="mt-3 block"><span className="label">Buyer</span><select className="input" value={buyerOwnerId} onChange={(event) => setBuyerOwnerId(event.target.value)}>{owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select></label>
+      <label className="mt-3 block"><span className="label">Buyer</span><select className="input" value={buyerOwnerId} onChange={(event) => setBuyerOwnerId(event.target.value)}><option value="">Select buyer intentionally</option>{owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}</select></label>
       <label className="mt-3 block"><span className="label">Amount in INR</span><input className="input" value={amountInr} onChange={(event) => setAmountInr(event.target.value)} /></label>
       {message ? <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
       <button className="btn-primary mt-4" disabled={loading || !plotId || !buyerOwnerId}>{loading ? <Loader2 className="animate-spin" size={17} /> : <Send size={17} />}Record transfer</button>
@@ -282,8 +283,8 @@ export function OwnershipDocumentUpload({
 
 export function PlotAllotmentForm({ plotId, owners }: { plotId: string; owners: OwnerDetailOption[] }) {
   const router = useRouter();
-  const [mode, setMode] = useState<"existing" | "new">("existing");
-  const [ownerId, setOwnerId] = useState(owners[0]?.id ?? "");
+  const [mode, setMode] = useState<"new" | "existing">("new");
+  const [ownerId, setOwnerId] = useState("");
   const [ownerType, setOwnerType] = useState("INDIVIDUAL");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -334,16 +335,18 @@ export function PlotAllotmentForm({ plotId, owners }: { plotId: string; owners: 
 
   return (
     <form onSubmit={submit} className="rounded-lg border border-slate-200 bg-white p-4">
-      <h3 className="text-sm font-semibold">Allot this plot</h3>
+      <h3 className="text-sm font-semibold">First allotment</h3>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Use this only when the plot is still with the company. No owner is selected by default.</p>
       <div className="mt-3 grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 text-sm">
-        <button type="button" className={`px-3 py-2 ${mode === "existing" ? "bg-navy-900 text-white" : "bg-white text-slate-700"}`} onClick={() => setMode("existing")}>Existing owner</button>
-        <button type="button" className={`px-3 py-2 ${mode === "new" ? "bg-navy-900 text-white" : "bg-white text-slate-700"}`} onClick={() => setMode("new")}>New owner</button>
+        <button type="button" className={`px-3 py-2 ${mode === "new" ? "bg-navy-100 text-navy-900" : "bg-white text-slate-700"}`} onClick={() => setMode("new")}>New owner</button>
+        <button type="button" className={`px-3 py-2 ${mode === "existing" ? "bg-navy-100 text-navy-900" : "bg-white text-slate-700"}`} onClick={() => setMode("existing")}>Existing owner</button>
       </div>
 
       {mode === "existing" ? (
         <label className="mt-3 block">
           <span className="label">Owner</span>
           <select className="input" value={ownerId} onChange={(event) => setOwnerId(event.target.value)}>
+            <option value="">Select owner intentionally</option>
             {owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
           </select>
         </label>
@@ -373,8 +376,8 @@ export function PlotAllotmentForm({ plotId, owners }: { plotId: string; owners: 
 
 export function PlotTransferForm({ plotId, owners }: { plotId: string; owners: OwnerDetailOption[] }) {
   const router = useRouter();
-  const [mode, setMode] = useState<"existing" | "new">("existing");
-  const [buyerOwnerId, setBuyerOwnerId] = useState(owners[0]?.id ?? "");
+  const [mode, setMode] = useState<"new" | "existing">("new");
+  const [buyerOwnerId, setBuyerOwnerId] = useState("");
   const [ownerType, setOwnerType] = useState("INDIVIDUAL");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -426,14 +429,16 @@ export function PlotTransferForm({ plotId, owners }: { plotId: string; owners: O
   return (
     <form onSubmit={submit} className="rounded-lg border border-slate-200 bg-white p-4">
       <h3 className="text-sm font-semibold">Transfer / resale</h3>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Use this only after a plot already has an owner. No buyer is selected by default.</p>
       <div className="mt-3 grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 text-sm">
-        <button type="button" className={`px-3 py-2 ${mode === "existing" ? "bg-navy-900 text-white" : "bg-white text-slate-700"}`} onClick={() => setMode("existing")}>Existing buyer</button>
-        <button type="button" className={`px-3 py-2 ${mode === "new" ? "bg-navy-900 text-white" : "bg-white text-slate-700"}`} onClick={() => setMode("new")}>New buyer</button>
+        <button type="button" className={`px-3 py-2 ${mode === "new" ? "bg-navy-100 text-navy-900" : "bg-white text-slate-700"}`} onClick={() => setMode("new")}>New buyer</button>
+        <button type="button" className={`px-3 py-2 ${mode === "existing" ? "bg-navy-100 text-navy-900" : "bg-white text-slate-700"}`} onClick={() => setMode("existing")}>Existing buyer</button>
       </div>
       {mode === "existing" ? (
         <label className="mt-3 block">
           <span className="label">Buyer</span>
           <select className="input" value={buyerOwnerId} onChange={(event) => setBuyerOwnerId(event.target.value)}>
+            <option value="">Select buyer intentionally</option>
             {owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
           </select>
         </label>

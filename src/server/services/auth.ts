@@ -1,8 +1,6 @@
 import bcrypt from "bcryptjs";
-import { SignJWT } from "jose";
 import { prisma } from "../db";
-
-const secret = new TextEncoder().encode(process.env.JWT_SECRET ?? "development-secret-change-me");
+import { createSessionToken } from "../session";
 
 export async function login(email: string, password: string) {
   const user = await prisma.user.findUnique({
@@ -19,16 +17,12 @@ export async function login(email: string, password: string) {
     throw new Error("Invalid login");
   }
 
-  const token = await new SignJWT({
-    sub: user.id,
-    tenantId: user.tenantId,
+  const token = await createSessionToken({
+    id: user.id,
+    tenantId: user.tenantId ?? "__unselected__",
     role: user.role,
     email: user.email,
-  })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime("12h")
-    .sign(secret);
+  });
 
   await prisma.user.update({
     where: { id: user.id },

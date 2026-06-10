@@ -1,9 +1,7 @@
-import Link from "next/link";
-import { ArrowRight, Building2, CheckCircle2, FileDown, Landmark, Map as MapIcon, Plus, Users } from "lucide-react";
-import type React from "react";
-import { PlotStatus } from "@prisma/client";
+import { Bell } from "lucide-react";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
+import { AlertActions } from "./alert-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -11,124 +9,34 @@ export default async function AppHomePage() {
   const session = await getSessionUser();
   if (!session) return null;
 
-  const projects = await prisma.project.findMany({
-    where: { tenantId: session.tenantId },
-    orderBy: { updatedAt: "desc" },
-    include: {
-      plots: { where: { archivedAt: null }, select: { id: true, status: true, currentOwnerId: true } },
-      _count: { select: { plots: { where: { archivedAt: null } } } },
-    },
+  const alerts = await prisma.approval.findMany({
+    where: { tenantId: session.tenantId, status: "PENDING" },
+    orderBy: { createdAt: "desc" },
+    take: 10,
   });
-  const plotStatus = await prisma.plot.groupBy({
-    by: ["status"],
-    where: { tenantId: session.tenantId, archivedAt: null },
-    _count: true,
-  });
-  const plotCounts = Object.fromEntries(plotStatus.map((item) => [item.status, item._count]));
 
   return (
-    <main className="px-4 py-6 lg:px-8">
-      <section>
-        <div className="flex flex-col justify-between gap-4 border-b border-slate-200 pb-6 lg:flex-row lg:items-end">
-          <div>
-            <div className="text-sm font-medium text-gold-700">Admin command center</div>
-            <h1 className="mt-1 text-3xl font-semibold tracking-tight">Projects and ownership at a glance</h1>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-              Open a project, check plot inventory, continue allotments, and download ownership reports.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Link className="btn-primary" href="/app/projects/new">
-              <Plus size={17} />
-              New project
-            </Link>
-            <Link className="btn-gold" href="/app/ownership/new-allotment">
-              <Users size={17} />
-              New allotment
-            </Link>
-          </div>
-        </div>
+    <main className="grid h-[calc(100vh-4rem)] gap-6 overflow-hidden px-4 py-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-8">
+      <section className="min-h-0 rounded-xl border border-dashed border-slate-200 bg-white" aria-label="Main workspace" />
 
-        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-          <Metric icon={Building2} label="Projects" value={String(projects.length)} />
-          <Metric icon={MapIcon} label="Total plots" value={String(Object.values(plotCounts).reduce((sum, count) => sum + count, 0))} />
-          <Metric icon={Landmark} label="With company" value={String(plotCounts.COMPANY_OWNED ?? 0)} />
-          <Metric icon={Users} label="Allotted" value={String(plotCounts.ALLOTTED ?? 0)} />
-          <Metric icon={CheckCircle2} label="Registered" value={String(plotCounts.REGISTERED ?? 0)} />
+      <section className="min-h-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
+        <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-4">
+          <Bell size={18} />
+          <h2 className="font-semibold">Alerts</h2>
+          <span className="chip bg-slate-100 text-slate-700">{alerts.length}</span>
         </div>
-
-        <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {projects.map((project) => {
-            const companyPlots = project.plots.filter((plot) => plot.status === PlotStatus.COMPANY_OWNED).length;
-            return (
-              <div key={project.id} className="card p-5 transition hover:-translate-y-0.5 hover:shadow-lg">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="flex items-center gap-2 text-sm text-slate-500">
-                      <Building2 size={16} />
-                      {project.city}
-                    </div>
-                    <h2 className="mt-2 text-lg font-semibold">{project.name}</h2>
-                    <p className="mt-1 line-clamp-2 text-sm text-slate-500">{project.address ?? "No address saved"}</p>
-                  </div>
-                  <Link href={`/app/projects/${project.id}`} title="Open project">
-                    <ArrowRight className="text-slate-400" size={18} />
-                  </Link>
-                </div>
-                <div className="mt-5 grid grid-cols-3 gap-2 text-center text-xs">
-                  <MiniMetric icon={MapIcon} label="Plots" value={project._count.plots} />
-                  <MiniMetric icon={Landmark} label="Company" value={companyPlots} />
-                  <MiniMetric icon={Users} label="Allotted" value={project.plots.filter((plot) => plot.status === PlotStatus.ALLOTTED).length} />
-                </div>
-                <div className="mt-5">
-                  <div className="mb-1 flex justify-between text-xs text-slate-500">
-                    <span>Progress</span>
-                    <span>{project.progressPct}%</span>
-                  </div>
-                  <div className="h-2 rounded-full bg-slate-100">
-                    <div className="h-2 rounded-full bg-gold-shine" style={{ width: `${project.progressPct}%` }} />
-                  </div>
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-2">
-                  <Link className="btn-primary h-9 px-3 text-xs" href={`/app/projects/${project.id}`}>Open</Link>
-                  <a className="btn-outline h-9 px-3 text-xs" href={`/api/v1/projects/${project.id}/report`}>
-                    <FileDown size={14} />
-                    Report
-                  </a>
-                </div>
-              </div>
-            );
-          })}
+        <div className="max-h-[calc(100vh-9rem)] divide-y divide-slate-100 overflow-auto">
+          {alerts.map((alert) => (
+            <article className="px-5 py-4" key={alert.id}>
+              <div className="text-sm font-medium">{alert.recordType} approval</div>
+              <div className="mt-1 text-xs text-slate-500">Record: {alert.recordId}</div>
+              {alert.notes ? <p className="mt-2 text-sm text-slate-600">{alert.notes}</p> : null}
+              <AlertActions id={alert.id} />
+            </article>
+          ))}
+          {!alerts.length ? <div className="px-5 py-8 text-center text-sm text-slate-500">No pending alerts.</div> : null}
         </div>
-
-        {!projects.length ? (
-          <div className="mt-6 rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center">
-            <Building2 className="mx-auto text-slate-400" size={32} />
-            <h2 className="mt-3 font-semibold">Create the first project</h2>
-            <p className="mt-2 text-sm text-slate-500">Use the New project button to start adding plots, ownership records, documents, and reports.</p>
-          </div>
-        ) : null}
       </section>
     </main>
-  );
-}
-
-function MiniMetric({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: number }) {
-  return (
-    <div className="rounded-lg bg-slate-50 p-3">
-      <Icon className="mx-auto text-navy-800" size={16} />
-      <div className="mt-1 font-semibold">{value}</div>
-      <div className="text-slate-500">{label}</div>
-    </div>
-  );
-}
-
-function Metric({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-card">
-      <Icon className="text-navy-800" size={18} />
-      <div className="mt-3 text-2xl font-semibold">{value}</div>
-      <div className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
-    </div>
   );
 }

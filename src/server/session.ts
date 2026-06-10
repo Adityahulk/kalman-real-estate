@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { jwtVerify } from "jose";
+import { jwtVerify, SignJWT } from "jose";
 import { Role } from "@prisma/client";
 
 const secret = new TextEncoder().encode(process.env.JWT_SECRET ?? "development-secret-change-me");
@@ -30,4 +30,17 @@ export async function verifySessionToken(token?: string): Promise<SessionUser | 
 
 export async function getSessionUser() {
   return verifySessionToken(cookies().get("kalman_session")?.value);
+}
+
+export async function createSessionToken(user: SessionUser) {
+  return new SignJWT({
+    sub: user.id,
+    tenantId: user.tenantId,
+    role: user.role,
+    email: user.email,
+  })
+    .setProtectedHeader({ alg: "HS256" })
+    .setIssuedAt()
+    .setExpirationTime("12h")
+    .sign(secret);
 }

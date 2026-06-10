@@ -65,6 +65,18 @@ async function main() {
     },
   });
 
+  const firmUsers = await prisma.user.findMany({
+    where: { tenantId: tenant.id },
+    select: { id: true, role: true },
+  });
+  for (const firmUser of firmUsers) {
+    await prisma.userFirmMembership.upsert({
+      where: { userId_tenantId: { userId: firmUser.id, tenantId: tenant.id } },
+      update: { role: firmUser.role },
+      create: { userId: firmUser.id, tenantId: tenant.id, role: firmUser.role },
+    });
+  }
+
   const project = await prisma.project.upsert({
     where: { id: "seed-vrinda-enclave" },
     update: {},
@@ -380,7 +392,7 @@ async function main() {
     });
   }
 
-  console.log("Seeded Kalman Estate OS");
+  console.log("Seeded WIDESTATE OS");
   console.log("Login: owner@saldhaland.example / Kalman@12345");
 }
 

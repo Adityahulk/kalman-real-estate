@@ -60,23 +60,23 @@ const proofPoints = [
 export default function Home() {
   return (
     <main className="min-h-screen bg-white text-navy-950">
-      <section className="relative overflow-hidden bg-navy-950 text-white">
-        <div className="absolute inset-0 opacity-20">
-          <div className="h-full w-full bg-[linear-gradient(rgba(255,255,255,.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.08)_1px,transparent_1px)] bg-[size:48px_48px]" />
+      <section className="relative overflow-hidden border-b border-slate-200 bg-navy-50">
+        <div className="absolute inset-0 opacity-50">
+          <div className="h-full w-full bg-[linear-gradient(rgba(107,122,141,.12)_1px,transparent_1px),linear-gradient(90deg,rgba(107,122,141,.12)_1px,transparent_1px)] bg-[size:48px_48px]" />
         </div>
         <div className="relative mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
           <nav className="flex items-center justify-between gap-4">
             <Link href="/" className="flex items-center gap-3">
-              <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-gold-shine text-navy-950">
+              <span className="flex h-10 w-10 items-center justify-center rounded-lg border border-navy-200 bg-white text-navy-900">
                 <Building2 size={21} />
               </span>
               <span>
-                <span className="block text-sm font-semibold uppercase tracking-wide text-gold-300">Kalman Estate OS</span>
-                <span className="block text-xs text-slate-300">Builder operating system</span>
+                <span className="block text-sm font-semibold uppercase tracking-wide text-navy-900">WIDESTATE OS</span>
+                <span className="block text-xs text-slate-500">Property operating system</span>
               </span>
             </Link>
             <div className="flex items-center gap-2">
-              <a className="hidden rounded-lg px-3 py-2 text-sm font-medium text-slate-300 hover:bg-white/10 hover:text-white sm:inline-flex" href="#modules">
+              <a className="hidden rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-white hover:text-navy-900 sm:inline-flex" href="#modules">
                 Modules
               </a>
               <Link className="btn-gold" href="/login">
@@ -87,28 +87,28 @@ export default function Home() {
 
           <div className="grid gap-10 py-12 lg:grid-cols-[0.94fr_1.06fr] lg:items-center lg:py-20">
             <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-medium text-gold-200">
+              <div className="inline-flex items-center gap-2 rounded-full border border-navy-200 bg-white px-3 py-1 text-xs font-medium text-navy-700">
                 <ShieldCheck size={14} />
-                Tenant-safe software for real estate builders
+                Managing partner of your property - Kalman Labs
               </div>
               <h1 className="mt-6 max-w-4xl text-4xl font-semibold leading-tight tracking-tight sm:text-5xl lg:text-6xl">
-                The operating system for real estate builders.
+                WIDESTATE OS
               </h1>
-              <p className="mt-5 max-w-2xl text-base leading-7 text-slate-300 sm:text-lg">
-                Control CAD maps, plot ownership, registry documents, site progress, marketing execution, costs, and AI reports from one production workspace.
+              <p className="mt-5 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg">
+                A simple operating system for property projects, ownership, registry documents, site progress, costs, and reports.
               </p>
               <div className="mt-7 flex flex-col gap-3 sm:flex-row">
                 <Link className="btn-gold h-11 px-5" href="/login">
                   Sign in
                 </Link>
-                <a className="btn border border-white/15 bg-white/10 text-white hover:bg-white/15" href="#modules">
+                <a className="btn-outline" href="#modules">
                   View platform modules
                 </a>
               </div>
-              <div className="mt-8 grid max-w-2xl gap-3 text-sm text-slate-300 sm:grid-cols-3">
-                <div className="border-t border-white/10 pt-3">DXF CAD visualizations</div>
-                <div className="border-t border-white/10 pt-3">Plot-level audit history</div>
-                <div className="border-t border-white/10 pt-3">Owner-safe document access</div>
+              <div className="mt-8 grid max-w-2xl gap-3 text-sm text-slate-600 sm:grid-cols-3">
+                <div className="border-t border-slate-200 pt-3">DXF CAD visualizations</div>
+                <div className="border-t border-slate-200 pt-3">Plot-level audit history</div>
+                <div className="border-t border-slate-200 pt-3">Owner-safe document access</div>
               </div>
             </div>
 
@@ -177,15 +177,15 @@ export default function Home() {
       </section>
 
       <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
-        <div className="rounded-lg bg-navy-950 px-6 py-8 text-white sm:px-8 lg:flex lg:items-center lg:justify-between">
+        <div className="rounded-lg border border-navy-200 bg-navy-50 px-6 py-8 text-navy-950 sm:px-8 lg:flex lg:items-center lg:justify-between">
           <div>
             <h2 className="text-2xl font-semibold tracking-tight">Ready to run your builder workspace?</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
               Sign in to manage CAD, ownership, documents, development, marketing, finance, and AI insights.
             </p>
           </div>
           <Link className="btn-gold mt-5 lg:mt-0" href="/login">
-            Sign in to Kalman Estate OS
+            Sign in to WIDESTATE OS
           </Link>
         </div>
       </section>
@@ -195,28 +195,28 @@ export default function Home() {
 
 function ProductPreview() {
   return (
-    <div className="rounded-lg border border-white/10 bg-white/10 p-3 shadow-2xl backdrop-blur">
-      <div className="rounded-lg bg-slate-950 p-4 ring-1 ring-white/10">
+    <div className="rounded-lg border border-slate-200 bg-white p-3 shadow-soft">
+      <div className="rounded-lg border border-slate-200 bg-white p-4">
         <div className="mb-4 flex items-center justify-between gap-3">
           <div>
-            <div className="text-xs uppercase tracking-wide text-slate-400">Vrinda Enclave</div>
+            <div className="text-xs uppercase tracking-wide text-slate-500">Vrinda Enclave</div>
             <div className="mt-1 text-lg font-semibold">Live builder command center</div>
           </div>
-          <span className="rounded-full bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-200">42% complete</span>
+          <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700">42% complete</span>
         </div>
 
         <div className="grid gap-3 lg:grid-cols-[1.15fr_0.85fr]">
-          <div className="rounded-lg border border-white/10 bg-navy-950 p-3">
-            <div className="mb-3 flex items-center justify-between text-xs text-slate-300">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="mb-3 flex items-center justify-between text-xs text-slate-600">
               <span className="inline-flex items-center gap-2"><Layers3 size={14} /> CAD site map</span>
               <span>DXF extracted</span>
             </div>
             <svg viewBox="0 0 520 330" className="h-auto w-full rounded-md bg-slate-900">
-              <rect width="520" height="330" fill="#071329" />
-              <path d="M52 56H468V276H52Z" fill="none" stroke="#64748b" strokeWidth="3" />
-              <path d="M78 100H444" stroke="#94a3b8" strokeWidth="18" strokeLinecap="round" opacity=".35" />
-              <path d="M78 230H444" stroke="#94a3b8" strokeWidth="18" strokeLinecap="round" opacity=".35" />
-              <path d="M254 76V258" stroke="#94a3b8" strokeWidth="16" strokeLinecap="round" opacity=".35" />
+              <rect width="520" height="330" fill="#171E28" />
+              <path d="M52 56H468V276H52Z" fill="none" stroke="#6B7A8D" strokeWidth="3" />
+              <path d="M78 100H444" stroke="#94A3B1" strokeWidth="18" strokeLinecap="round" opacity=".35" />
+              <path d="M78 230H444" stroke="#94A3B1" strokeWidth="18" strokeLinecap="round" opacity=".35" />
+              <path d="M254 76V258" stroke="#94A3B1" strokeWidth="16" strokeLinecap="round" opacity=".35" />
               {[
                 [98, 122, "A-101"],
                 [172, 122, "A-102"],
@@ -228,12 +228,12 @@ function ProductPreview() {
                 [374, 178, "B-204"],
               ].map(([x, y, label]) => (
                 <g key={label}>
-                  <rect x={Number(x)} y={Number(y)} width="58" height="42" rx="4" fill="#f4c54222" stroke="#e2b13a" />
+                  <rect x={Number(x)} y={Number(y)} width="58" height="42" rx="4" fill="#2D598633" stroke="#5E88B1" />
                   <text x={Number(x) + 12} y={Number(y) + 25} fill="#f8fafc" fontSize="12">{label}</text>
                 </g>
               ))}
-              <rect x="206" y="188" width="96" height="48" rx="5" fill="#22c55e22" stroke="#86efac" />
-              <text x="226" y="217" fill="#dcfce7" fontSize="12">Park</text>
+              <rect x="206" y="188" width="96" height="48" rx="5" fill="#5A8A6E33" stroke="#9BC2AA" />
+              <text x="226" y="217" fill="#DCEAE2" fontSize="12">Park</text>
             </svg>
           </div>
 
@@ -262,13 +262,13 @@ function PreviewPanel({
   detail: string;
 }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-white/[0.06] p-3">
-      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-slate-500">
         <Icon size={14} />
         {label}
       </div>
-      <div className="mt-2 text-sm font-semibold text-white">{value}</div>
-      <div className="mt-1 text-xs leading-5 text-slate-400">{detail}</div>
+      <div className="mt-2 text-sm font-semibold text-navy-950">{value}</div>
+      <div className="mt-1 text-xs leading-5 text-slate-500">{detail}</div>
     </div>
   );
 }
