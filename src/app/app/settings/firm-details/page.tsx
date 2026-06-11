@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Building2, Plus, Settings } from "lucide-react";
+import { Building2, FileStack, Plus, Settings } from "lucide-react";
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/server/session";
 import { firmFieldsForUser, firmsForUser } from "@/server/services/firms";
@@ -18,7 +18,11 @@ export default async function FirmDetailsPage() {
 
   return (
     <main className="h-[calc(100vh-4rem)] overflow-hidden px-4 py-6 lg:px-8">
-      <div className="grid h-full min-h-0 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+      <div className="mb-4 flex gap-2">
+        <Link className="btn-primary" href="/app/settings/firm-details"><Settings size={16} /> Firm details</Link>
+        <Link className="btn-outline" href="/app/settings/project-files"><FileStack size={16} /> Project files</Link>
+      </div>
+      <div className="grid h-[calc(100%-3.25rem)] min-h-0 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <section className="min-h-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
           <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-4">
             <Settings size={18} />

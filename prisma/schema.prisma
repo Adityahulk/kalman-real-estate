@@ -206,12 +206,13 @@ model Tenant {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  users       User[]
-  projects    Project[]
-  owners      Owner[]
-  files       FileAsset[]
-  auditEvents AuditEvent[]
-  memberships UserFirmMembership[]
+  users             User[]
+  projects          Project[]
+  owners            Owner[]
+  files             FileAsset[]
+  auditEvents       AuditEvent[]
+  memberships       UserFirmMembership[]
+  projectFileFields ProjectFileField[]
 }
 
 model User {
@@ -265,23 +266,27 @@ model UserFirmMembership {
 }
 
 model Project {
-  id                String    @id @default(cuid())
-  tenantId          String
-  name              String
-  city              String
-  address           String?
-  reraNumber        String?
-  landAreaSqft      Decimal?  @db.Decimal(14, 2)
-  siteContactPhone  String?
-  whatsappShareText String?
-  status            String    @default("ACTIVE")
-  budgetInr         Decimal?  @db.Decimal(14, 2)
-  spentInr          Decimal?  @db.Decimal(14, 2)
-  progressPct       Int       @default(0)
-  startedAt         DateTime?
-  handoverAt        DateTime?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id                  String    @id @default(cuid())
+  tenantId            String
+  name                String
+  city                String
+  state               String?
+  address             String?
+  developmentLicenses Json?
+  reraNumber          String?
+  landAreaAcres       Decimal?  @db.Decimal(14, 4)
+  landAreaSqft        Decimal?  @db.Decimal(14, 2)
+  siteContactPhone    String?
+  totalPlots          Int?
+  whatsappShareText   String?
+  status              String    @default("ACTIVE")
+  budgetInr           Decimal?  @db.Decimal(14, 2)
+  spentInr            Decimal?  @db.Decimal(14, 2)
+  progressPct         Int       @default(0)
+  startedAt           DateTime?
+  handoverAt          DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   tenant         Tenant          @relation(fields: [tenantId], references: [id])
   phases         Phase[]
@@ -293,6 +298,21 @@ model Project {
   marketingTasks MarketingTask[]
 
   @@index([tenantId])
+}
+
+model ProjectFileField {
+  id        String   @id @default(cuid())
+  tenantId  String
+  label     String
+  key       String
+  section   String   @default("PROJECT_FILES")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, section, key])
+  @@index([tenantId, section])
 }
 
 model Phase {
@@ -598,6 +618,7 @@ model FileAsset {
   notes              String?
   ownerType          String?
   ownerId            String?
+  categoryKey        String?
   uploadedById       String?
   deletedAt          DateTime?
   deletedById        String?
@@ -606,6 +627,7 @@ model FileAsset {
   tenant             Tenant                  @relation(fields: [tenantId], references: [id])
 
   @@index([tenantId, ownerType, ownerId])
+  @@index([tenantId, ownerType, ownerId, categoryKey])
   @@index([tenantId, deletedAt])
 }
 

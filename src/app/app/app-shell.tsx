@@ -107,7 +107,7 @@ export function AppShell({
     });
   }
 
-  const selectedProject = projects.find((project) => project.id === (selectedProjectId || fallbackProjectId)) ?? null;
+  const selectedProject = projects.find((project) => project.id === (selectedProjectId || (pathname === "/app" ? "" : fallbackProjectId))) ?? null;
   const sidebarWidth = collapsed ? "lg:pl-20" : "lg:pl-72";
 
   function projectHref(key: string) {

@@ -16,6 +16,7 @@ export const fileUploadSchema = z.object({
   notes: z.string().optional(),
   ownerType: z.string().optional(),
   ownerId: z.string().optional(),
+  categoryKey: z.string().max(100).optional(),
 });
 
 export const deleteFileSchema = z.object({
@@ -47,6 +48,7 @@ export async function createFileUpload(context: RequestContext, input: z.infer<t
       notes: input.notes,
       ownerType: input.ownerType,
       ownerId: input.ownerId,
+      categoryKey: input.categoryKey,
       uploadedById: context.userId,
     },
   });

@@ -5,10 +5,11 @@ const prisma = new PrismaClient();
 
 async function main() {
   const passwordHash = await bcrypt.hash("Kalman@12345", 12);
+  const saldhaEditKeyHash = await bcrypt.hash("saldhakey", 12);
 
   const tenant = await prisma.tenant.upsert({
     where: { slug: "saldha-land-developers" },
-    update: {},
+    update: { editKeyHash: saldhaEditKeyHash },
     create: {
       name: "Saldha Land Developers",
       slug: "saldha-land-developers",
@@ -17,6 +18,7 @@ async function main() {
       pan: "ABCDE1234F",
       contactEmail: "admin@saldhaland.example",
       contactPhone: "+91 98765 43210",
+      editKeyHash: saldhaEditKeyHash,
       crmUrl: "https://crm.example.com/saldha",
       letterhead: {
         address: "Punjab, India",
