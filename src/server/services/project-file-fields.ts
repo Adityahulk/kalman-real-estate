@@ -2,6 +2,14 @@ import { z } from "zod";
 import { RequestContext } from "../api";
 import { prisma } from "../db";
 
+export const defaultProjectFileFields = [
+  { label: "Registry", key: "registry" },
+  { label: "RERA", key: "rera" },
+  { label: "NOC", key: "noc" },
+  { label: "License", key: "license" },
+  { label: "Development file", key: "development_file" },
+] as const;
+
 export const projectFileFieldSchema = z.object({
   label: z.string().min(2).max(80),
   section: z.enum(["PROJECT_FILES", "CAD"]).default("PROJECT_FILES"),

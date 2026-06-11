@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { getSessionUser } from "@/server/session";
 import { firmFieldsForUser, firmForUser } from "@/server/services/firms";
 import { FirmDetailsEditor } from "./firm-details-editor";
+import { BackButton } from "@/components/back-button";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,7 @@ export default async function FirmDetailPage({ params }: { params: { firmId: str
 
   return (
     <main className="h-[calc(100vh-4rem)] overflow-hidden px-4 py-6 lg:px-8">
+      <BackButton fallbackHref="/app/settings/firm-details" />
       <FirmDetailsEditor
         firm={{
           id: firm.id,

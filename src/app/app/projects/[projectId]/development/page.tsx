@@ -4,6 +4,7 @@ import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
 import { ProgressForm, ProgressPhotoPanel } from "../../../development/development-actions";
 import { ManualSiteAssetForm } from "../../manual-entry-actions";
+import { BackButton } from "@/components/back-button";
 
 export const dynamic = "force-dynamic";
 
@@ -43,6 +44,7 @@ export default async function ProjectDevelopmentPage({ params }: { params: { pro
 
   return (
     <main className="px-4 py-6 lg:px-8">
+      <BackButton fallbackHref={`/app/projects/${project.id}`} />
       <div className="mb-6 border-b border-slate-200 pb-6">
         <div className="text-sm text-slate-500">{project.name}</div>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">Development dashboard</h1>

@@ -3,6 +3,7 @@ import { Role } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../db";
 import { createSessionToken, SessionUser } from "../session";
+import { defaultProjectFileFields } from "./project-file-fields";
 
 export const createFirmSchema = z.object({
   name: z.string().min(2).max(120),
@@ -72,6 +73,9 @@ export async function createFirm(user: SessionUser, input: z.infer<typeof create
     });
     await tx.userFirmMembership.create({
       data: { userId: user.id, tenantId: tenant.id, role: Role.BUILDER_OWNER },
+    });
+    await tx.projectFileField.createMany({
+      data: defaultProjectFileFields.map((field) => ({ tenantId: tenant.id, section: "PROJECT_FILES", ...field })),
     });
     return tenant;
   });

@@ -27,6 +27,17 @@ async function main() {
     },
   });
 
+  await prisma.projectFileField.createMany({
+    data: [
+      { tenantId: tenant.id, section: "PROJECT_FILES", label: "Registry", key: "registry" },
+      { tenantId: tenant.id, section: "PROJECT_FILES", label: "RERA", key: "rera" },
+      { tenantId: tenant.id, section: "PROJECT_FILES", label: "NOC", key: "noc" },
+      { tenantId: tenant.id, section: "PROJECT_FILES", label: "License", key: "license" },
+      { tenantId: tenant.id, section: "PROJECT_FILES", label: "Development file", key: "development_file" },
+    ],
+    skipDuplicates: true,
+  });
+
   await prisma.user.upsert({
     where: { email: "owner@saldhaland.example" },
     update: { passwordHash, status: "ACTIVE" },

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
 import { CadWorkspace } from "./cad-workspace";
+import { BackButton } from "@/components/back-button";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,7 @@ export default async function CadReviewPage({ params }: { params: { id: string }
 
   return (
     <main className="px-4 py-5 lg:px-6">
+      <BackButton fallbackHref={cadFile.projectId ? `/app/projects/${cadFile.projectId}/cad` : "/app/cad"} />
       <div className="mb-5 flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
         <div>
           <div className="text-sm text-slate-500">

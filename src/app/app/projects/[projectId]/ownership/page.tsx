@@ -4,6 +4,7 @@ import { PlotStatus } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
 import { fullInr } from "@/lib/format";
+import { BackButton } from "@/components/back-button";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +80,7 @@ export default async function ProjectOwnershipPage({
 
   return (
     <main className="px-4 py-6 lg:px-8">
+      <BackButton fallbackHref={`/app/projects/${project.id}`} />
       <div className="flex flex-col justify-between gap-4 border-b border-slate-200 pb-6 xl:flex-row xl:items-end">
         <div>
           <div className="text-sm text-slate-500">{project.name}</div>
