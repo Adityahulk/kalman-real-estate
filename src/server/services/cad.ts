@@ -149,7 +149,7 @@ export async function completeCadUpload(context: RequestContext, id: string, inp
   try {
     await getObjectResilient(input.storageKey);
   } catch {
-    throwBadRequest("The CAD file was not received by storage. Please upload the file again.");
+    throwBadRequest("The Map file was not received by storage. Please upload the file again.");
   }
   const cadFile = await prisma.cadFile.update({
     where: { id },
@@ -305,8 +305,8 @@ export async function startCadExtraction(context: RequestContext, id: string, in
     where: { id, tenantId: context.tenantId },
     include: { analysis: true },
   });
-  if (!file.analysis) throwBadRequest("CAD inspection is not ready yet");
-  if (file.status === CadStatus.PUBLISHED) throwBadRequest("Published CAD versions are immutable");
+  if (!file.analysis) throwBadRequest("Map inspection is not ready yet");
+  if (file.status === CadStatus.PUBLISHED) throwBadRequest("Published Map versions are immutable");
   await prisma.cadAnalysis.update({
     where: { cadFileId: id },
     data: {
@@ -319,7 +319,7 @@ export async function startCadExtraction(context: RequestContext, id: string, in
   });
   await prisma.cadFile.update({ where: { id }, data: { status: CadStatus.EXTRACTING, errorMessage: null } });
   const queue = await enqueueCadProcessing({ cadFileId: id, tenantId: context.tenantId, mode: "extract" });
-  if (!queue.queued) throwBadRequest(`CAD worker queue is unavailable: ${queue.reason}`);
+  if (!queue.queued) throwBadRequest(`Map worker queue is unavailable: ${queue.reason}`);
   await writeAuditEvent(context, {
     action: AuditAction.REVIEW,
     entityType: "CadFile",
@@ -341,7 +341,7 @@ export async function calibrateCad(context: RequestContext, id: string, input: z
       },
     },
   });
-  if (!file.analysis) throwBadRequest("CAD inspection is not ready");
+  if (!file.analysis) throwBadRequest("Map inspection is not ready");
   if (!file.scenes.length) throwBadRequest("Extract candidates before confirming scale");
   const drawingUnitsPerFoot = input.drawingDistance / input.knownLengthFeet;
   const calibration = {
@@ -416,7 +416,7 @@ export async function reviewCadBatch(context: RequestContext, id: string, input:
     include: { scenes: { orderBy: { createdAt: "desc" }, take: 1, select: { id: true } } },
   });
   const scene = file.scenes[0];
-  if (!scene) throwBadRequest("CAD candidates are not ready");
+  if (!scene) throwBadRequest("Map candidates are not ready");
   const changed = await prisma.cadEntity.updateMany({
     where: { id: { in: input.entityIds }, tenantId: context.tenantId, sceneId: scene.id },
     data: { status: input.status },
@@ -489,10 +489,10 @@ export async function publishCad(context: RequestContext, id: string, input: z.i
       scenes: { include: { entities: true }, orderBy: { createdAt: "desc" }, take: 1 },
     },
   });
-  if (file.status === CadStatus.PUBLISHED) throwBadRequest("This CAD version is already published");
+  if (file.status === CadStatus.PUBLISHED) throwBadRequest("This Map version is already published");
   if (file.status !== CadStatus.REVIEW_REQUIRED) throwBadRequest("Complete drawing setup, extraction, calibration, and candidate review before publishing");
   const scene = file.scenes[0];
-  if (!scene) throwBadRequest("CAD candidates are not ready for publish");
+  if (!scene) throwBadRequest("Map candidates are not ready for publish");
 
   const confirmedEntities = scene.entities.filter((entity) => entity.status === "CONFIRMED");
   if (!confirmedEntities.length) throwBadRequest("Confirm at least one reviewed candidate before publishing");
@@ -512,7 +512,7 @@ export async function publishCad(context: RequestContext, id: string, input: z.i
   const overrideable = blockingIssues.filter((issue) => issue.code === "PLOT_COUNT_MISMATCH");
   const nonOverrideable = blockingIssues.filter((issue) => issue.code !== "PLOT_COUNT_MISMATCH");
   if (nonOverrideable.length) {
-    throwBadRequest(`Resolve ${nonOverrideable.length} blocking CAD issue${nonOverrideable.length === 1 ? "" : "s"} before publishing`);
+    throwBadRequest(`Resolve ${nonOverrideable.length} blocking Map issue${nonOverrideable.length === 1 ? "" : "s"} before publishing`);
   }
   if ((overrideable.length || confirmedCountMismatch) && !input.overrideReason) {
     throwBadRequest(`The drawing states ${expectedPlotCount ?? "a different number of"} plots, but ${confirmedPlots.length} reviewed plots are confirmed. Resolve the difference or provide a publish override reason.`);
@@ -528,7 +528,7 @@ export async function publishCad(context: RequestContext, id: string, input: z.i
       select: { code: true },
     });
     if (existing.length) {
-      throwBadRequest(`Plots already exist with these codes: ${existing.slice(0, 10).map((plot) => plot.code).join(", ")}. Roll back the prior CAD publish or resolve duplicates first.`);
+      throwBadRequest(`Plots already exist with these codes: ${existing.slice(0, 10).map((plot) => plot.code).join(", ")}. Roll back the prior Map publish or resolve duplicates first.`);
     }
   }
 
@@ -596,7 +596,7 @@ export async function publishCad(context: RequestContext, id: string, input: z.i
             kind: "COMPANY_INVENTORY",
             amountInr: plot.priceInr,
             sharePct: 100,
-            notes: `Company inventory created from reviewed CAD publish ${batch.id}.`,
+            notes: `Company inventory created from reviewed Map publish ${batch.id}.`,
             createdById: context.userId,
           },
         });
@@ -670,7 +670,7 @@ export async function publishCad(context: RequestContext, id: string, input: z.i
     },
   });
   await createNotification(context, {
-    title: "CAD published",
+    title: "Map published",
     body: `Published ${result.plots.length} plots, ${result.assets.length} site assets, and ${result.checklistItems.length} plot zones from ${file.originalName}.`,
     data: { cadFileId: id, publishBatchId: result.batch.id, plotCount: result.plots.length, assetCount: result.assets.length, checklistItemCount: result.checklistItems.length },
   });
@@ -683,7 +683,7 @@ export async function getCadPreview(context: RequestContext, id: string) {
     where: { cadFileId: id, tenantId: context.tenantId },
     select: { previewArtifactKey: true },
   });
-  if (!analysis.previewArtifactKey) throwNotFound("CAD preview is not available");
+  if (!analysis.previewArtifactKey) throwNotFound("Map preview is not available");
   return {
     bytes: await getObjectResilient(analysis.previewArtifactKey),
     contentType: analysis.previewArtifactKey.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg",
@@ -710,7 +710,7 @@ export async function rollbackCadPublish(context: RequestContext, id: string, in
   const batch = file.publishBatches[0] ?? null;
   const legacyLinks = file.scenes[0]?.entities.flatMap((entity) => entity.spatialLinks).filter((link) => !link.publishBatchId) ?? [];
   const links = batch?.spatialLinks.length ? batch.spatialLinks : legacyLinks;
-  if (!links.length) throwBadRequest("No published CAD-created records were found for this version");
+  if (!links.length) throwBadRequest("No published Map-created records were found for this version");
 
   const plotIds = [...new Set(links.filter((link) => link.recordType === "Plot").map((link) => link.recordId))];
   const assetIds = [...new Set(links.filter((link) => link.recordType === "SiteAsset").map((link) => link.recordId))];
@@ -944,11 +944,11 @@ export async function startCadProcessing(context: RequestContext, id: string, re
     where: { id, tenantId: context.tenantId },
     include: { analysis: true },
   });
-  if (cadFile.status === CadStatus.PUBLISHED) throwBadRequest("Published CAD versions are immutable and cannot be processed again");
+  if (cadFile.status === CadStatus.PUBLISHED) throwBadRequest("Published Map versions are immutable and cannot be processed again");
   try {
     await getObjectResilient(cadFile.storageKey);
   } catch {
-    throwBadRequest("The uploaded CAD file is missing from storage. Re-upload the DXF file to repair this CAD record.");
+    throwBadRequest("The uploaded Map file is missing from storage. Re-upload the DXF file to repair this Map record.");
   }
 
   const updated = await prisma.cadFile.update({
@@ -964,8 +964,8 @@ export async function startCadProcessing(context: RequestContext, id: string, re
     after: { processingQueued: true, retried, mode, queue },
   });
   await createNotification(context, {
-    title: retried ? "CAD processing retried" : "CAD processing queued",
-    body: `${cadFile.originalName} is queued for CAD ${mode === "inspect" ? "inspection" : "extraction"}.`,
+    title: retried ? "Map processing retried" : "Map processing queued",
+    body: `${cadFile.originalName} is queued for Map ${mode === "inspect" ? "inspection" : "extraction"}.`,
     data: { cadFileId: id, status: updated.status, mode, queue },
   });
   return { cadFile: updated, queue };
@@ -980,7 +980,7 @@ export async function replaceCadFile(
     where: { id, tenantId: context.tenantId },
   });
   if (before.status === CadStatus.PUBLISHED) {
-    throwBadRequest("Published CAD versions are immutable. Upload a new CAD version instead.");
+    throwBadRequest("Published Map versions are immutable. Upload a new Map version instead.");
   }
   validateCadBytes(input.bytes, input.format);
 
@@ -1043,7 +1043,7 @@ function validateCadBytes(bytes: Buffer, format: CadFormat) {
     const isAsciiDxf = /\bSECTION\b/i.test(header) || /\bENTITIES\b/i.test(header);
     const isBinaryDxf = header.startsWith("AutoCAD Binary DXF");
     if (!isAsciiDxf && !isBinaryDxf) {
-      throwBadRequest("The uploaded file does not appear to be a valid DXF. Export it again from the CAD application.");
+      throwBadRequest("The uploaded file does not appear to be a valid DXF. Export it again from the mapping application.");
     }
   }
 }
@@ -1104,10 +1104,10 @@ export async function deleteCadFile(context: RequestContext, id: string, input: 
     },
   });
   if (before.status === CadStatus.PUBLISHED) {
-    throwBadRequest("Published CAD versions cannot be deleted. Upload a new version or keep the published audit trail.");
+    throwBadRequest("Published Map versions cannot be deleted. Upload a new version or keep the published audit trail.");
   }
   if (before.versions.length || before.publishBatches.length) {
-    throwBadRequest("CAD versions with a publish history cannot be deleted. Use publish rollback and keep the audit trail.");
+    throwBadRequest("Map versions with a publish history cannot be deleted. Use publish rollback and keep the audit trail.");
   }
 
   const entityIds = before.scenes.flatMap((scene) => scene.entities.map((entity) => entity.id));

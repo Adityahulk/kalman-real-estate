@@ -12,8 +12,8 @@ export function CadUploadForm({
   fixedProjectId,
   fixedParentType,
   fixedParentId,
-  title = "Upload recursive CAD",
-  description = "Create a site, plot, unit, floor, room, or asset CAD job against the selected parent.",
+  title = "Upload recursive Map",
+  description = "Create a site, plot, unit, floor, room, or asset Map job against the selected parent.",
   simple = false,
   redirectToReview = false,
 }: {
@@ -62,7 +62,7 @@ export function CadUploadForm({
     if (!response.ok) {
       setLoading(false);
       setStage("idle");
-      setMessage(payload.error ?? "CAD upload failed");
+      setMessage(payload.error ?? "Map upload failed");
       return;
     }
 
@@ -70,7 +70,7 @@ export function CadUploadForm({
     setStage("done");
     setMessage(
       payload.data.queue?.queued
-        ? `Uploaded ${payload.data.cadFile.originalName}. CAD processing has been queued.`
+        ? `Uploaded ${payload.data.cadFile.originalName}. Map processing has been queued.`
         : `Uploaded ${payload.data.cadFile.originalName}, but processing could not be queued: ${payload.data.queue?.reason ?? "queue unavailable"}.`,
     );
     if (redirectToReview) router.push(`/app/cad/${payload.data.cadFile.id}`);
@@ -118,7 +118,7 @@ export function CadUploadForm({
               </select>
             </label>
             <label>
-              <span className="label">CAD scope</span>
+              <span className="label">Map scope</span>
               <select className="input" value={parentType} onChange={(event) => setParentType(event.target.value as CadScope)}>
                 {Object.values(CadScope).map((scope) => (
                   <option key={scope} value={scope}>{scope.replaceAll("_", " ")}</option>
@@ -144,7 +144,7 @@ export function CadUploadForm({
           </>
         ) : null}
         <label className="md:col-span-2">
-          <span className="label">CAD file</span>
+          <span className="label">Map file</span>
           <input className="input" type="file" accept=".dxf,.pdf" onChange={chooseFile} />
           {selectedFile ? (
             <span className="mt-2 block text-xs text-slate-500">
@@ -156,8 +156,8 @@ export function CadUploadForm({
 
       {loading ? (
         <div className="mt-4 rounded-lg bg-gold-50 px-3 py-2 text-sm text-navy-900">
-          {stage === "preparing" ? "Preparing CAD upload..." : null}
-          {stage === "uploading" ? "Uploading CAD file and queueing extraction..." : null}
+          {stage === "preparing" ? "Preparing Map upload..." : null}
+          {stage === "uploading" ? "Uploading Map file and queueing extraction..." : null}
           {stage === "queueing" ? "Queueing extraction worker..." : null}
         </div>
       ) : null}
@@ -165,7 +165,7 @@ export function CadUploadForm({
 
       <button className="btn-primary mt-5 w-full" disabled={loading || !projects.length || !selectedFile}>
         {loading ? <Loader2 className="animate-spin" size={17} /> : <Upload size={17} />}
-        {selectedFile ? "Upload and process CAD" : "Choose CAD file first"}
+        {selectedFile ? "Upload and process Map" : "Choose Map file first"}
       </button>
     </form>
   );
@@ -179,8 +179,8 @@ async function readApiResponse(response: Response) {
     return {
       ok: false,
       error: response.status === 413
-        ? "The CAD file is larger than the server upload limit."
-        : `CAD upload failed with HTTP ${response.status}.`,
+        ? "The Map file is larger than the server upload limit."
+        : `Map upload failed with HTTP ${response.status}.`,
     };
   }
 }

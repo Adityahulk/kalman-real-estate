@@ -13,16 +13,16 @@ export async function POST(request: NextRequest) {
       const file = form.get("file");
       if (!(file instanceof File)) throwBadRequest("Choose a DXF or PDF drawing.");
       const maxBytes = Number(process.env.MAX_CAD_UPLOAD_MB ?? 100) * 1024 * 1024;
-      if (file.size <= 0) throwBadRequest("The selected CAD file is empty.");
+      if (file.size <= 0) throwBadRequest("The selected map file is empty.");
       if (file.size > maxBytes) {
-        throwBadRequest(`CAD files must be smaller than ${process.env.MAX_CAD_UPLOAD_MB ?? 100} MB.`);
+        throwBadRequest(`Map files must be smaller than ${process.env.MAX_CAD_UPLOAD_MB ?? 100} MB.`);
       }
 
       const format = parseCadFormat(String(form.get("format") ?? ""), file.name);
       return created(await createStoredCadUpload(context, {
         projectId: optionalString(form.get("projectId")),
         parentType: parseCadScope(form.get("parentType")),
-        parentId: requiredString(form.get("parentId"), "CAD parent is required."),
+        parentId: requiredString(form.get("parentId"), "Map parent is required."),
         format,
         originalName: file.name,
         contentType: file.type || (format === CadFormat.VECTOR_PDF ? "application/pdf" : "application/octet-stream"),
@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
 
 function parseCadScope(value: FormDataEntryValue | null) {
   const scope = String(value ?? "");
-  if (!Object.values(CadScope).includes(scope as CadScope)) throwBadRequest("Invalid CAD scope.");
+  if (!Object.values(CadScope).includes(scope as CadScope)) throwBadRequest("Invalid map scope.");
   return scope as CadScope;
 }
 

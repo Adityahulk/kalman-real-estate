@@ -12,8 +12,8 @@ export async function PUT(request: NextRequest, { params }: { params: { id: stri
     const file = form.get("file");
     if (!(file instanceof File)) throwBadRequest("Choose a DXF or PDF drawing.");
     const maxBytes = Number(process.env.MAX_CAD_UPLOAD_MB ?? 100) * 1024 * 1024;
-    if (file.size <= 0) throwBadRequest("The selected CAD file is empty.");
-    if (file.size > maxBytes) throwBadRequest(`CAD files must be smaller than ${process.env.MAX_CAD_UPLOAD_MB ?? 100} MB.`);
+    if (file.size <= 0) throwBadRequest("The selected map file is empty.");
+    if (file.size > maxBytes) throwBadRequest(`Map files must be smaller than ${process.env.MAX_CAD_UPLOAD_MB ?? 100} MB.`);
 
     const lower = file.name.toLowerCase();
     const format = lower.endsWith(".dxf")

@@ -20,7 +20,7 @@ import {
 const modules = [
   {
     icon: Map,
-    title: "CAD Visualization",
+    title: "Map Visualization",
     copy: "Upload DXF layouts and turn plots, roads, utilities, labels, and amenities into clickable builder maps.",
   },
   {
@@ -46,7 +46,7 @@ const modules = [
   {
     icon: BadgeIndianRupee,
     title: "Cost Control & AI",
-    copy: "Connect BOQ, vendors, POs, invoices, payments, CAD quantities, and AI variance insights in INR.",
+    copy: "Connect BOQ, vendors, POs, invoices, payments, Map quantities, and AI variance insights in INR.",
   },
 ];
 
@@ -106,7 +106,7 @@ export default function Home() {
                 </a>
               </div>
               <div className="mt-8 grid max-w-2xl gap-3 text-sm text-slate-600 sm:grid-cols-3">
-                <div className="border-t border-slate-200 pt-3">DXF CAD visualizations</div>
+                <div className="border-t border-slate-200 pt-3">DXF Map visualizations</div>
                 <div className="border-t border-slate-200 pt-3">Plot-level audit history</div>
                 <div className="border-t border-slate-200 pt-3">Owner-safe document access</div>
               </div>
@@ -181,7 +181,7 @@ export default function Home() {
           <div>
             <h2 className="text-2xl font-semibold tracking-tight">Ready to run your builder workspace?</h2>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-              Sign in to manage CAD, ownership, documents, development, marketing, finance, and AI insights.
+              Sign in to manage Map, ownership, documents, development, marketing, finance, and AI insights.
             </p>
           </div>
           <Link className="btn-gold mt-5 lg:mt-0" href="/login">
@@ -208,7 +208,7 @@ function ProductPreview() {
         <div className="grid gap-3 lg:grid-cols-[1.15fr_0.85fr]">
           <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
             <div className="mb-3 flex items-center justify-between text-xs text-slate-600">
-              <span className="inline-flex items-center gap-2"><Layers3 size={14} /> CAD site map</span>
+              <span className="inline-flex items-center gap-2"><Layers3 size={14} /> Map site map</span>
               <span>DXF extracted</span>
             </div>
             <svg viewBox="0 0 520 330" className="h-auto w-full rounded-md bg-slate-900">

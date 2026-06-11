@@ -17,7 +17,7 @@ export default async function FirmDetailPage({ params }: { params: { firmId: str
   if (!firm) notFound();
 
   return (
-    <main className="h-[calc(100vh-4rem)] overflow-hidden px-4 py-6 lg:px-8">
+    <main className="min-h-[calc(100vh-4rem)] px-4 py-6 lg:px-8">
       <BackButton fallbackHref="/app/settings/firm-details" />
       <FirmDetailsEditor
         firm={{

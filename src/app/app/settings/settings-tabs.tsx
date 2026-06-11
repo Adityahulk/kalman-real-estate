@@ -1,0 +1,12 @@
+import Link from "next/link";
+import { FileStack, Map, Settings } from "lucide-react";
+
+export function SettingsTabs({ active }: { active: "firm" | "files" | "maps" }) {
+  return (
+    <div className="mb-4 mt-2 flex flex-wrap gap-2">
+      <Link className={active === "firm" ? "btn-primary" : "btn-outline"} href="/app/settings/firm-details"><Settings size={16} /> Firm details</Link>
+      <Link className={active === "files" ? "btn-primary" : "btn-outline"} href="/app/settings/project-files"><FileStack size={16} /> Project files</Link>
+      <Link className={active === "maps" ? "btn-primary" : "btn-outline"} href="/app/settings/project-maps"><Map size={16} /> Project maps</Link>
+    </div>
+  );
+}

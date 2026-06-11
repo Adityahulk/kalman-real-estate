@@ -6,10 +6,15 @@ import { prisma } from "../db";
 
 export const manualPlotSchema = z.object({
   code: z.string().min(1),
-  label: z.string().optional(),
-  areaSqft: z.number().nonnegative().optional(),
+  areaSqYards: z.number().nonnegative().optional(),
   priceInr: z.number().nonnegative().optional(),
-  facing: z.string().optional(),
+  primeLocation: z.string().optional(),
+  boundaries: z.object({
+    north: z.string().optional(),
+    south: z.string().optional(),
+    east: z.string().optional(),
+    west: z.string().optional(),
+  }).optional(),
   notes: z.string().optional(),
 });
 
@@ -21,10 +26,11 @@ export async function createManualPlot(context: RequestContext, projectId: strin
         tenantId: context.tenantId,
         projectId,
         code: input.code,
-        label: input.label,
-        areaSqft: input.areaSqft,
+        areaSqYards: input.areaSqYards,
+        areaSqft: input.areaSqYards ? input.areaSqYards * 9 : undefined,
         priceInr: input.priceInr,
-        facing: input.facing,
+        primeLocation: input.primeLocation,
+        boundaries: input.boundaries,
         status: PlotStatus.COMPANY_OWNED,
       },
     });
@@ -36,7 +42,7 @@ export async function createManualPlot(context: RequestContext, projectId: strin
         kind: "COMPANY_INVENTORY",
         amountInr: input.priceInr,
         sharePct: 100,
-        notes: input.notes ?? "Manual non-CAD plot inventory created.",
+        notes: input.notes ?? "Manual non-Map plot inventory created.",
         createdById: context.userId,
       },
     });

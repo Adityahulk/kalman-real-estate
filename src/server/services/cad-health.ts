@@ -63,10 +63,10 @@ async function getWorkerHealth() {
   try {
     await redis.connect();
     const raw = await redis.get("kalman:cad-worker:health");
-    if (!raw) return { ready: false, error: "CAD worker heartbeat is not available" };
+    if (!raw) return { ready: false, error: "Map worker heartbeat is not available" };
     return JSON.parse(raw) as Record<string, unknown>;
   } catch (error) {
-    return { ready: false, error: error instanceof Error ? error.message : "CAD worker health is unavailable" };
+    return { ready: false, error: error instanceof Error ? error.message : "Map worker health is unavailable" };
   } finally {
     redis.disconnect();
   }

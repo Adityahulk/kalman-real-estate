@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { Building2, FileStack, Plus, Settings } from "lucide-react";
+import { Building2, Plus, Settings } from "lucide-react";
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/server/session";
 import { firmFieldsForUser, firmsForUser } from "@/server/services/firms";
 import { AddFirmFieldForm } from "./settings-actions";
 import { BackButton } from "@/components/back-button";
+import { SettingsTabs } from "../settings-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -18,19 +19,16 @@ export default async function FirmDetailsPage() {
   ]);
 
   return (
-    <main className="h-[calc(100vh-4rem)] overflow-hidden px-4 py-6 lg:px-8">
+    <main className="min-h-[calc(100vh-4rem)] px-4 py-6 lg:px-8">
       <BackButton fallbackHref="/app" />
-      <div className="mb-4 mt-2 flex gap-2">
-        <Link className="btn-primary" href="/app/settings/firm-details"><Settings size={16} /> Firm details</Link>
-        <Link className="btn-outline" href="/app/settings/project-files"><FileStack size={16} /> Project files</Link>
-      </div>
-      <div className="grid h-[calc(100%-5.5rem)] min-h-0 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <section className="min-h-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
+      <SettingsTabs active="firm" />
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+        <section className="self-start overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
           <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-4">
             <Settings size={18} />
             <h1 className="font-semibold">Firm details</h1>
           </div>
-          <div className="max-h-[calc(100vh-9rem)] divide-y divide-slate-100 overflow-auto">
+          <div className="divide-y divide-slate-100">
             {firms.map((firm) => (
               <Link key={firm.id} href={`/app/settings/firm-details/${firm.id}`} className="flex items-center justify-between gap-4 px-5 py-4 hover:bg-slate-50">
                 <span className="flex min-w-0 items-center gap-3">
@@ -49,7 +47,7 @@ export default async function FirmDetailsPage() {
           </div>
         </section>
 
-        <aside className="min-h-0 space-y-4 overflow-auto">
+        <aside className="space-y-4">
           <AddFirmFieldForm />
           <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-card">
             <div className="flex items-center gap-2">

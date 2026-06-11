@@ -10,13 +10,13 @@ export function DeleteCadButton({ cadFileId, fileName }: { cadFileId: string; fi
   const [message, setMessage] = useState("");
 
   async function remove() {
-    if (!window.confirm(`Are you sure you want to delete ${fileName ?? "this CAD file"}? This action cannot be undone.`)) return;
+    if (!window.confirm(`Are you sure you want to delete ${fileName ?? "this Map file"}? This action cannot be undone.`)) return;
     setLoading(true);
     setMessage("");
     const response = await fetch(`/api/v1/cad/${cadFileId}`, {
       method: "DELETE",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ reason: "Deleted from CAD workspace UI" }),
+      body: JSON.stringify({ reason: "Deleted from Map workspace UI" }),
     });
     const body = await response.json();
     setLoading(false);

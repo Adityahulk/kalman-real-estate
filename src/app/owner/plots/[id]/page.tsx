@@ -78,7 +78,7 @@ export default async function OwnerPlotPage({ params }: { params: { id: string }
               </defs>
               <text x="225" y="145" fill="#f8fafc" fontSize="28">{plot.code}</text>
               <text x="225" y="185" fill="#cbd5e1" fontSize="16">{plot.areaSqft?.toString() ?? "-"} sq ft</text>
-              <text x="225" y="225" fill="#8FB2D1" fontSize="15">Owner-visible live CAD boundary</text>
+              <text x="225" y="225" fill="#8FB2D1" fontSize="15">Owner-visible live Map boundary</text>
             </svg>
           </div>
         </div>

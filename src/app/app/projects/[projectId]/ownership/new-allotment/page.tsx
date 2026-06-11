@@ -18,41 +18,45 @@ export default async function NewAllotmentPage({
   if (!session) return null;
   const project = await prisma.project.findFirst({ where: { id: params.projectId, tenantId: session.tenantId } });
   if (!project) notFound();
-  const [plots, owners] = await Promise.all([
+  const [plots, firm] = await Promise.all([
     prisma.plot.findMany({
       where: { tenantId: session.tenantId, projectId: project.id, status: PlotStatus.COMPANY_OWNED, archivedAt: null },
       orderBy: { code: "asc" },
-      select: { id: true, code: true, areaSqft: true, priceInr: true },
+      select: { id: true, code: true, areaSqYards: true, areaSqft: true, priceInr: true },
     }),
-    prisma.owner.findMany({
-      where: { tenantId: session.tenantId },
-      orderBy: { name: "asc" },
-      select: { id: true, name: true, email: true, phone: true },
+    prisma.tenant.findUniqueOrThrow({
+      where: { id: session.tenantId },
+      select: { name: true, address: true, pan: true, contactEmail: true, authorizedPersons: true },
     }),
   ]);
+  const authorizedPersons = Array.isArray(firm.authorizedPersons)
+    ? firm.authorizedPersons.map((person) => {
+        if (typeof person === "string") return person;
+        if (person && typeof person === "object" && "name" in person && typeof person.name === "string") return person.name;
+        return JSON.stringify(person);
+      })
+    : [];
 
   return (
     <ActionPageShell
       eyebrow={project.name}
       title="New allotment"
-      description="Select a company-owned plot, add or choose the owner, record allotment details, then open Letter Studio for the allotment letter."
+      description="Select a plot and record the allottee, firm, payment, and supporting details."
       backHref={`/app/projects/${project.id}/ownership`}
       backLabel="Back to ownership ledger"
-      aside={<ActionHint title="After saving">The plot owner, status, ownership record, and audit history are updated. Letter generation stays a separate editable step.</ActionHint>}
+      aside={<ActionHint title="After saving">The plot moves out of company inventory and its ownership history is updated.</ActionHint>}
     >
-      <div className="card p-5">
-        <ProjectAllotmentFlow
-          projectId={project.id}
-          defaultPlotId={searchParams.plotId}
-          plots={plots.map((plot) => ({
-            id: plot.id,
-            code: plot.code,
-            areaSqft: plot.areaSqft?.toString() ?? null,
-            priceInr: plot.priceInr?.toString() ?? null,
-          }))}
-          owners={owners}
-        />
-      </div>
+      <ProjectAllotmentFlow
+        projectId={project.id}
+        defaultPlotId={searchParams.plotId}
+        plots={plots.map((plot) => ({
+          id: plot.id,
+          code: plot.code,
+          areaSqYards: plot.areaSqYards?.toString() ?? (plot.areaSqft ? String(Number(plot.areaSqft) / 9) : null),
+          priceInr: plot.priceInr?.toString() ?? null,
+        }))}
+        firm={{ ...firm, authorizedPersons }}
+      />
     </ActionPageShell>
   );
 }

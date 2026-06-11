@@ -20,7 +20,7 @@ export function ActionPageShell({
   aside?: React.ReactNode;
 }) {
   return (
-    <main className="px-4 py-6 lg:px-8">
+    <main className="min-h-[calc(100vh-4rem)] px-4 py-6 lg:px-8">
       <div className="mx-auto max-w-6xl">
         <Link className="mb-5 inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-navy-900" href={backHref}>
           <ArrowLeft size={16} />

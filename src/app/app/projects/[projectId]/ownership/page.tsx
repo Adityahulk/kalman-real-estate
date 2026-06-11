@@ -1,10 +1,10 @@
 import Link from "next/link";
-import { FileText, FileWarning, GitBranch, Landmark, Plus, Search, UserRoundCheck, Users } from "lucide-react";
+import { Landmark, Plus, Search, Users } from "lucide-react";
 import { PlotStatus } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
-import { fullInr } from "@/lib/format";
 import { BackButton } from "@/components/back-button";
+import { OwnershipPlotRow } from "./ownership-plot-row";
 
 export const dynamic = "force-dynamic";
 
@@ -13,11 +13,14 @@ export default async function ProjectOwnershipPage({
   searchParams,
 }: {
   params: { projectId: string };
-  searchParams: { q?: string; status?: string; owner?: string; docs?: string; registry?: string };
+  searchParams: { q?: string; status?: string; statusGroup?: string; owner?: string; docs?: string; registry?: string };
 }) {
   const session = await getSessionUser();
   if (!session) return null;
-  const project = await prisma.project.findFirstOrThrow({ where: { id: params.projectId, tenantId: session.tenantId } });
+  const [project, firm] = await Promise.all([
+    prisma.project.findFirstOrThrow({ where: { id: params.projectId, tenantId: session.tenantId } }),
+    prisma.tenant.findUniqueOrThrow({ where: { id: session.tenantId }, select: { name: true } }),
+  ]);
   const q = searchParams.q?.trim();
   const status = searchParams.status as PlotStatus | undefined;
   const owner = searchParams.owner?.trim();
@@ -32,6 +35,7 @@ export default async function ProjectOwnershipPage({
       projectId: project.id,
       archivedAt: null,
       ...(status ? { status } : {}),
+      ...(searchParams.statusGroup === "allotted-transferred" ? { status: { in: [PlotStatus.ALLOTTED, PlotStatus.TRANSFERRED] } } : {}),
       ...(q
         ? {
             OR: [
@@ -45,48 +49,34 @@ export default async function ProjectOwnershipPage({
     },
     include: {
       currentOwner: true,
-      registryRecords: { orderBy: { createdAt: "desc" }, take: 1 },
-      ownershipRecords: { orderBy: { effectiveAt: "desc" }, take: 1 },
+      checklistItems: { select: { progressPct: true } },
     },
     orderBy: { code: "asc" },
   });
 
-  const plotFiles = await prisma.fileAsset.groupBy({
-    by: ["ownerId"],
-    where: { tenantId: session.tenantId, ownerType: "Plot", ownerId: { in: allProjectPlots.map((plot) => plot.id) }, deletedAt: null },
-    _count: true,
-  });
-  const fileCountByPlot = new Map(plotFiles.map((file) => [file.ownerId, file._count]));
-  const missingDocuments = allProjectPlots.filter((plot) => plot.currentOwnerId && !fileCountByPlot.has(plot.id)).length;
   const statusCounts = allProjectPlots.reduce<Record<string, number>>((counts, plot) => {
     counts[plot.status] = (counts[plot.status] ?? 0) + 1;
     return counts;
   }, {});
   const generatedLetters = await prisma.generatedDocument.findMany({
-    where: { tenantId: session.tenantId, recordType: "Plot", recordId: { in: plots.map((plot) => plot.id) } },
+    where: { tenantId: session.tenantId, recordType: "Plot", recordId: { in: plots.map((plot) => plot.id) }, type: { contains: "allotment", mode: "insensitive" } },
     orderBy: { createdAt: "desc" },
   });
   const letterByPlot = new Map<string, typeof generatedLetters[number]>();
   for (const letter of generatedLetters) {
     if (!letterByPlot.has(letter.recordId)) letterByPlot.set(letter.recordId, letter);
   }
-  const filteredPlots = plots.filter((plot) => {
-    const hasDocs = (fileCountByPlot.get(plot.id) ?? 0) > 0;
-    const registryStatus = plot.registryRecords[0]?.status ?? "Not started";
-    if (searchParams.docs === "missing" && hasDocs) return false;
-    if (searchParams.registry === "pending" && ["Completed", "COMPLETED", "Registered", "REGISTERED"].includes(registryStatus)) return false;
-    return true;
-  });
+  const filteredPlots = plots;
 
   return (
-    <main className="px-4 py-6 lg:px-8">
+    <main className="min-h-[calc(100vh-4rem)] px-4 py-6 lg:px-8">
       <BackButton fallbackHref={`/app/projects/${project.id}`} />
       <div className="flex flex-col justify-between gap-4 border-b border-slate-200 pb-6 xl:flex-row xl:items-end">
         <div>
           <div className="text-sm text-slate-500">{project.name}</div>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">Ownership ledger</h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-            Search plots, check owner details, registry state, document gaps, and open the plot workspace for actions.
+            Search plots, check ownership and registry status, and open a plot for further actions.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -101,16 +91,14 @@ export default async function ProjectOwnershipPage({
         </div>
       </div>
 
-      <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-        <SummaryCard label="Total plots" value={String(allProjectPlots.length)} href={`/app/projects/${project.id}/ownership`} active={!searchParams.status && !searchParams.docs} />
+      <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <SummaryCard label="Total plots" value={String(allProjectPlots.length)} href={`/app/projects/${project.id}/ownership`} active={!searchParams.status && !searchParams.statusGroup && !searchParams.docs} />
         <SummaryCard label="Company inventory" value={String(statusCounts.COMPANY_OWNED ?? 0)} href={`/app/projects/${project.id}/ownership?status=COMPANY_OWNED`} active={searchParams.status === "COMPANY_OWNED"} />
-        <SummaryCard label="Allotted" value={String(statusCounts.ALLOTTED ?? 0)} href={`/app/projects/${project.id}/ownership?status=ALLOTTED`} active={searchParams.status === "ALLOTTED"} />
-        <SummaryCard label="Transferred" value={String(statusCounts.TRANSFERRED ?? 0)} href={`/app/projects/${project.id}/ownership?status=TRANSFERRED`} active={searchParams.status === "TRANSFERRED"} />
+        <SummaryCard label="Allotted + transferred" value={String((statusCounts.ALLOTTED ?? 0) + (statusCounts.TRANSFERRED ?? 0))} href={`/app/projects/${project.id}/ownership?statusGroup=allotted-transferred`} active={searchParams.statusGroup === "allotted-transferred"} />
         <SummaryCard label="Registered" value={String(statusCounts.REGISTERED ?? 0)} href={`/app/projects/${project.id}/ownership?status=REGISTERED`} active={searchParams.status === "REGISTERED"} />
-        <SummaryCard label="Missing docs" value={String(missingDocuments)} href={`/app/projects/${project.id}/ownership?docs=missing`} active={searchParams.docs === "missing"} />
       </section>
 
-      <form className="mt-6 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-[1fr_180px_180px_160px_160px_auto]">
+      <form className="mt-6 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-[1fr_180px_180px_auto]">
         <label>
           <span className="label">Search plot or owner</span>
           <div className="relative">
@@ -129,20 +117,6 @@ export default async function ProjectOwnershipPage({
           <span className="label">Owner</span>
           <input className="input" name="owner" defaultValue={searchParams.owner ?? ""} />
         </label>
-        <label>
-          <span className="label">Documents</span>
-          <select className="input" name="docs" defaultValue={searchParams.docs ?? ""}>
-            <option value="">All</option>
-            <option value="missing">Missing docs</option>
-          </select>
-        </label>
-        <label>
-          <span className="label">Registry</span>
-          <select className="input" name="registry" defaultValue={searchParams.registry ?? ""}>
-            <option value="">All</option>
-            <option value="pending">Pending</option>
-          </select>
-        </label>
         <button className="btn-outline self-end">Filter</button>
       </form>
 
@@ -158,53 +132,29 @@ export default async function ProjectOwnershipPage({
               <tr>
                 <th className="px-5 py-3">Plot</th>
                 <th className="px-5 py-3">Owner</th>
+                <th className="px-5 py-3">Area</th>
+                <th className="px-5 py-3">Development</th>
                 <th className="px-5 py-3">Status</th>
-                <th className="px-5 py-3">Registry</th>
-                <th className="px-5 py-3">Documents</th>
-                <th className="px-5 py-3">Value</th>
                 <th className="px-5 py-3">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredPlots.map((plot) => {
-                const documentCount = fileCountByPlot.get(plot.id) ?? 0;
                 const letter = letterByPlot.get(plot.id);
+                const development = plot.checklistItems.length
+                  ? Math.round(plot.checklistItems.reduce((total, item) => total + item.progressPct, 0) / plot.checklistItems.length)
+                  : null;
                 return (
-                  <tr key={plot.id} className="hover:bg-slate-50">
-                    <td className="px-5 py-3 font-medium">
-                      <Link className="text-navy-900 hover:underline" href={`/app/projects/${project.id}/plots/${plot.id}`}>{plot.code}</Link>
-                      <div className="text-xs text-slate-500">{plot.areaSqft?.toString() ?? "-"} sq ft</div>
-                    </td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-2">
-                        <UserRoundCheck size={16} className="text-slate-400" />
-                        {plot.currentOwner?.name ?? "Company inventory"}
-                      </div>
-                    </td>
-                    <td className="px-5 py-3"><span className="chip bg-slate-100 text-slate-700">{plot.status.replaceAll("_", " ")}</span></td>
-                    <td className="px-5 py-3">{plot.registryRecords[0]?.status ?? "Not started"}</td>
-                    <td className="px-5 py-3">
-                      {documentCount ? (
-                        <span className="chip bg-emerald-50 text-emerald-700">{documentCount} files</span>
-                      ) : (
-                        <span className="chip bg-amber-50 text-amber-800"><FileWarning size={13} /> Missing</span>
-                      )}
-                    </td>
-                    <td className="px-5 py-3">{fullInr(Number(plot.ownershipRecords[0]?.amountInr ?? plot.priceInr ?? 0))}</td>
-                    <td className="px-5 py-3">
-                      <div className="flex min-w-[300px] flex-wrap gap-2">
-                        <Link className="btn-primary h-8 px-3 text-xs" href={`/app/projects/${project.id}/plots/${plot.id}`}>Open</Link>
-                        <Link className="btn-outline h-8 px-3 text-xs" href={letter ? `/app/projects/${project.id}/plots/${plot.id}/letters/${letter.id}` : `/app/projects/${project.id}/plots/${plot.id}/letters/new`}>
-                          <FileText size={14} />
-                          {letter ? "Open Letter" : "Generate Letter"}
-                        </Link>
-                        <Link className="btn-outline h-8 px-3 text-xs" href={plot.currentOwnerId ? `/app/projects/${project.id}/plots/${plot.id}/transfer` : `/app/projects/${project.id}/ownership/new-allotment?plotId=${plot.id}`}>
-                          <GitBranch size={14} />
-                          {plot.currentOwnerId ? "Change Owner" : "Add Owner"}
-                        </Link>
-                      </div>
-                    </td>
-                  </tr>
+                  <OwnershipPlotRow
+                    key={plot.id}
+                    href={`/app/projects/${project.id}/plots/${plot.id}`}
+                    plot={plot.code}
+                    ownerName={plot.currentOwner?.name ?? firm.name}
+                    area={`${plot.areaSqYards?.toString() ?? (plot.areaSqft ? String(Number(plot.areaSqft) / 9) : "-")} sq yd`}
+                    development={development}
+                    allotmentStatus={plot.status === "COMPANY_OWNED" ? "Available for allotment" : plot.status.replaceAll("_", " ").toLowerCase().replace(/^\w/, (letter) => letter.toUpperCase())}
+                    document={letter ? { id: letter.id, status: letter.status, fileAssetId: letter.fileAssetId } : null}
+                  />
                 );
               })}
             </tbody>

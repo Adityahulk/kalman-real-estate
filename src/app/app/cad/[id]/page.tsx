@@ -37,7 +37,7 @@ export default async function CadReviewPage({ params }: { params: { id: string }
           </div>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">{cadFile.originalName}</h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-            Pan, inspect, review, search, layer-toggle, and publish extracted CAD intelligence into live business records.
+            Pan, inspect, review, search, layer-toggle, and publish extracted Map intelligence into live business records.
           </p>
         </div>
         <span className="chip bg-slate-100 text-slate-700">{cadFile.status.replaceAll("_", " ")}</span>

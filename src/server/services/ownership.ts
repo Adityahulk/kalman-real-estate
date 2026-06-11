@@ -35,6 +35,8 @@ export const allotPlotSchema = z.object({
   sharePct: z.number().min(0).max(100).optional(),
   documentId: z.string().optional(),
   effectiveAt: z.string().datetime().optional(),
+  paymentMode: z.string().optional(),
+  extraDetails: z.record(z.unknown()).optional(),
   notes: z.string().optional(),
 });
 
@@ -59,6 +61,8 @@ export async function allotPlot(context: RequestContext, plotId: string, input: 
         sharePct: input.sharePct,
         documentId: input.documentId,
         notes: input.notes,
+        paymentMode: input.paymentMode,
+        extraDetails: input.extraDetails as Prisma.InputJsonValue | undefined,
         effectiveAt: input.effectiveAt ? new Date(input.effectiveAt) : undefined,
         createdById: context.userId,
       },

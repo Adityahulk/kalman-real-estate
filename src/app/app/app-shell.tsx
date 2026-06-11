@@ -141,7 +141,7 @@ export function AppShell({
   }
 
   return (
-    <div className="h-screen overflow-hidden bg-slate-50 text-navy-950">
+    <div className="min-h-screen bg-slate-50 text-navy-950">
       <button
         className="fixed left-4 top-4 z-50 rounded-lg border border-slate-200 bg-white p-2 shadow-sm lg:hidden"
         onClick={() => setMobileOpen((value) => !value)}
@@ -151,7 +151,7 @@ export function AppShell({
       </button>
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 border-r border-slate-200 bg-white transition-all ${
+        className={`fixed inset-y-0 left-0 z-40 flex flex-col overflow-y-auto border-r border-slate-200 bg-white transition-all ${
           collapsed ? "w-20" : "w-72"
         } ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
       >
@@ -191,7 +191,7 @@ export function AppShell({
           )}
         </div>
 
-        <nav className="space-y-1 p-3">
+        <nav className="flex-1 space-y-1 p-3">
           {moduleNav.map((item) => (
             <ShellLink
               key={item.key}
@@ -216,7 +216,7 @@ export function AppShell({
           ))}
         </nav>
 
-        <div className="absolute bottom-0 left-0 right-0 space-y-2 border-t border-slate-200 p-3">
+        <div className="mt-auto space-y-2 border-t border-slate-200 p-3">
           <Link
             className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 ${collapsed ? "justify-center" : ""}`}
             href="/app/settings/firm-details"
@@ -246,7 +246,7 @@ export function AppShell({
         </div>
       </aside>
 
-      <div className={`h-screen overflow-hidden transition-all ${sidebarWidth}`}>
+      <div className={`min-h-screen transition-all ${sidebarWidth}`}>
         <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 px-4 pl-16 backdrop-blur lg:px-8">
           <div className="relative flex min-w-0 items-center gap-2" ref={firmMenuRef}>
             <div className="truncate text-sm font-semibold text-navy-950">Welcome to {user.tenantName}</div>

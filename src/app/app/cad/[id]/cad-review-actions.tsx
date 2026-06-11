@@ -39,7 +39,7 @@ export function CadEntityReviewForm({ cadFileId, entities, issueIds }: { cadFile
     });
     const body = await response.json();
     setLoading(false);
-    setMessage(response.ok ? "CAD review saved." : body.error ?? "Review failed");
+    setMessage(response.ok ? "Map review saved." : body.error ?? "Review failed");
     router.refresh();
   }
 

@@ -69,7 +69,7 @@ export default async function ProjectsPage({ searchParams }: { searchParams: { q
               <tr>
                 <th className="px-5 py-3">Project Name</th>
                 <th className="px-5 py-3">City</th>
-                <th className="px-5 py-3">CAD Status</th>
+                <th className="px-5 py-3">Map Status</th>
                 <th className="px-5 py-3">Total Plots</th>
                 <th className="px-5 py-3">With Company</th>
                 <th className="px-5 py-3">Actions</th>
@@ -90,7 +90,7 @@ export default async function ProjectsPage({ searchParams }: { searchParams: { q
                     <td className="px-5 py-3">
                       <span className="chip bg-slate-100 text-slate-700">
                         <Map size={13} />
-                        {cad?.status.replaceAll("_", " ") ?? "No CAD"}
+                        {cad?.status.replaceAll("_", " ") ?? "No Map"}
                       </span>
                     </td>
                     <td className="px-5 py-3">{project._count.plots}</td>

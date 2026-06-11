@@ -5,7 +5,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "WIDESTATE OS — Real Estate Builder Operating System",
   description:
-    "Real estate builder software for CAD visualization, ownership ledgers, site progress, documents, cost control, and AI insights.",
+    "Real estate builder software for Map visualization, ownership ledgers, site progress, documents, cost control, and AI insights.",
   metadataBase: new URL("https://kalman.estate")
 };
 

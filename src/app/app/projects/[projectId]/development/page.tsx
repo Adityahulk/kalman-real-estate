@@ -49,7 +49,7 @@ export default async function ProjectDevelopmentPage({ params }: { params: { pro
         <div className="text-sm text-slate-500">{project.name}</div>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">Development dashboard</h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-          CAD-linked site assets, contractor progress, owner-visible updates, issues, and photos for this project.
+          Map-linked site assets, contractor progress, owner-visible updates, issues, and photos for this project.
         </p>
       </div>
 
@@ -85,7 +85,7 @@ export default async function ProjectDevelopmentPage({ params }: { params: { pro
                   <div className="mt-2 text-xs text-slate-500">{asset.progressPct}% · {asset.status}</div>
                 </div>
               ))}
-              {!assets.length ? <Empty label="Publish site CAD assets or create assets to begin tracking." /> : null}
+              {!assets.length ? <Empty label="Publish site Map assets or create assets to begin tracking." /> : null}
             </div>
           </section>
 

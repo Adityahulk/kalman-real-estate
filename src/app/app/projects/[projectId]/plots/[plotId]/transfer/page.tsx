@@ -19,7 +19,7 @@ export default async function TransferPlotPage({ params }: { params: { projectId
   return (
     <ActionPageShell
       eyebrow={`${plot.project.name} / ${plot.code}`}
-      title="Change owner"
+      title="New transfer"
       description="Record a transfer or resale. The ownership timeline, current owner, plot status, and audit history will update after saving."
       backHref={`/app/projects/${plot.projectId}/plots/${plot.id}`}
       backLabel="Back to plot"

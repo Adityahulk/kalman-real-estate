@@ -77,7 +77,7 @@ export function CadMap({
       sourceBounds.maxX,
       axisMaxY - sourceBounds.minY,
     ];
-    const projection = new Projection({ code: `CAD-${cadFileId}`, units: "pixels", extent });
+    const projection = new Projection({ code: `Map-${cadFileId}`, units: "pixels", extent });
     const layers = [];
     if (showPreview && imageRect?.length === 4) {
       const rect = imageExtent(imageRect, axisMaxY);

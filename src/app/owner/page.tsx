@@ -30,7 +30,7 @@ export default async function OwnerPortalPage() {
   return (
     <main className="mx-auto max-w-6xl px-4 py-6">
       <h1 className="text-3xl font-semibold tracking-tight">My plots</h1>
-      <p className="mt-2 text-sm text-slate-600">Owner-visible CAD, documents, registry, construction progress, and photos.</p>
+      <p className="mt-2 text-sm text-slate-600">Owner-visible Map, documents, registry, construction progress, and photos.</p>
 
       <section className="mt-6 grid gap-4 md:grid-cols-2">
         {plots.map((plot) => {
@@ -47,7 +47,7 @@ export default async function OwnerPortalPage() {
                 <span className="chip bg-slate-100 text-slate-700">{plot.areaSqft?.toString() ?? "-"} sq ft</span>
               </div>
               <div className="mt-4 grid grid-cols-3 gap-3 text-sm">
-                <div className="rounded-lg bg-slate-50 p-3"><MapPinned size={16} /><div className="mt-2">CAD</div></div>
+                <div className="rounded-lg bg-slate-50 p-3"><MapPinned size={16} /><div className="mt-2">Map</div></div>
                 <div className="rounded-lg bg-slate-50 p-3"><Hammer size={16} /><div className="mt-2">{progress}%</div></div>
                 <div className="rounded-lg bg-slate-50 p-3"><FileText size={16} /><div className="mt-2">{fullInr(Number(plot.priceInr ?? 0))}</div></div>
               </div>

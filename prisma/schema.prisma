@@ -306,13 +306,17 @@ model ProjectFileField {
   label     String
   key       String
   section   String   @default("PROJECT_FILES")
+  parentId  String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent   ProjectFileField?  @relation("ProjectMapSubFields", fields: [parentId], references: [id], onDelete: Cascade)
+  children ProjectFileField[] @relation("ProjectMapSubFields")
 
   @@unique([tenantId, section, key])
   @@index([tenantId, section])
+  @@index([parentId])
 }
 
 model Phase {
@@ -366,7 +370,10 @@ model Plot {
   code           String
   label          String?
   areaSqft       Decimal?   @db.Decimal(12, 2)
+  areaSqYards    Decimal?   @db.Decimal(12, 2)
   priceInr       Decimal?   @db.Decimal(14, 2)
+  primeLocation  String?
+  boundaries     Json?
   status         PlotStatus @default(COMPANY_OWNED)
   facing         String?
   geometry       Json?
@@ -390,18 +397,20 @@ model Plot {
 }
 
 model OwnershipRecord {
-  id          String        @id @default(cuid())
-  tenantId    String
-  plotId      String
-  ownerId     String?
-  kind        OwnershipKind
-  amountInr   Decimal?      @db.Decimal(14, 2)
-  sharePct    Decimal?      @db.Decimal(5, 2)
-  documentId  String?
-  notes       String?
-  effectiveAt DateTime      @default(now())
-  createdById String?
-  createdAt   DateTime      @default(now())
+  id           String        @id @default(cuid())
+  tenantId     String
+  plotId       String
+  ownerId      String?
+  kind         OwnershipKind
+  amountInr    Decimal?      @db.Decimal(14, 2)
+  sharePct     Decimal?      @db.Decimal(5, 2)
+  documentId   String?
+  notes        String?
+  paymentMode  String?
+  extraDetails Json?
+  effectiveAt  DateTime      @default(now())
+  createdById  String?
+  createdAt    DateTime      @default(now())
 
   plot  Plot   @relation(fields: [plotId], references: [id])
   owner Owner? @relation(fields: [ownerId], references: [id])

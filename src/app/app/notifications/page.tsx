@@ -23,7 +23,7 @@ export default async function NotificationsPage() {
       <div className="mb-6">
         <h1 className="text-3xl font-semibold tracking-tight">Notifications</h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-          CAD processing, document approvals, marketing reviews, owner-visible progress updates, and cost/payment alerts.
+          Map processing, document approvals, marketing reviews, owner-visible progress updates, and cost/payment alerts.
         </p>
       </div>
       <section className="card overflow-hidden">

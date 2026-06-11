@@ -130,7 +130,7 @@ export function CadWorkspace({
     const response = await fetch(`/api/v1/cad/${cadFile.id}/process/retry`, { method: "POST" });
     const body = await response.json().catch(() => null);
     setLoading(false);
-    setMessage(response.ok ? "CAD processing queued again." : body?.error ?? "Retry failed.");
+    setMessage(response.ok ? "Map processing queued again." : body?.error ?? "Retry failed.");
     if (response.ok) {
       setStatus("UPLOADED");
       router.refresh();
@@ -139,7 +139,7 @@ export function CadWorkspace({
 
   if (status === "FAILED") {
     return (
-      <StatePanel icon={<AlertTriangle size={24} />} title="CAD processing stopped" detail={errorMessage ?? "The worker could not inspect this drawing."}>
+      <StatePanel icon={<AlertTriangle size={24} />} title="Map processing stopped" detail={errorMessage ?? "The worker could not inspect this drawing."}>
         <button className="btn-primary" onClick={retry} disabled={loading}>
           {loading ? <Loader2 className="animate-spin" size={17} /> : <RefreshCcw size={17} />}
           Retry safely
@@ -239,7 +239,7 @@ function DrawingSetup({ cadFile, analysis }: { cadFile: CadFile; analysis: Analy
           {analysis.previewArtifactKey ? (
             <div className="relative mx-auto w-fit max-w-full">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img className="block max-h-[68vh] max-w-full select-none object-contain" src={`/api/v1/cad/${cadFile.id}/preview`} alt="CAD source preview" />
+              <img className="block max-h-[68vh] max-w-full select-none object-contain" src={`/api/v1/cad/${cadFile.id}/preview`} alt="Map source preview" />
               <div
                 className="pointer-events-none absolute border-2 border-gold-400 bg-gold-400/10 shadow-[0_0_0_9999px_rgba(2,6,23,0.52)]"
                 style={{ left: `${region.x * 100}%`, top: `${region.y * 100}%`, width: `${region.width * 100}%`, height: `${region.height * 100}%` }}
@@ -485,7 +485,7 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
     const safeCount = preview.safePlots.length + preview.safeAssets.length + preview.safeChecklistItems.length;
     const protectedCount = preview.protectedPlots.length + preview.protectedAssets.length + preview.protectedChecklistItems.length;
     const reason = window.prompt(
-      `${safeCount} untouched CAD-created records can be removed from active use. ${protectedCount} records are protected because they contain business activity.\n\nEnter the rollback reason to continue:`,
+      `${safeCount} untouched Map-created records can be removed from active use. ${protectedCount} records are protected because they contain business activity.\n\nEnter the rollback reason to continue:`,
     );
     if (!reason) {
       setLoading(false);
@@ -500,8 +500,8 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
     setLoading(false);
     setMessage(response.ok
       ? body.data.result.partial
-        ? "Untouched CAD-created records were removed. Records with business activity remain protected."
-        : "Untouched CAD-created records were removed and the drawing was queued for safe reinspection."
+        ? "Untouched Map-created records were removed. Records with business activity remain protected."
+        : "Untouched Map-created records were removed and the drawing was queued for safe reinspection."
       : body?.error ?? "Rollback failed.");
     if (response.ok) router.refresh();
   }
@@ -521,7 +521,7 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
           </div>
           <div className="flex flex-wrap gap-2">
             {cadFile.status === "PUBLISHED" ? (
-              <button className="btn-outline text-rose-700" onClick={rollback} disabled={loading}><Trash2 size={16} /> Roll back CAD publish</button>
+              <button className="btn-outline text-rose-700" onClick={rollback} disabled={loading}><Trash2 size={16} /> Roll back Map publish</button>
             ) : (
               <button className="btn-gold" onClick={publish} disabled={loading || confirmedCount === 0 || nonCountBlocking.length > 0 || (countMismatch && overrideReason.trim().length < 10)}>
                 {loading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
@@ -696,15 +696,15 @@ function Notice({ text, error = false }: { text: string; error?: boolean }) {
 }
 
 function statusTitle(status: string) {
-  if (status === "UPLOADED") return "CAD file stored";
+  if (status === "UPLOADED") return "Map file stored";
   if (status === "CONVERTING") return "Converting drawing";
   if (status === "PARSING" || status === "ANALYZING") return "Inspecting drawing structure";
   if (status === "EXTRACTING") return "Extracting safe business candidates";
-  return "Preparing CAD intelligence";
+  return "Preparing Map intelligence";
 }
 
 function statusHelp(status: string) {
-  if (status === "UPLOADED") return "The file is safely stored and waiting for the dedicated CAD worker.";
+  if (status === "UPLOADED") return "The file is safely stored and waiting for the dedicated Map worker.";
   if (status === "ANALYZING") return "The worker is separating raster layout content, vector layers, schedules, legends, and title blocks.";
   if (status === "EXTRACTING") return "Plot cells, labels, roads, site assets, and electrical networks are being extracted into a review-only scene.";
   return "This page refreshes automatically when the next review step is ready.";

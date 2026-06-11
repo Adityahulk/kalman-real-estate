@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, ArrowLeft, Bold, CheckCircle2, Download, Eye, FileText, Italic, Loader2, Save, Send, Underline, Wand2, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, Bold, CheckCircle2, Download, Eye, FileText, Italic, Loader2, Plus, Save, Send, Underline, Wand2, X } from "lucide-react";
 
 type ProjectInfo = {
   id: string;
@@ -20,15 +20,16 @@ type ProjectInfo = {
 type PlotOption = {
   id: string;
   code: string;
-  areaSqft: string | null;
+  areaSqYards: string | null;
   priceInr: string | null;
 };
 
-type OwnerOption = {
-  id: string;
+type FirmInfo = {
   name: string;
-  email: string | null;
-  phone: string | null;
+  address: string | null;
+  pan: string | null;
+  contactEmail: string | null;
+  authorizedPersons: string[];
 };
 
 export function ProjectSiteInfoForm({
@@ -122,153 +123,179 @@ export function ProjectSiteInfoForm({
 export function ProjectAllotmentFlow({
   projectId,
   plots,
-  owners,
+  firm,
   defaultPlotId,
 }: {
   projectId: string;
   plots: PlotOption[];
-  owners: OwnerOption[];
+  firm: FirmInfo;
   defaultPlotId?: string;
 }) {
   const router = useRouter();
-  const [plotId, setPlotId] = useState(defaultPlotId && plots.some((plot) => plot.id === defaultPlotId) ? defaultPlotId : plots[0]?.id ?? "");
-  const [mode, setMode] = useState<"existing" | "new">("existing");
-  const [ownerId, setOwnerId] = useState(owners[0]?.id ?? "");
-  const [ownerType, setOwnerType] = useState("INDIVIDUAL");
+  const [plotId, setPlotId] = useState(defaultPlotId && plots.some((plot) => plot.id === defaultPlotId) ? defaultPlotId : "");
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
-  const [address, setAddress] = useState("");
   const [amountInr, setAmountInr] = useState("");
-  const [sharePct, setSharePct] = useState("100");
+  const [paymentMode, setPaymentMode] = useState("");
   const [effectiveAt, setEffectiveAt] = useState(new Date().toISOString().slice(0, 10));
-  const [notes, setNotes] = useState("");
+  const [eStampNumber, setEStampNumber] = useState("");
+  const [witnessDetails, setWitnessDetails] = useState("");
+  const [extraFields, setExtraFields] = useState<Array<{ label: string; value: string }>>([]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
-  const [completedPlotId, setCompletedPlotId] = useState("");
 
   const selectedPlot = useMemo(() => plots.find((plot) => plot.id === plotId), [plotId, plots]);
+  useEffect(() => {
+    if (selectedPlot?.priceInr && !amountInr) setAmountInr(selectedPlot.priceInr);
+  }, [selectedPlot, amountInr]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!plotId) return;
     setLoading(true);
     setMessage("");
-    let resolvedOwnerId = ownerId;
-
-    if (mode === "new") {
-      const ownerResponse = await fetch("/api/v1/ownership/owners", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ type: ownerType, name, email: email || undefined, phone: phone || undefined, address: address || undefined }),
-      });
-      const ownerBody = await ownerResponse.json();
-      if (!ownerResponse.ok) {
-        setLoading(false);
-        setMessage(ownerBody.error ?? "Owner creation failed");
-        return;
-      }
-      resolvedOwnerId = ownerBody.data.id;
+    const ownerResponse = await fetch("/api/v1/ownership/owners", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "INDIVIDUAL", name, phone: phone || undefined }),
+    });
+    const ownerBody = await ownerResponse.json();
+    if (!ownerResponse.ok) {
+      setLoading(false);
+      setMessage(ownerBody.error ?? "Allottee creation failed");
+      return;
     }
 
     const response = await fetch(`/api/v1/ownership/plots/${plotId}/allot`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        ownerId: resolvedOwnerId,
+        ownerId: ownerBody.data.id,
         amountInr: amountInr ? Number(amountInr) : undefined,
-        sharePct: sharePct ? Number(sharePct) : undefined,
+        sharePct: 100,
+        paymentMode: paymentMode || undefined,
         effectiveAt: effectiveAt ? new Date(effectiveAt).toISOString() : undefined,
-        notes: notes || undefined,
+        extraDetails: {
+          eStampNumber: eStampNumber || undefined,
+          eStampDate: effectiveAt || undefined,
+          witnessDetails: witnessDetails || undefined,
+          customFields: Object.fromEntries(extraFields.filter((field) => field.label).map((field) => [field.label, field.value])),
+        },
       }),
     });
     const body = await response.json();
-    setLoading(false);
     if (!response.ok) {
+      setLoading(false);
       setMessage(body.error ?? "Allotment failed");
       return;
     }
-    setCompletedPlotId(plotId);
-    setMessage(`Plot ${body.data.plot.code} allotted. You can open Letter Studio now.`);
-    router.refresh();
+    const draftResponse = await fetch("/api/v1/documents/drafts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "allotment_letter", recordType: "Plot", recordId: plotId }),
+    });
+    const draftBody = await draftResponse.json();
+    setLoading(false);
+    if (!draftResponse.ok) {
+      setMessage(draftBody.error ?? `Plot ${body.data.plot.code} allotted, but Letter Studio could not be opened.`);
+      router.refresh();
+      return;
+    }
+    router.push(`/app/projects/${projectId}/plots/${plotId}/letters/${draftBody.data.document.id}`);
   }
 
   if (!plots.length) {
     return (
       <div className="rounded-lg border border-dashed border-slate-300 p-6 text-sm text-slate-600">
-        No company-owned plots are available for allotment. Add a plot first or check the selected project inventory.
+        <p>No company-owned plots are available for allotment.</p>
+        <Link className="btn-primary mt-4 w-fit" href={`/app/projects/${projectId}/ownership/add-plot`}><Plus size={17} />Add plot</Link>
       </div>
     );
   }
 
   return (
     <form onSubmit={submit} className="grid gap-4">
-      <label>
-        <span className="label">Company-owned plot</span>
-        <select className="input" value={plotId} onChange={(event) => setPlotId(event.target.value)}>
-          {plots.map((plot) => (
-            <option key={plot.id} value={plot.id}>
-              {plot.code} {plot.areaSqft ? `· ${plot.areaSqft} sq ft` : ""}
-            </option>
-          ))}
-        </select>
-      </label>
-
-      <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
-        Selected plot: <span className="font-medium text-navy-900">{selectedPlot?.code}</span>
-        {selectedPlot?.priceInr ? ` · INR ${selectedPlot.priceInr}` : ""}
-      </div>
-
-      <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 text-sm">
-        <button type="button" className={`px-3 py-2 ${mode === "existing" ? "bg-navy-900 text-white" : "bg-white text-slate-700"}`} onClick={() => setMode("existing")}>
-          Existing owner
-        </button>
-        <button type="button" className={`px-3 py-2 ${mode === "new" ? "bg-navy-900 text-white" : "bg-white text-slate-700"}`} onClick={() => setMode("new")}>
-          New owner
-        </button>
-      </div>
-
-      {mode === "existing" ? (
-        <label>
-          <span className="label">Owner</span>
-          <select className="input" value={ownerId} onChange={(event) => setOwnerId(event.target.value)}>
-            {owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
-          </select>
-        </label>
-      ) : (
-        <div className="grid gap-3 md:grid-cols-2">
-          <label><span className="label">Owner type</span><select className="input" value={ownerType} onChange={(event) => setOwnerType(event.target.value)}><option value="INDIVIDUAL">Individual</option><option value="COMPANY">Company</option><option value="SHARED">Shared ownership group</option></select></label>
-          <label><span className="label">Name</span><input className="input" value={name} onChange={(event) => setName(event.target.value)} /></label>
-          <label><span className="label">Email</span><input className="input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
-          <label><span className="label">Phone</span><input className="input" value={phone} onChange={(event) => setPhone(event.target.value)} /></label>
-          <label className="md:col-span-2"><span className="label">Address</span><textarea className="input min-h-20" value={address} onChange={(event) => setAddress(event.target.value)} /></label>
+      <FormSection number="1" title="Plot details">
+        <div className="flex items-end gap-3">
+          <label className="flex-1">
+            <span className="label">Available plot</span>
+            <select className="input" value={plotId} onChange={(event) => setPlotId(event.target.value)}>
+              <option value="">Select plot</option>
+              {plots.map((plot) => <option key={plot.id} value={plot.id}>{plot.code}{plot.areaSqYards ? ` · ${plot.areaSqYards} sq yd` : ""}</option>)}
+            </select>
+          </label>
+          <Link className="btn-outline shrink-0" href={`/app/projects/${projectId}/ownership/add-plot`}><Plus size={17} />Plot</Link>
         </div>
-      )}
+        {selectedPlot ? <div className="mt-3 rounded-lg bg-navy-50 px-3 py-2 text-sm text-navy-900">
+          Selected: <span className="font-semibold">{selectedPlot.code}</span>{selectedPlot.priceInr ? ` · INR ${selectedPlot.priceInr}` : ""}
+        </div> : null}
+      </FormSection>
 
-      <div className="grid gap-3 md:grid-cols-3">
-        <label><span className="label">Amount in INR</span><input className="input" inputMode="numeric" value={amountInr} onChange={(event) => setAmountInr(event.target.value)} /></label>
-        <label><span className="label">Share %</span><input className="input" inputMode="decimal" value={sharePct} onChange={(event) => setSharePct(event.target.value)} /></label>
-        <label><span className="label">Allotment date</span><input className="input" type="date" value={effectiveAt} onChange={(event) => setEffectiveAt(event.target.value)} /></label>
-      </div>
-      <label>
-        <span className="label">Notes</span>
-        <textarea className="input min-h-20" value={notes} onChange={(event) => setNotes(event.target.value)} />
-      </label>
+      <FormSection number="2" title="Allottee details">
+        <div className="grid gap-3 md:grid-cols-2">
+          <label><span className="label">Name</span><input className="input" value={name} onChange={(event) => setName(event.target.value)} required /></label>
+          <label><span className="label">Phone</span><input className="input" value={phone} onChange={(event) => setPhone(event.target.value)} /></label>
+        </div>
+      </FormSection>
+
+      <FormSection number="3" title="Firm details">
+        <div className="grid gap-x-6 gap-y-3 text-sm md:grid-cols-2">
+          <FirmValue label="Firm name" value={firm.name} />
+          <FirmValue label="Email" value={firm.contactEmail} />
+          <FirmValue label="PAN" value={firm.pan} />
+          <FirmValue label="Address" value={firm.address} />
+          <FirmValue label="Authorised person" value={firm.authorizedPersons.join(", ") || null} />
+        </div>
+      </FormSection>
+
+      <FormSection number="4" title="Payment">
+        <div className="grid gap-3 md:grid-cols-2">
+          <label><span className="label">Price</span><input className="input" inputMode="numeric" value={amountInr} onChange={(event) => setAmountInr(event.target.value)} /></label>
+          <label><span className="label">Mode</span><select className="input" value={paymentMode} onChange={(event) => setPaymentMode(event.target.value)}><option value="">Select payment mode</option><option>Cash</option><option>Cheque</option><option>Bank transfer</option><option>UPI</option><option>Other</option></select></label>
+        </div>
+      </FormSection>
+
+      <FormSection number="5" title="Extra">
+        <div className="grid gap-3 md:grid-cols-2">
+          <label><span className="label">E-stamp number</span><input className="input" value={eStampNumber} onChange={(event) => setEStampNumber(event.target.value)} /></label>
+          <label><span className="label">Date</span><input className="input" type="date" value={effectiveAt} onChange={(event) => setEffectiveAt(event.target.value)} /></label>
+          <label className="md:col-span-2"><span className="label">Witness details</span><textarea className="input min-h-20" value={witnessDetails} onChange={(event) => setWitnessDetails(event.target.value)} /></label>
+          {extraFields.map((field, index) => (
+            <div key={index} className="grid gap-2 md:col-span-2 md:grid-cols-[1fr_1fr_auto]">
+              <input className="input" placeholder="Field name" value={field.label} onChange={(event) => setExtraFields((fields) => fields.map((item, itemIndex) => itemIndex === index ? { ...item, label: event.target.value } : item))} />
+              <input className="input" placeholder="Detail" value={field.value} onChange={(event) => setExtraFields((fields) => fields.map((item, itemIndex) => itemIndex === index ? { ...item, value: event.target.value } : item))} />
+              <button type="button" className="btn-outline px-3" aria-label="Remove field" onClick={() => setExtraFields((fields) => fields.filter((_, itemIndex) => itemIndex !== index))}><X size={16} /></button>
+            </div>
+          ))}
+        </div>
+        <button type="button" className="btn-outline mt-3 w-fit" onClick={() => setExtraFields((fields) => [...fields, { label: "", value: "" }])}><Plus size={16} />Additional field</button>
+      </FormSection>
+
       {message ? <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
       <div className="flex flex-wrap gap-2">
-        <button className="btn-primary" disabled={loading || !plotId || (mode === "existing" ? !ownerId : !name)}>
+        <button className="btn-primary" disabled={loading || !plotId || !name}>
           {loading ? <Loader2 className="animate-spin" size={17} /> : <Send size={17} />}
           Record allotment
         </button>
-        {completedPlotId ? (
-          <Link className="btn-gold" href={`/app/projects/${projectId}/plots/${completedPlotId}/letters/new?type=allotment_letter`}>
-            <FileText size={17} />
-            Open Letter Studio
-          </Link>
-        ) : null}
       </div>
     </form>
   );
+}
+
+function FormSection({ number, title, children }: { number: string; title: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-5">
+      <div className="mb-4 flex items-center gap-2">
+        <span className="flex size-6 items-center justify-center rounded-full bg-navy-900 text-xs font-semibold text-white">{number}</span>
+        <h2 className="font-semibold">{title}</h2>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function FirmValue({ label, value }: { label: string; value: string | null }) {
+  return <div><div className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div><div className="mt-1 text-slate-800">{value || "-"}</div></div>;
 }
 
 export function LetterDraftStartForm({

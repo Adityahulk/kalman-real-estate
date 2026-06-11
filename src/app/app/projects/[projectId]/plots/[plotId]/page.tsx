@@ -1,35 +1,33 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
-  BadgeIndianRupee,
   CheckCircle2,
   ChevronDown,
   FileText,
   GitBranch,
   History,
-  Image,
   Landmark,
   Map,
   Upload,
-  UserRound,
   Wrench,
 } from "lucide-react";
 import type React from "react";
 import { getSessionUser } from "@/server/session";
 import { getPlotWorkspace } from "@/server/services/plot-workspace";
+import { prisma } from "@/server/db";
 import { fullInr } from "@/lib/format";
 import { DeleteFileButton } from "@/components/delete-file-button";
-import { FileUploader } from "@/components/file-uploader";
 import { CadUploadForm } from "../../../../cad/cad-upload-form";
 import { DocumentApprovalButtons } from "../../../../documents/document-actions";
 import { ManualPlotZoneForm } from "../../../manual-entry-actions";
 import {
   PlotChecklistProgressForm,
 } from "../../../../ownership/ownership-actions";
+import { BackButton } from "@/components/back-button";
 
 export const dynamic = "force-dynamic";
 
-const primaryTabs = ["overview", "ownership", "documents", "history"] as const;
+const primaryTabs = ["overview", "status", "ownership", "plot-map", "documents", "history"] as const;
 const advancedTabs = ["registry", "transfers", "development", "child-cad"] as const;
 const tabs = [...primaryTabs, ...advancedTabs] as const;
 
@@ -42,132 +40,133 @@ export default async function ProjectPlotWorkspacePage({
 }) {
   const session = await getSessionUser();
   if (!session) return null;
-  const workspace = await getPlotWorkspace({ tenantId: session.tenantId, userId: session.id, role: session.role }, params.plotId);
+  const [workspace, firm] = await Promise.all([
+    getPlotWorkspace({ tenantId: session.tenantId, userId: session.id, role: session.role }, params.plotId),
+    prisma.tenant.findUniqueOrThrow({ where: { id: session.tenantId }, select: { name: true } }),
+  ]);
   if (workspace.plot.projectId !== params.projectId) notFound();
   const plot = workspace.plot;
   const requestedTab = searchParams.tab === "audit" ? "history" : searchParams.tab;
   const activeTab = tabs.includes(requestedTab as typeof tabs[number]) ? requestedTab as typeof tabs[number] : "overview";
-  const latestRegistry = plot.registryRecords[0];
-  const latestOwnership = plot.ownershipRecords[0];
   const cadFileId = workspace.spatialLinks[0]?.entity.scene.cadFileId;
-  const plotDocumentCount = workspace.plotFiles.length + workspace.generatedDocuments.length;
+  const plotMapFileId = workspace.childCadFiles[0]?.id ?? cadFileId;
+  const registryDocuments = workspace.plotFiles.filter((file) => file.documentType === "REGISTRY_RECEIPT" || file.documentType === "REGISTRY_DEED");
+  const ownershipLetters = workspace.generatedDocuments.filter((document) => document.type.includes("allotment") || document.type.includes("transfer"));
+  const developmentPct = plot.checklistItems.length
+    ? Math.round(plot.checklistItems.reduce((total, item) => total + item.progressPct, 0) / plot.checklistItems.length)
+    : 0;
+  const developmentStatus = developmentPct === 0 ? "Not started" : developmentPct >= 100 ? "Finished" : "In progress";
+  const allotmentStatus = plot.currentOwnerId ? "Allotted" : "Not allotted";
 
   return (
-    <main className="px-4 py-6 lg:px-8">
+    <main className="min-h-[calc(100vh-4rem)] px-4 py-6 lg:px-8">
+      <BackButton fallbackHref={`/app/projects/${plot.projectId}/ownership`} />
       <div className="flex flex-col justify-between gap-4 border-b border-slate-200 pb-6 xl:flex-row xl:items-end">
         <div>
           <div className="flex flex-wrap items-center gap-2 text-sm text-slate-500">
             <Link className="hover:underline" href={`/app/projects/${plot.projectId}`}>{plot.project.name}</Link>
             <span>/</span>
-            <span>Plot workspace</span>
+            <span>Plot details</span>
           </div>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">{plot.code}</h1>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            {plot.currentOwner?.name ?? "Company inventory"} · {plot.status.replaceAll("_", " ")} · {plot.areaSqft?.toString() ?? "-"} sq ft
+            {plot.currentOwner?.name ?? firm.name} · {plot.status.replaceAll("_", " ")} · {plot.areaSqYards?.toString() ?? (plot.areaSqft ? String(Number(plot.areaSqft) / 9) : "-")} sq yd
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {cadFileId ? (
-            <Link className="btn-primary" href={`/app/cad/${cadFileId}`}>
-              <Map size={17} />
-              Open CAD source
-            </Link>
-          ) : null}
+          <Link className="btn-primary" href={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=plot-map`}>
+            <Map size={17} />
+            Plot map
+          </Link>
           <Link className="btn-outline" href={`/app/projects/${plot.projectId}/ownership`}>
             Back to ledger
           </Link>
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2 pb-2">
-        {primaryTabs.map((tab) => (
-          <Link
-            key={tab}
-            className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium ${
-              activeTab === tab ? "bg-navy-900 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
-            }`}
-            href={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=${tab}`}
-          >
-            {tab.replaceAll("-", " ")}
-          </Link>
-        ))}
-        <details className="relative">
-          <summary className="cursor-pointer rounded-lg bg-slate-100 px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200">More</summary>
-          <div className="absolute z-20 mt-2 grid min-w-48 gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-card">
-            {advancedTabs.map((tab) => (
-              <Link
-                key={tab}
-                className={`whitespace-nowrap rounded-lg px-3 py-2 text-sm font-medium ${
-                  activeTab === tab ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"
-                }`}
-                href={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=${tab}`}
-              >
-                {tab.replaceAll("-", " ")}
-              </Link>
-            ))}
-          </div>
-        </details>
-      </div>
-
       {activeTab === "overview" ? (
-        <section className="mt-4 space-y-6">
-          <div className="space-y-6">
-            <div className="grid gap-4 md:grid-cols-4">
-              <Metric icon={UserRound} label="Current owner" value={plot.currentOwner?.name ?? "Company"} />
-              <Metric icon={Landmark} label="Registry" value={latestRegistry?.status ?? "Not started"} />
-              <Metric icon={FileText} label="Documents" value={String(plotDocumentCount)} />
-              <Metric icon={BadgeIndianRupee} label="Last value" value={fullInr(Number(latestOwnership?.amountInr ?? plot.priceInr ?? 0))} />
-            </div>
-            <div className="card p-5">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <h2 className="font-semibold">Quick actions</h2>
-                  <p className="mt-1 text-sm text-slate-500">Open a focused page for each action.</p>
-                </div>
-                <Link className="btn-outline h-9 px-3 text-xs" href={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=history`}>
-                  View history
-                </Link>
+        <section className="mt-6">
+          <div className="card divide-y divide-slate-200 overflow-hidden">
+            <AccordionRow label="Plot" value={plot.code} open>
+              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <Info label="Plot code" value={plot.code} />
+                <Info label="Area" value={`${plot.areaSqYards?.toString() ?? (plot.areaSqft ? String(Number(plot.areaSqft) / 9) : "-")} sq yd`} />
+                <Info label="Prime location" value={plot.primeLocation ?? "-"} />
+                <Info label="Sale price" value={plot.priceInr ? fullInr(Number(plot.priceInr)) : "-"} />
+                <Info label="North boundary" value={boundaryValue(plot.boundaries, "north")} />
+                <Info label="South boundary" value={boundaryValue(plot.boundaries, "south")} />
+                <Info label="East boundary" value={boundaryValue(plot.boundaries, "east")} />
+                <Info label="West boundary" value={boundaryValue(plot.boundaries, "west")} />
               </div>
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+            </AccordionRow>
+
+            <AccordionRow label="Current owner" value={plot.currentOwner?.name ?? firm.name}>
+              <div className="grid gap-4 md:grid-cols-2">
+                <Info label="Owner" value={plot.currentOwner?.name ?? firm.name} />
+                <Info label="Owner type" value={plot.currentOwner?.type?.replaceAll("_", " ") ?? "Company"} />
+                <Info label="Phone" value={plot.currentOwner?.phone ?? "-"} />
+                <Info label="Email" value={plot.currentOwner?.email ?? "-"} />
+                <Info label="Address" value={plot.currentOwner?.address ?? "-"} wide />
+              </div>
+              <div className="mt-5 overflow-x-auto rounded-lg border border-slate-200">
+                <OwnerHistoryRows records={plot.ownershipRecords} firmName={firm.name} />
+              </div>
+            </AccordionRow>
+
+            <AccordionRow label="Status" value={allotmentStatus}>
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <OwnershipLetterRows documents={ownershipLetters} />
+              </div>
+            </AccordionRow>
+
+            <AccordionRow label="Development" value={`${developmentStatus} · ${developmentPct}%`}>
+              <div className="grid gap-3 md:grid-cols-2">
+                {plot.checklistItems.map((item) => (
+                  <div key={item.id} className="rounded-lg border border-slate-200 p-3 text-sm">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="font-medium">{item.label}</div>
+                      <span className="chip bg-slate-100 text-slate-700">{item.progressPct}%</span>
+                    </div>
+                    <div className="mt-3 h-2 rounded-full bg-slate-100">
+                      <div className="h-2 rounded-full bg-gold-shine" style={{ width: `${item.progressPct}%` }} />
+                    </div>
+                    <div className="mt-2 text-xs text-slate-500">{item.status.replaceAll("_", " ")}</div>
+                  </div>
+                ))}
+                {!plot.checklistItems.length ? <Empty label="No development checklist has been added yet." /> : null}
+              </div>
+            </AccordionRow>
+
+            <AccordionRow label="Actions" value={plot.currentOwnerId ? "Transfer or registry" : "New allotment"}>
+              <div className="flex flex-wrap gap-2">
                 <Link className="btn-primary justify-center" href={plot.currentOwnerId ? `/app/projects/${plot.projectId}/plots/${plot.id}/transfer` : `/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}`}>
                   <GitBranch size={17} />
-                  {plot.currentOwnerId ? "Change owner" : "Add owner"}
+                  + {plot.currentOwnerId ? "New transfer" : "New allotment"}
                 </Link>
-                <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/documents/upload`}>
-                  <Upload size={17} />
-                  Upload document
-                </Link>
-                <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/letters/new`}>
-                  <FileText size={17} />
-                  Generate letter
-                </Link>
-                <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/registry/update`}>
-                  <CheckCircle2 size={17} />
-                  Update registry
-                </Link>
+                {plot.currentOwnerId ? <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/registry/update`}><Upload size={17} />{registryDocuments.length ? "+ New registry" : "Upload registry"}</Link> : null}
+                {registryDocuments.length ? <Link className="btn-outline justify-center" href={`?tab=registry`}><Landmark size={17} />View registry</Link> : null}
+                <Link className="btn-outline justify-center" href={`?tab=documents`}><FileText size={17} />Documents</Link>
+                <Link className="btn-outline justify-center" href={`?tab=history`}><History size={17} />History</Link>
               </div>
+            </AccordionRow>
+          </div>
+        </section>
+      ) : null}
+
+      {activeTab === "status" ? (
+        <section className="mt-4">
+          <div className="card overflow-hidden">
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h2 className="font-semibold">Allotment and transfer letters</h2>
+              <p className="mt-1 text-sm text-slate-500">Letters recorded during allotment and every owner transfer.</p>
             </div>
-            <div className="card p-5">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <Map size={18} />
-                  <h2 className="font-semibold">Plot CAD preview</h2>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {cadFileId ? <Link className="btn-outline h-9 px-3 text-xs" href={`/app/cad/${cadFileId}`}>Open full CAD</Link> : null}
-                  <Link className="btn-outline h-9 px-3 text-xs" href={`?tab=child-cad`}>Upload plot CAD</Link>
-                </div>
-              </div>
-              <PlotGeometryPreview geometry={plot.geometry} label={plot.code} />
-            </div>
-            <div className="card p-5">
-              <div className="mb-4 flex items-center gap-2">
-                <Image size={18} />
-                <h2 className="font-semibold">Plot media / structure photos</h2>
-              </div>
-              <FileUploader label="Upload plot image or house photo" ownerType="Plot" ownerId={plot.id} visibility="OWNER_VISIBLE" accept="image/*" />
-            </div>
-            <Timeline title="Recent plot history" items={workspace.timeline.slice(0, 8)} collapsible />
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-5 py-3">Letter</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Date</th><th className="px-5 py-3">Download</th></tr></thead>
+              <tbody className="divide-y divide-slate-100">
+                {ownershipLetters.map((document) => <tr key={document.id}><td className="px-5 py-3 font-medium">{document.number ?? document.type.replaceAll("_", " ")}</td><td className="px-5 py-3">{document.status.replaceAll("_", " ")}</td><td className="px-5 py-3">{document.createdAt.toLocaleDateString("en-IN")}</td><td className="px-5 py-3">{document.fileAssetId ? <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`}>Download</a> : <span className="text-slate-500">PDF not generated</span>}</td></tr>)}
+              </tbody>
+            </table>
+            {!ownershipLetters.length ? <div className="p-6 text-sm text-slate-500">No allotment or transfer letters yet.</div> : null}
           </div>
         </section>
       ) : null}
@@ -175,8 +174,8 @@ export default async function ProjectPlotWorkspacePage({
       {activeTab === "ownership" ? (
         <section className="mt-4 grid gap-6 xl:grid-cols-[1fr_320px]">
           <div className="space-y-6">
-            <OwnerSummary plot={plot} />
-            <OwnershipTimeline records={plot.ownershipRecords} />
+            <OwnerSummary plot={plot} firmName={firm.name} />
+            <OwnerHistoryTable records={plot.ownershipRecords} firmName={firm.name} />
             <div className="card p-5">
               <h2 className="mb-4 font-semibold">Owner KYC documents</h2>
               <DocumentGrid files={workspace.ownerFiles} empty="No PAN/Aadhaar/KYC uploaded for current owner." />
@@ -186,13 +185,29 @@ export default async function ProjectPlotWorkspacePage({
             <ActionCard title="Ownership actions">
               <Link className="btn-primary justify-center" href={plot.currentOwnerId ? `/app/projects/${plot.projectId}/plots/${plot.id}/transfer` : `/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}`}>
                 <GitBranch size={17} />
-                {plot.currentOwnerId ? "Change owner" : "Add owner"}
+                {plot.currentOwnerId ? "New transfer" : "New allotment"}
               </Link>
               <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/documents/upload`}>
                 <Upload size={17} />
                 Upload owner documents
               </Link>
             </ActionCard>
+          </aside>
+        </section>
+      ) : null}
+
+      {activeTab === "plot-map" ? (
+        <section className="mt-4 grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+          <div className="card p-5">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="font-semibold">Plot map preview</h2>
+              {plotMapFileId ? <Link className="btn-outline h-9 px-3 text-xs" href={`/app/cad/${plotMapFileId}`}>Open full map with zoom</Link> : null}
+            </div>
+            <PlotGeometryPreview geometry={plot.geometry} label={plot.code} />
+          </div>
+          <aside className="space-y-4">
+            <CadUploadForm projects={[{ id: plot.projectId, name: plot.project.name }]} fixedProjectId={plot.projectId} fixedParentType="PLOT" fixedParentId={plot.id} title="Upload plot map" description="Upload a DXF or PDF plot map for preview and processing." simple redirectToReview />
+            <div className="card p-4"><h3 className="font-semibold">Map versions</h3><div className="mt-3 space-y-2">{workspace.childCadFiles.map((file) => <Link className="block rounded-lg bg-slate-50 px-3 py-2 text-sm hover:bg-slate-100" href={`/app/cad/${file.id}`} key={file.id}>{file.originalName} · v{file.version}</Link>)}{!workspace.childCadFiles.length ? <div className="text-sm text-slate-500">No plot map uploaded yet.</div> : null}</div></div>
           </aside>
         </section>
       ) : null}
@@ -291,7 +306,7 @@ export default async function ProjectPlotWorkspacePage({
             <ActionCard title="Transfer actions">
               <Link className="btn-primary justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/transfer`}>
                 <GitBranch size={17} />
-                Change owner
+                New transfer
               </Link>
               <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/letters/new?type=transfer_letter`}>
                 <FileText size={17} />
@@ -327,7 +342,7 @@ export default async function ProjectPlotWorkspacePage({
                     <div className="mt-2 text-xs text-slate-500">{item.progressPct}% · {item.status}</div>
                   </div>
                 ))}
-                {!plot.checklistItems.length ? <Empty label="Upload plot CAD or add checklist zones to track plot development." /> : null}
+                {!plot.checklistItems.length ? <Empty label="Upload plot Map or add checklist zones to track plot development." /> : null}
               </div>
             </div>
             <div className="card p-5">
@@ -364,8 +379,8 @@ export default async function ProjectPlotWorkspacePage({
               fixedProjectId={plot.projectId}
               fixedParentType="PLOT"
               fixedParentId={plot.id}
-              title="Upload plot-level CAD"
-              description="Upload this plot's internal CAD to extract rooms, bathroom, kitchen, electrical, plumbing, garden, and finishing zones."
+              title="Upload plot-level Map"
+              description="Upload this plot's internal Map to extract rooms, bathroom, kitchen, electrical, plumbing, garden, and finishing zones."
               simple
               redirectToReview
             />
@@ -374,7 +389,7 @@ export default async function ProjectPlotWorkspacePage({
           <div className="card overflow-hidden">
             <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-4">
               <GitBranch size={18} />
-              <h2 className="font-semibold">Child CAD versions</h2>
+              <h2 className="font-semibold">Child Map versions</h2>
             </div>
             <div className="divide-y divide-slate-100">
               {workspace.childCadFiles.map((file) => (
@@ -386,7 +401,7 @@ export default async function ProjectPlotWorkspacePage({
                   <Link className="btn-outline h-8 px-3 text-xs" href={`/app/cad/${file.id}`}>Open</Link>
                 </div>
               ))}
-              {!workspace.childCadFiles.length ? <div className="p-8 text-center text-sm text-slate-500">No child CAD uploaded for this plot yet.</div> : null}
+              {!workspace.childCadFiles.length ? <div className="p-8 text-center text-sm text-slate-500">No child Map uploaded for this plot yet.</div> : null}
             </div>
           </div>
         </section>
@@ -395,13 +410,28 @@ export default async function ProjectPlotWorkspacePage({
   );
 }
 
-function Metric({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
+function AccordionRow({
+  label,
+  value,
+  children,
+  open = false,
+}: {
+  label: string;
+  value: string;
+  children: React.ReactNode;
+  open?: boolean;
+}) {
   return (
-    <div className="card p-4">
-      <Icon className="text-navy-800" size={18} />
-      <div className="mt-3 truncate text-lg font-semibold">{value}</div>
-      <div className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
-    </div>
+    <details className="group" open={open}>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-4 px-5 py-4 hover:bg-slate-50">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="w-32 shrink-0 text-sm font-semibold text-slate-600">{label}</span>
+          <span className="truncate text-sm font-medium text-navy-950">{value}</span>
+        </div>
+        <ChevronDown className="shrink-0 text-slate-400 transition group-open:rotate-180" size={18} />
+      </summary>
+      <div className="border-t border-slate-100 bg-slate-50/60 px-5 py-5">{children}</div>
+    </details>
   );
 }
 
@@ -414,12 +444,12 @@ function ActionCard({ title, children }: { title: string; children: React.ReactN
   );
 }
 
-function OwnerSummary({ plot }: { plot: Awaited<ReturnType<typeof getPlotWorkspace>>["plot"] }) {
+function OwnerSummary({ plot, firmName }: { plot: Awaited<ReturnType<typeof getPlotWorkspace>>["plot"]; firmName: string }) {
   return (
     <div className="card p-5">
       <h2 className="mb-4 font-semibold">Current ownership</h2>
       <div className="grid gap-4 md:grid-cols-2">
-        <Info label="Owner" value={plot.currentOwner?.name ?? "Company inventory"} />
+        <Info label="Owner" value={plot.currentOwner?.name ?? firmName} />
         <Info label="Owner type" value={plot.currentOwner?.type?.replaceAll("_", " ") ?? "Company"} />
         <Info label="Email" value={plot.currentOwner?.email ?? "-"} />
         <Info label="Phone" value={plot.currentOwner?.phone ?? "-"} />
@@ -453,6 +483,104 @@ function OwnershipTimeline({ records }: { records: Awaited<ReturnType<typeof get
         {!records.length ? <Empty label="No ownership records yet." /> : null}
       </div>
     </div>
+  );
+}
+
+function OwnerHistoryTable({
+  records,
+  firmName,
+}: {
+  records: Awaited<ReturnType<typeof getPlotWorkspace>>["plot"]["ownershipRecords"];
+  firmName: string;
+}) {
+  return (
+    <div className="card overflow-hidden">
+      <div className="border-b border-slate-200 px-5 py-4">
+        <h2 className="font-semibold">Owner history</h2>
+        <p className="mt-1 text-sm text-slate-500">Every allotment and transfer recorded for this plot.</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-5 py-3">Owner</th>
+              <th className="px-5 py-3">Record</th>
+              <th className="px-5 py-3">Phone</th>
+              <th className="px-5 py-3">Email</th>
+              <th className="px-5 py-3">Address</th>
+              <th className="px-5 py-3">Date</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {records.map((record) => (
+              <tr key={record.id}>
+                <td className="px-5 py-3 font-medium">{record.owner?.name ?? firmName}</td>
+                <td className="px-5 py-3">{record.kind.replaceAll("_", " ")}</td>
+                <td className="px-5 py-3">{record.owner?.phone ?? "-"}</td>
+                <td className="px-5 py-3">{record.owner?.email ?? "-"}</td>
+                <td className="max-w-64 px-5 py-3">{record.owner?.address ?? "-"}</td>
+                <td className="whitespace-nowrap px-5 py-3">{record.effectiveAt.toLocaleDateString("en-IN")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!records.length ? <div className="p-5"><Empty label="No owner history yet." /></div> : null}
+    </div>
+  );
+}
+
+function OwnerHistoryRows({
+  records,
+  firmName,
+}: {
+  records: Awaited<ReturnType<typeof getPlotWorkspace>>["plot"]["ownershipRecords"];
+  firmName: string;
+}) {
+  return (
+    <table className="w-full text-left text-sm">
+      <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-500">
+        <tr><th className="px-4 py-3">Owner</th><th className="px-4 py-3">Record</th><th className="px-4 py-3">Phone</th><th className="px-4 py-3">Email</th><th className="px-4 py-3">Date</th></tr>
+      </thead>
+      <tbody className="divide-y divide-slate-100 bg-white">
+        {records.map((record) => (
+          <tr key={record.id}>
+            <td className="px-4 py-3 font-medium">{record.owner?.name ?? firmName}</td>
+            <td className="px-4 py-3">{record.kind.replaceAll("_", " ")}</td>
+            <td className="px-4 py-3">{record.owner?.phone ?? "-"}</td>
+            <td className="px-4 py-3">{record.owner?.email ?? "-"}</td>
+            <td className="whitespace-nowrap px-4 py-3">{record.effectiveAt.toLocaleDateString("en-IN")}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function OwnershipLetterRows({
+  documents,
+}: {
+  documents: Awaited<ReturnType<typeof getPlotWorkspace>>["generatedDocuments"];
+}) {
+  return (
+    <>
+      <table className="w-full text-left text-sm">
+        <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-500">
+          <tr><th className="px-4 py-3">Letter</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Date</th><th className="px-4 py-3">Download</th></tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100 bg-white">
+          {documents.map((document) => (
+            <tr key={document.id}>
+              <td className="px-4 py-3 font-medium">{document.number ?? document.type.replaceAll("_", " ")}</td>
+              <td className="px-4 py-3">{document.status.replaceAll("_", " ")}</td>
+              <td className="whitespace-nowrap px-4 py-3">{document.createdAt.toLocaleDateString("en-IN")}</td>
+              <td className="px-4 py-3">{document.fileAssetId ? <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`}>Download</a> : <span className="text-slate-500">PDF not generated</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!documents.length ? <div className="bg-white p-4 text-sm text-slate-500">No allotment or transfer letters yet.</div> : null}
+    </>
   );
 }
 
@@ -532,7 +660,7 @@ function Timeline({
 function PlotGeometryPreview({ geometry, label }: { geometry: unknown; label: string }) {
   const points = extractPoints(geometry);
   if (!points.length) {
-    return <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">No CAD geometry attached to this plot yet.</div>;
+    return <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">No Map geometry attached to this plot yet.</div>;
   }
   const xs = points.map((point) => point[0]);
   const ys = points.map((point) => point[1]);
@@ -560,6 +688,12 @@ function extractPoints(geometry: unknown): [number, number][] {
   const rawPoints = (geometry as Record<string, unknown>).points;
   if (!Array.isArray(rawPoints)) return [];
   return rawPoints.filter((point): point is [number, number] => Array.isArray(point) && typeof point[0] === "number" && typeof point[1] === "number");
+}
+
+function boundaryValue(boundaries: unknown, direction: "north" | "south" | "east" | "west") {
+  if (!boundaries || typeof boundaries !== "object" || Array.isArray(boundaries)) return "-";
+  const value = (boundaries as Record<string, unknown>)[direction];
+  return typeof value === "string" && value.trim() ? value : "-";
 }
 
 function Empty({ label }: { label: string }) {

@@ -385,10 +385,10 @@ async function runCadIntelligence(
     try {
       result = JSON.parse(stdout) as ExtractionResult;
     } catch {
-      throw new CadProcessError("CAD intelligence worker returned unreadable output.", "INVALID_WORKER_OUTPUT");
+      throw new CadProcessError("Map intelligence worker returned unreadable output.", "INVALID_WORKER_OUTPUT");
     }
     if (!Array.isArray(result.layers) || !Array.isArray(result.entities)) {
-      throw new CadProcessError("CAD intelligence worker returned an invalid result.", "INVALID_WORKER_OUTPUT");
+      throw new CadProcessError("Map intelligence worker returned an invalid result.", "INVALID_WORKER_OUTPUT");
     }
     return { result, dir };
   } catch (error) {
@@ -470,19 +470,19 @@ async function runPythonExtractor(job: CadJob, startedAt: Date, command: string,
   await progressWrites.catch(() => undefined);
 
   if (timedOut) {
-    throw new CadProcessError("CAD processing exceeded the allowed processing time.", "EXTRACTION_TIMEOUT", {
+    throw new CadProcessError("Map processing exceeded the allowed processing time.", "EXTRACTION_TIMEOUT", {
       ...result,
       diagnosticTail,
     });
   }
   if (outputExceeded) {
-    throw new CadProcessError("CAD extraction produced more data than the worker can safely process.", "OUTPUT_LIMIT", {
+    throw new CadProcessError("Map extraction produced more data than the worker can safely process.", "OUTPUT_LIMIT", {
       ...result,
       diagnosticTail,
     });
   }
   if (result.exitCode !== 0) {
-    throw new CadProcessError("CAD extraction process exited unexpectedly.", classifyExitFailure(result.signal, diagnosticTail), {
+    throw new CadProcessError("Map extraction process exited unexpectedly.", classifyExitFailure(result.signal, diagnosticTail), {
       ...result,
       diagnosticTail,
     });
@@ -516,7 +516,7 @@ function appendDiagnostic(lines: string[], line: string) {
 function sanitizeDiagnostic(value: string) {
   return value
     .replace(/\/tmp\/kalman-cad-v2-[^\s/'"]+/g, "[temporary-file]")
-    .replace(/\/app\/src\/workers\/cad-python\/cad_intelligence\.py/g, "CAD extractor");
+    .replace(/\/app\/src\/workers\/cad-python\/cad_intelligence\.py/g, "Map extractor");
 }
 
 function classifyExitFailure(signal: NodeJS.Signals | null, diagnostics: string[]) {
@@ -546,7 +546,7 @@ async function assertWorkerCapacity() {
   const memory = await workerMemory();
   if (memory.limitMb < memory.minimumMb) {
     throw new CadProcessError(
-      `CAD processing requires at least ${memory.minimumMb} MB of worker memory; this container has ${memory.limitMb} MB.`,
+      `Map processing requires at least ${memory.minimumMb} MB of worker memory; this container has ${memory.limitMb} MB.`,
       "INSUFFICIENT_MEMORY",
     );
   }
@@ -729,7 +729,7 @@ new Worker<CadJob>(
             elapsedMs: startedAt && !Number.isNaN(startedAt.getTime()) ? failedAt.getTime() - startedAt.getTime() : undefined,
             mode: job.data.mode ?? "inspect",
             stage: "failed",
-            progressLabel: "CAD processing stopped",
+            progressLabel: "Map processing stopped",
             failureCode: failure.code,
             exitCode: failure.exitCode,
             signal: failure.signal,
@@ -749,7 +749,7 @@ setInterval(async () => {
   await connection.set("kalman:cad-worker:health", JSON.stringify(await cadWorkerHealth()), "EX", 120).catch(() => undefined);
 }, 60_000).unref();
 
-console.log("CAD intelligence worker listening on cad.process", initialHealth);
+console.log("Map intelligence worker listening on cad.process", initialHealth);
 
 function extractionFailure(error: unknown) {
   if (error instanceof CadProcessError) {
@@ -777,15 +777,15 @@ function extractionFailure(error: unknown) {
 }
 
 function failureMessage(code: string, fallback?: string) {
-  if (code === "INSUFFICIENT_MEMORY") return fallback ?? "The CAD worker does not have enough memory for this drawing.";
-  if (code === "MEMORY_LIMIT") return "The CAD worker reached its memory limit. Increase worker memory or reduce the confirmed drawing region, then retry.";
-  if (code === "EXTRACTION_TIMEOUT") return "CAD processing took longer than the configured limit. Retry after confirming a tighter drawing region.";
-  if (code === "DEPENDENCY_MISSING") return "The CAD worker is missing a required PDF/OCR dependency. Rebuild the CAD worker image and retry.";
+  if (code === "INSUFFICIENT_MEMORY") return fallback ?? "The Map worker does not have enough memory for this drawing.";
+  if (code === "MEMORY_LIMIT") return "The Map worker reached its memory limit. Increase worker memory or reduce the confirmed drawing region, then retry.";
+  if (code === "EXTRACTION_TIMEOUT") return "Map processing took longer than the configured limit. Retry after confirming a tighter drawing region.";
+  if (code === "DEPENDENCY_MISSING") return "The Map worker is missing a required PDF/OCR dependency. Rebuild the Map worker image and retry.";
   if (code === "INVALID_DRAWING") return "The PDF is corrupt, encrypted, or unsupported. Export an unlocked vector or mixed PDF and retry.";
   if (code === "DRAWING_REGION_EMPTY") return "No usable site drawing was found in the confirmed region. Adjust the drawing region and retry.";
   if (code === "OUTPUT_LIMIT") return "The drawing produced too much extraction data. Reduce the drawing region or split the plan and retry.";
-  if (code === "INVALID_WORKER_OUTPUT") return "The CAD worker completed but returned an invalid result. Rebuild the CAD worker image and retry.";
-  return "CAD processing failed inside the extraction worker. Review the worker diagnostics and retry.";
+  if (code === "INVALID_WORKER_OUTPUT") return "The Map worker completed but returned an invalid result. Rebuild the Map worker image and retry.";
+  return "Map processing failed inside the extraction worker. Review the worker diagnostics and retry.";
 }
 
 function jsonObject(value: Prisma.JsonValue | null | undefined) {

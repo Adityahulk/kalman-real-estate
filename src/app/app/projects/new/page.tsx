@@ -9,7 +9,7 @@ export default function NewProjectPage() {
         <div className="mb-6">
           <h1 className="text-3xl font-semibold tracking-tight">Create project</h1>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            This becomes the workspace for CAD, ownership, registry, documents, development, and cost tracking.
+            This becomes the workspace for Map, ownership, registry, documents, development, and cost tracking.
           </p>
         </div>
         <CreateProjectForm />

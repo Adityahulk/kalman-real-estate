@@ -16,16 +16,16 @@ export default async function AppHomePage() {
   });
 
   return (
-    <main className="grid h-[calc(100vh-4rem)] gap-6 overflow-hidden px-4 py-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-8">
-      <section className="min-h-0 rounded-xl border border-dashed border-slate-200 bg-white" aria-label="Main workspace" />
+    <main className="grid min-h-[calc(100vh-4rem)] gap-6 px-4 py-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:px-8">
+      <section className="min-h-[320px] rounded-xl border border-dashed border-slate-200 bg-white" aria-label="Main workspace" />
 
-      <section className="min-h-0 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
+      <section className="self-start overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
         <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-4">
           <Bell size={18} />
           <h2 className="font-semibold">Alerts</h2>
           <span className="chip bg-slate-100 text-slate-700">{alerts.length}</span>
         </div>
-        <div className="max-h-[calc(100vh-9rem)] divide-y divide-slate-100 overflow-auto">
+        <div className="divide-y divide-slate-100">
           {alerts.map((alert) => (
             <article className="px-5 py-4" key={alert.id}>
               <div className="text-sm font-medium">{alert.recordType} approval</div>

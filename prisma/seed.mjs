@@ -34,6 +34,8 @@ async function main() {
       { tenantId: tenant.id, section: "PROJECT_FILES", label: "NOC", key: "noc" },
       { tenantId: tenant.id, section: "PROJECT_FILES", label: "License", key: "license" },
       { tenantId: tenant.id, section: "PROJECT_FILES", label: "Development file", key: "development_file" },
+      { tenantId: tenant.id, section: "PROJECT_MAPS", label: "Electrical plans", key: "electrical_plan" },
+      { tenantId: tenant.id, section: "PROJECT_MAPS", label: "Water sewage", key: "water_sewage" },
     ],
     skipDuplicates: true,
   });
