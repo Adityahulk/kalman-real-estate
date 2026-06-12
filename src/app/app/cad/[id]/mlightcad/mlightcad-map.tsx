@@ -103,8 +103,8 @@ export function MlightCadMap({
         const created = viewer.AcApDocManager.createInstance({
           container: container.current!,
           autoResize: true,
-          baseUrl: "/cad-runtime/",
-          notLoadDefaultFonts: true,
+          // Do not set baseUrl — lets the viewer use its CDN default for fonts.
+          // Worker scripts are provided explicitly below so they don't need baseUrl.
           useMainThreadDraw: true,
           webworkerFileUrls: {
             dxfParser: "/cad-runtime/dxf-parser-worker.js",

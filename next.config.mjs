@@ -1,8 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
+  serverExternalPackages: ["@napi-rs/canvas", "sharp", "pdfjs-dist"],
   experimental: {
-    serverComponentsExternalPackages: ["@napi-rs/canvas", "sharp", "pdfjs-dist"],
     outputFileTracingIncludes: {
       "/api/**/*": [
         "./node_modules/sharp/**/*",
