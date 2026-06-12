@@ -44,6 +44,7 @@ const navigation = [
   ["Construction", "construction"],
   ["Cost Control", "cost-control"],
   ["Custom Solutions", "custom"],
+  ["Our Work", "portfolio"],
   ["About", "implementation"],
 ] as const;
 
@@ -175,7 +176,7 @@ export function LandingPage({ whatsappNumber, salesEmail }: LandingPageProps) {
             <span><span className="block text-sm font-bold">WIDESTATE OS</span><span className="block text-[11px] text-slate-500">by Kalman Labs</span></span>
           </a>
           <nav className="hidden items-center gap-5 xl:flex" aria-label="Primary navigation">
-            {navigation.map(([label, id]) => <a key={id} className="text-sm font-medium text-slate-600 hover:text-navy-950" href={`#${id}`}>{label}</a>)}
+            {navigation.map(([label, id]) => id === "portfolio" ? <Link key={id} className="text-sm font-medium text-slate-600 hover:text-navy-950" href="/portfolio">{label}</Link> : <a key={id} className="text-sm font-medium text-slate-600 hover:text-navy-950" href={`#${id}`}>{label}</a>)}
           </nav>
           <div className="hidden items-center gap-2 sm:flex">
             <Link className="btn-ghost" href="/login">Client sign in</Link>
@@ -188,7 +189,7 @@ export function LandingPage({ whatsappNumber, salesEmail }: LandingPageProps) {
         {menuOpen ? (
           <nav className="border-t border-slate-200 bg-white px-4 py-4 xl:hidden" aria-label="Mobile navigation">
             <div className="mx-auto grid max-w-[1440px] gap-1">
-              {navigation.map(([label, id]) => <a key={id} className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" href={`#${id}`} onClick={() => setMenuOpen(false)}>{label}</a>)}
+              {navigation.map(([label, id]) => id === "portfolio" ? <Link key={id} className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" href="/portfolio" onClick={() => setMenuOpen(false)}>{label}</Link> : <a key={id} className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" href={`#${id}`} onClick={() => setMenuOpen(false)}>{label}</a>)}
               <div className="mt-3 grid grid-cols-2 gap-2 border-t border-slate-200 pt-3"><Link className="btn-outline" href="/login">Sign in</Link><a className="btn-gold" href="#book-demo" onClick={() => setMenuOpen(false)}>Book Demo</a></div>
             </div>
           </nav>
@@ -206,6 +207,7 @@ export function LandingPage({ whatsappNumber, salesEmail }: LandingPageProps) {
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <a className="btn-gold h-12 px-6" href="#book-demo" onClick={() => trackLandingEvent({ name: "cta_click", location: "hero", detail: { action: "book_demo" } })}>Book a Demo <ArrowRight size={17} /></a>
               <a className="btn h-12 border border-white/25 bg-white/10 px-6 text-white hover:bg-white/15" href={whatsappHref} target="_blank" rel="noreferrer" onClick={() => trackLandingEvent({ name: "cta_click", location: "hero", detail: { action: whatsappConfigured ? "whatsapp" : "email" } })}><MessageCircle size={17} /> {whatsappConfigured ? "Talk to Us on WhatsApp" : "Talk to Sales"}</a>
+              <Link className="btn h-12 px-2 text-white hover:text-gold-200" href="/portfolio">View Our Work <ArrowRight size={17} /></Link>
             </div>
             <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2 text-sm text-slate-300">
               <a className="inline-flex items-center gap-2 hover:text-white" href={phoneHref} onClick={() => trackLandingEvent({ name: "cta_click", location: "hero", detail: { action: "call" } })}><Phone size={15} /> {phoneDisplay}</a>
