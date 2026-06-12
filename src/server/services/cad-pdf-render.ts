@@ -1,7 +1,4 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { getDocument, OPS } from "pdfjs-dist/legacy/build/pdf.mjs";
-import { createCanvas } from "@napi-rs/canvas";
-import sharp from "sharp";
 
 export type PdfRenderMeta = {
   width: number;
@@ -23,6 +20,8 @@ export async function renderPdfPage(
   scale: number,
   outputPath: string,
 ): Promise<PdfRenderMeta> {
+  const { getDocument, OPS } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const { createCanvas } = await import("@napi-rs/canvas");
   const data = new Uint8Array(await readFile(pdfPath));
   const doc = await getDocument({
     data,
@@ -93,6 +92,7 @@ export async function renderPdfPage(
 }
 
 export async function cropPng(inputPath: string, x: number, y: number, w: number, h: number, outputPath: string) {
+  const sharp = (await import("sharp")).default;
   const safeW = Math.max(1, w);
   const safeH = Math.max(1, h);
   await sharp(inputPath)

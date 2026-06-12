@@ -6,7 +6,7 @@ import {
   extractPdfWithGemini,
   type GeminiEntity,
 } from "./gemini-vision";
-import { cropPng, renderPdfPage, type PdfRenderMeta } from "./cad-pdf-render";
+import type { PdfRenderMeta } from "./cad-pdf-render";
 
 type Region = { x: number; y: number; width: number; height: number };
 
@@ -27,6 +27,7 @@ export type CadExtractionResult = {
 };
 
 export async function inspectPdf(pdfBuffer: Buffer, originalName: string): Promise<CadExtractionResult> {
+  const { renderPdfPage } = await import("./cad-pdf-render");
   const dir = await mkWorkDir();
   try {
     const pdfPath = join(dir, safeName(originalName, ".pdf"));
@@ -94,6 +95,7 @@ export async function extractPdf(
   originalName: string,
   analysis: Record<string, unknown>,
 ): Promise<CadExtractionResult> {
+  const { renderPdfPage, cropPng } = await import("./cad-pdf-render");
   const dir = await mkWorkDir();
   try {
     const pdfPath = join(dir, safeName(originalName, ".pdf"));

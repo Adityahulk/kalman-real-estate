@@ -3,6 +3,13 @@ const nextConfig = {
   output: "standalone",
   experimental: {
     serverComponentsExternalPackages: ["@napi-rs/canvas", "sharp", "pdfjs-dist"],
+    outputFileTracingIncludes: {
+      "/api/**/*": [
+        "./node_modules/sharp/**/*",
+        "./node_modules/@img/**/*",
+        "./node_modules/@napi-rs/canvas/**/*",
+      ],
+    },
   },
   images: {
     remotePatterns: [

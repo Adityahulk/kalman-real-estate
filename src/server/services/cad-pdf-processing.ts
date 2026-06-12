@@ -1,7 +1,6 @@
 import { CadFormat, CadStatus, Prisma } from "@prisma/client";
 import { prisma } from "../db";
 import { getObjectResilient } from "../storage";
-import { inspectPdf, extractPdf } from "./cad-pdf";
 import { geminiAvailable } from "./gemini-vision";
 
 type CadPdfMode = "inspect" | "extract";
@@ -87,6 +86,7 @@ async function runCadPdfProcessing(opts: {
     const buffer = await getObjectResilient(cadFile.storageKey);
     await updateProgress(opts, startedAt, "processing", opts.mode === "inspect" ? "Analyzing with AI" : "Extracting map candidates");
 
+    const { inspectPdf, extractPdf } = await import("./cad-pdf");
     if (opts.mode === "inspect") {
       const result = await inspectPdf(buffer, cadFile.originalName);
       const { persistSyncInspect } = await import("./cad");
