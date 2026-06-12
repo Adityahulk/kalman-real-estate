@@ -35,7 +35,7 @@ export function CadUploadForm({
   const [originalName, setOriginalName] = useState("master-plan.dxf");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [message, setMessage] = useState("");
-  const [stage, setStage] = useState<"idle" | "preparing" | "uploading" | "queueing" | "done">("idle");
+  const [stage, setStage] = useState<"idle" | "preparing" | "uploading" | "processing" | "done">("idle");
   const [loading, setLoading] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -75,8 +75,8 @@ export function CadUploadForm({
         : payload.data.queue?.reason === "browser_extraction_required"
           ? `Uploaded ${payload.data.cadFile.originalName}. Open the drawing to visualize it and prepare review candidates in your browser.`
         : payload.data.queue?.queued
-          ? `Uploaded ${payload.data.cadFile.originalName}. Map processing has been queued.`
-          : `Uploaded ${payload.data.cadFile.originalName}. ${payload.data.queue?.reason === "sync_processed" ? "Analysis complete." : `Processing could not be queued: ${payload.data.queue?.reason ?? "queue unavailable"}.`}`,
+          ? `Uploaded ${payload.data.cadFile.originalName}. Map processing has started.`
+          : `Uploaded ${payload.data.cadFile.originalName}. ${payload.data.queue?.reason === "sync_processed" ? "Analysis complete." : `Processing could not start: ${payload.data.queue?.reason ?? "processing unavailable"}.`}`,
     );
     if (redirectToReview) router.push(`/app/cad/${payload.data.cadFile.id}`);
     router.refresh();
@@ -164,7 +164,7 @@ export function CadUploadForm({
         <div className="mt-4 rounded-lg bg-gold-50 px-3 py-2 text-sm text-navy-900">
           {stage === "preparing" ? "Preparing Map upload..." : null}
           {stage === "uploading" ? "Uploading the original Map file..." : null}
-          {stage === "queueing" ? "Queueing extraction worker..." : null}
+          {stage === "processing" ? "Starting map processing..." : null}
         </div>
       ) : null}
       {message ? <div className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}

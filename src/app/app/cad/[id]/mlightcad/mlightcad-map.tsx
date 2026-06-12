@@ -93,9 +93,7 @@ export function MlightCadMap({
         const response = await fetch(`/api/v1/cad/${cadFileId}/source`, { cache: "no-store" });
         if (!response.ok) throw new Error(await responseError(response, "Could not load the original CAD file."));
         const bytes = await response.arrayBuffer();
-        const serverChecksum = response.headers.get("x-cad-source-sha256");
-        const checksum = await sha256(bytes);
-        if (serverChecksum && checksum !== serverChecksum) throw new Error("The downloaded CAD file failed its integrity check.");
+        const checksum = await resolveSourceChecksum(bytes, response.headers.get("x-cad-source-sha256"));
 
         setProgress("Opening drawing securely in your browser");
         await previousViewerTeardown;
@@ -312,9 +310,18 @@ async function uploadExtraction(
   if (!completeResponse.ok) throw new Error(await responseError(completeResponse, "The extracted CAD data did not pass server validation."));
 }
 
-async function sha256(value: ArrayBuffer) {
-  const digest = await crypto.subtle.digest("SHA-256", value);
-  return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+async function resolveSourceChecksum(bytes: ArrayBuffer, serverChecksum: string | null) {
+  if (!serverChecksum) {
+    throw new Error("The CAD source checksum is missing.");
+  }
+  if (globalThis.crypto?.subtle) {
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    const computed = Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+    if (computed !== serverChecksum) {
+      throw new Error("The downloaded CAD file failed its integrity check.");
+    }
+  }
+  return serverChecksum;
 }
 
 async function responseError(response: Response, fallback: string) {

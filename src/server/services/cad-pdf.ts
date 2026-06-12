@@ -1,31 +1,14 @@
-import { execFile } from "node:child_process";
 import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
 import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
-import { promisify } from "node:util";
 import {
   inspectPdfWithGemini,
   extractPdfWithGemini,
   type GeminiEntity,
 } from "./gemini-vision";
-
-const execFileAsync = promisify(execFile);
+import { cropPng, renderPdfPage, type PdfRenderMeta } from "./cad-pdf-render";
 
 type Region = { x: number; y: number; width: number; height: number };
-
-type PdfRenderMeta = {
-  width: number;
-  height: number;
-  pageWidth: number;
-  pageHeight: number;
-  pageCount: number;
-  vectorPathCount: number;
-  imageCount: number;
-  textSpanCount: number;
-  pageText: string;
-  largestImage: { xref: number; area: number; width: number; height: number; rect: number[] } | null;
-  rect: number[];
-};
 
 export type CadExtractionResult = {
   analysis?: Record<string, unknown>;
@@ -231,29 +214,6 @@ function geminiEntityToCandidate(
     status: "SUGGESTED",
     sourceHandle: `gemini:${entity.type.toLowerCase()}:${index}`,
   };
-}
-
-async function renderPdfPage(pdfPath: string, page: number, scale: number, outputPath: string): Promise<PdfRenderMeta> {
-  const python = process.env.PYTHON_BIN ?? "python3";
-  const script = join(process.cwd(), "src/workers/cad-python/render_pdf.py");
-  const { stdout } = await execFileAsync(python, [script, pdfPath, String(page), String(scale), outputPath], {
-    timeout: 30_000,
-    maxBuffer: 10 * 1024 * 1024,
-  });
-  return JSON.parse(stdout.trim()) as PdfRenderMeta;
-}
-
-async function cropPng(inputPath: string, x: number, y: number, w: number, h: number, outputPath: string) {
-  const python = process.env.PYTHON_BIN ?? "python3";
-  const code = `
-import sys; from PIL import Image
-img = Image.open(sys.argv[1])
-cropped = img.crop((int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[2])+int(sys.argv[4]), int(sys.argv[3])+int(sys.argv[5])))
-cropped.save(sys.argv[6])
-`.trim();
-  await execFileAsync(python, ["-c", code, inputPath, String(x), String(y), String(w), String(h), outputPath], {
-    timeout: 15_000,
-  });
 }
 
 function polygonArea(points: number[][]) {

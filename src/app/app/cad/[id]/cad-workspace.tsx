@@ -133,7 +133,7 @@ export function CadWorkspace({
     const response = await fetch(`/api/v1/cad/${cadFile.id}/process/retry`, { method: "POST" });
     const body = await response.json().catch(() => null);
     setLoading(false);
-    setMessage(response.ok ? "Map processing queued again." : body?.error ?? "Retry failed.");
+    setMessage(response.ok ? "Map processing started again." : body?.error ?? "Retry failed.");
     if (response.ok) {
       setStatus("UPLOADED");
       router.refresh();
@@ -155,7 +155,7 @@ export function CadWorkspace({
 
   if (status === "FAILED") {
     return (
-      <StatePanel icon={<AlertTriangle size={24} />} title="Map processing stopped" detail={errorMessage ?? "The worker could not inspect this drawing."}>
+      <StatePanel icon={<AlertTriangle size={24} />} title="Map processing stopped" detail={errorMessage ?? "Map processing could not inspect this drawing."}>
         <button className="btn-primary" onClick={retry} disabled={loading}>
           {loading ? <Loader2 className="animate-spin" size={17} /> : <RefreshCcw size={17} />}
           Retry safely
@@ -556,7 +556,7 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
     setMessage(response.ok
       ? body.data.result.partial
         ? "Untouched Map-created records were removed. Records with business activity remain protected."
-        : "Untouched Map-created records were removed and the drawing was queued for safe reinspection."
+        : "Untouched Map-created records were removed and the drawing was scheduled for safe reinspection."
       : body?.error ?? "Rollback failed.");
     if (response.ok) router.refresh();
   }

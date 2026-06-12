@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "../db";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
-import { enqueueCadProcessing } from "../jobs";
+import { scheduleCadPdfProcessing } from "./cad-pdf-processing";
 import { createUploadTargets, getObjectResilient, putObjectResilient, storageKey } from "../storage";
 import { createNotification } from "./notifications";
 import { inspectPdf, extractPdf, type CadExtractionResult } from "./cad-pdf";
@@ -59,7 +59,7 @@ async function trySyncExtract(format: CadFormat, bytes: Buffer, originalName: st
   }
 }
 
-async function persistSyncInspect(
+export async function persistSyncInspect(
   tenantId: string,
   cadFileId: string,
   result: CadExtractionResult,
@@ -360,7 +360,16 @@ export async function createStoredCadUpload(context: RequestContext, input: Stor
     return { cadFile: updated, storage: stored, queue };
   }
 
-  queue = await enqueueCadProcessing({ cadFileId: cadFile.id, tenantId: context.tenantId });
+  queue = scheduleCadPdfProcessing({ cadFileId: cadFile.id, tenantId: context.tenantId, mode: "inspect" });
+  if (!queue.queued) {
+    await prisma.cadFile.update({
+      where: { id: cadFile.id },
+      data: {
+        status: CadStatus.FAILED,
+        errorMessage: queue.reason,
+      },
+    });
+  }
   await writeAuditEvent(context, {
     action: AuditAction.UPLOAD,
     entityType: "CadFile",
@@ -370,7 +379,7 @@ export async function createStoredCadUpload(context: RequestContext, input: Stor
       originalName: cadFile.originalName,
       storageKey: cadFile.storageKey,
       storageProvider: stored.storageProvider,
-      processingQueued: queue.queued,
+      processingScheduled: queue.queued,
     },
   });
 
@@ -652,13 +661,13 @@ export async function startCadExtraction(context: RequestContext, id: string, in
   }
 
   await prisma.cadFile.update({ where: { id }, data: { status: CadStatus.EXTRACTING, errorMessage: null } });
-  const queue = await enqueueCadProcessing({ cadFileId: id, tenantId: context.tenantId, mode: "extract" });
-  if (!queue.queued) throwBadRequest(`Map worker queue is unavailable: ${queue.reason}`);
+  const queue = scheduleCadPdfProcessing({ cadFileId: id, tenantId: context.tenantId, mode: "extract" });
+  if (!queue.queued) throwBadRequest(`PDF map processing is unavailable: ${queue.reason}`);
   await writeAuditEvent(context, {
     action: AuditAction.REVIEW,
     entityType: "CadFile",
     entityId: id,
-    after: { drawingSetup: input, extractionQueue: queue },
+    after: { drawingSetup: input, extractionSchedule: queue },
   });
   return { cadFileId: id, queue };
 }
@@ -1182,7 +1191,7 @@ export async function rollbackCadPublish(context: RequestContext, id: string, in
   });
   const queue = rolledBack.partial
     ? { queued: false, reason: "protected_records_preserve_published_scene" }
-    : await enqueueCadProcessing({ cadFileId: id, tenantId: context.tenantId, mode: "inspect" });
+    : scheduleCadPdfProcessing({ cadFileId: id, tenantId: context.tenantId, mode: "inspect" });
   await writeAuditEvent(context, {
     action: AuditAction.DELETE,
     entityType: "CadPublishBatch",
@@ -1316,16 +1325,17 @@ export async function startCadProcessing(context: RequestContext, id: string, re
     data: { status: CadStatus.UPLOADED, errorMessage: null, processingLog: Prisma.JsonNull },
   });
   const mode = cadFile.analysis?.setupConfirmedAt ? "extract" : "inspect";
-  const queue = await enqueueCadProcessing({ cadFileId: cadFile.id, tenantId: context.tenantId, mode });
+  const queue = scheduleCadPdfProcessing({ cadFileId: cadFile.id, tenantId: context.tenantId, mode });
+  if (!queue.queued) throwBadRequest(`PDF map processing is unavailable: ${queue.reason}`);
   await writeAuditEvent(context, {
     action: AuditAction.UPDATE,
     entityType: "CadFile",
     entityId: id,
-    after: { processingQueued: true, retried, mode, queue },
+    after: { processingScheduled: true, retried, mode, queue },
   });
   await createNotification(context, {
-    title: retried ? "Map processing retried" : "Map processing queued",
-    body: `${cadFile.originalName} is queued for Map ${mode === "inspect" ? "inspection" : "extraction"}.`,
+    title: retried ? "Map processing retried" : "Map processing started",
+    body: `${cadFile.originalName} is processing Map ${mode === "inspect" ? "inspection" : "extraction"}.`,
     data: { cadFileId: id, status: updated.status, mode, queue },
   });
   return { cadFile: updated, queue };
@@ -1374,7 +1384,13 @@ export async function replaceCadFile(
   const browserExtraction = input.format === CadFormat.DXF || input.format === CadFormat.DWG;
   const queue = browserExtraction
     ? { queued: false, reason: "browser_extraction_required" }
-    : await enqueueCadProcessing({ cadFileId: cadFile.id, tenantId: context.tenantId });
+    : scheduleCadPdfProcessing({ cadFileId: cadFile.id, tenantId: context.tenantId, mode: "inspect" });
+  if (!browserExtraction && !queue.queued) {
+    await prisma.cadFile.update({
+      where: { id },
+      data: { status: CadStatus.FAILED, errorMessage: queue.reason },
+    });
+  }
   if (browserExtraction) {
     await prisma.cadAnalysis.deleteMany({ where: { tenantId: context.tenantId, cadFileId: id } });
   }
