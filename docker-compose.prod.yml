@@ -14,7 +14,7 @@ services:
     env_file:
       - .env.production
     ports:
-      - "127.0.0.1:3000:3000"
+      - "${WEB_BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-3000}:3000"
     volumes:
       - storage_data:/app/storage
     depends_on:

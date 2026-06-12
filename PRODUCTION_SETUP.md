@@ -147,6 +147,33 @@ GET /api/v1/cad/health
 
 Use managed Postgres, managed Redis, and S3/R2/MinIO-compatible storage where available. Keep `FILE_STORAGE_DRIVER=s3_with_local_fallback` and mount `/app/storage` so the app can continue generating PDFs and accepting uploads when S3 is missing or temporarily unavailable. Set the environment variables from `.env.example`, run migrations in CI/CD, and run separate worker processes for CAD parsing, document generation, AI reports, and notifications.
 
+The production Compose file publishes the web application using:
+
+```env
+WEB_BIND_ADDRESS="0.0.0.0"
+WEB_PORT="3000"
+```
+
+This makes it directly reachable at `http://SERVER_IP:3000`. Set
+`WEB_BIND_ADDRESS="127.0.0.1"` when the application should be reachable only
+through Nginx.
+
+Configure the public sales landing page and demo-request delivery:
+
+```env
+NEXT_PUBLIC_SALES_WHATSAPP="918292098293"
+NEXT_PUBLIC_SALES_EMAIL="company@kalman-labs.com"
+DEMO_LEAD_WEBHOOK_URL="https://crm.example.com/webhooks/widestate"
+DEMO_LEAD_WEBHOOK_TOKEN=""
+DEMO_LEAD_NOTIFY_EMAIL="sales@example.com"
+DEMO_LEAD_FROM_EMAIL="WIDESTATE OS <leads@example.com>"
+RESEND_API_KEY=""
+```
+
+Every demo enquiry is saved in PostgreSQL. CRM webhook and Resend email
+delivery are optional and do not block the visitor’s confirmation when an
+external service is temporarily unavailable.
+
 In fallback mode, S3 is only attempted when credentials are actually configured. Without `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY`, uploads and generated files go directly to `/app/storage`, including CAD files. If deploying on AWS with an instance/task role instead of explicit keys, set `S3_ALLOW_IAM_ROLE="true"`.
 
 The production compose file includes a `storage-init` container that fixes the shared Docker volume permissions before the web and worker containers start. This is required because the app runs as UID `1001` and must be able to write fallback CAD files, PDFs, photos, invoices, and registry documents under `/app/storage`.

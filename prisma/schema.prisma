@@ -1000,3 +1000,25 @@ model BackgroundJob {
 
   @@index([tenantId, queue, status])
 }
+
+model DemoRequest {
+  id              String   @id @default(cuid())
+  name            String
+  company         String
+  phone           String
+  email           String
+  city            String
+  activeProjects  String
+  requirement     String
+  preferredTime   String
+  source          String   @default("PUBLIC_LANDING_PAGE")
+  status          String   @default("NEW")
+  notes           String?
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([email, createdAt])
+}
