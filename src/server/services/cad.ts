@@ -32,14 +32,14 @@ type StoredCadUpload = z.infer<typeof cadUploadSchema> & {
 
 const SYNC_TIMEOUT_MS = Number(process.env.CAD_SYNC_TIMEOUT_MS ?? 25_000);
 
-async function trySyncInspect(format: CadFormat, bytes: Buffer, originalName: string): Promise<CadExtractionResult | null> {
+async function trySyncInspect(format: CadFormat, bytes: Buffer, originalName: string): Promise<{ result: CadExtractionResult; previewBuffer: Buffer } | null> {
   if (format !== CadFormat.VECTOR_PDF || !geminiAvailable()) return null;
   try {
-    const result = await Promise.race([
+    const resolved = await Promise.race([
       inspectPdf(bytes, originalName),
       new Promise<null>((resolve) => setTimeout(() => resolve(null), SYNC_TIMEOUT_MS)),
     ]);
-    return result;
+    return resolved;
   } catch {
     return null;
   }
@@ -62,6 +62,7 @@ export async function persistSyncInspect(
   tenantId: string,
   cadFileId: string,
   result: CadExtractionResult,
+  previewBuffer?: Buffer,
 ) {
   const analysis = result.analysis ?? {};
   const analysisData = {
@@ -80,6 +81,11 @@ export async function persistSyncInspect(
   const rawKey = storageKey([tenantId, "cad", cadFileId, "artifacts", `${Date.now()}-inspect.json`]);
   const stored = await putObjectResilient(rawKey, Buffer.from(JSON.stringify(result)), "application/json", { mirrorLocalOnS3Success: true });
   analysisData.rawArtifactKey = stored.storageKey;
+  if (previewBuffer) {
+    const previewKey = storageKey([tenantId, "cad", cadFileId, "artifacts", `${Date.now()}-preview.png`]);
+    const previewStored = await putObjectResilient(previewKey, previewBuffer, "image/png", { mirrorLocalOnS3Success: true });
+    analysisData.previewArtifactKey = previewStored.storageKey;
+  }
 
   await prisma.$transaction([
     prisma.cadAnalysis.upsert({
@@ -342,7 +348,7 @@ export async function createStoredCadUpload(context: RequestContext, input: Stor
   const syncResult = await trySyncInspect(input.format, input.bytes, originalName);
   let queue: { queued: boolean; jobId?: string; reason?: string } = { queued: false, reason: "sync_processed" };
   if (syncResult) {
-    await persistSyncInspect(context.tenantId, cadFile.id, syncResult);
+    await persistSyncInspect(context.tenantId, cadFile.id, syncResult.result, syncResult.previewBuffer);
     const updated = await prisma.cadFile.findUniqueOrThrow({ where: { id: cadFile.id } });
     await writeAuditEvent(context, {
       action: AuditAction.UPLOAD,
@@ -649,7 +655,12 @@ export async function startCadExtraction(context: RequestContext, id: string, in
   const syncResult = await trySyncExtract(file.format, buffer, file.originalName, analysisObj);
   if (syncResult && syncResult.entities.length > 0) {
     await prisma.cadFile.update({ where: { id }, data: { status: CadStatus.EXTRACTING, errorMessage: null } });
-    await persistCadExtractionResult(context.tenantId, id, syncResult, updatedAnalysis, "gemini-pdf");
+    try {
+      await persistCadExtractionResult(context.tenantId, id, syncResult, updatedAnalysis, "gemini-pdf");
+    } catch (err) {
+      await prisma.cadFile.update({ where: { id }, data: { status: CadStatus.SETUP_REQUIRED, errorMessage: err instanceof Error ? err.message : "Extraction failed." } });
+      throw err;
+    }
     await writeAuditEvent(context, {
       action: AuditAction.REVIEW,
       entityType: "CadFile",
@@ -661,7 +672,10 @@ export async function startCadExtraction(context: RequestContext, id: string, in
 
   await prisma.cadFile.update({ where: { id }, data: { status: CadStatus.EXTRACTING, errorMessage: null } });
   const queue = await schedulePdfProcessing({ cadFileId: id, tenantId: context.tenantId, mode: "extract" });
-  if (!queue.queued) throwBadRequest(`PDF map processing is unavailable: ${queue.reason}`);
+  if (!queue.queued) {
+    await prisma.cadFile.update({ where: { id }, data: { status: CadStatus.SETUP_REQUIRED, errorMessage: queue.reason } });
+    throwBadRequest(`PDF map processing is unavailable: ${queue.reason}`);
+  }
   await writeAuditEvent(context, {
     action: AuditAction.REVIEW,
     entityType: "CadFile",

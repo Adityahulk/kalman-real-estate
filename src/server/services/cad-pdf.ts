@@ -26,7 +26,7 @@ export type CadExtractionResult = {
   }>;
 };
 
-export async function inspectPdf(pdfBuffer: Buffer, originalName: string): Promise<CadExtractionResult> {
+export async function inspectPdf(pdfBuffer: Buffer, originalName: string): Promise<{ result: CadExtractionResult; previewBuffer: Buffer }> {
   const { renderPdfPage } = await import("./cad-pdf-render");
   const dir = await mkWorkDir();
   try {
@@ -41,7 +41,7 @@ export async function inspectPdf(pdfBuffer: Buffer, originalName: string): Promi
       ? meta.vectorPathCount > 0 ? "MIXED_RASTER_VECTOR" : "RASTER_PDF"
       : "VECTOR_PDF";
 
-    return {
+    const result: CadExtractionResult = {
       analysis: {
         discipline: inspection.discipline,
         sourceKind,
@@ -80,11 +80,11 @@ export async function inspectPdf(pdfBuffer: Buffer, originalName: string): Promi
           requiresVectorExtraction: meta.vectorPathCount > 0,
           aiProvider: "gemini",
         },
-        previewArtifact: "preview.png",
       },
       layers: [],
       entities: [],
     };
+    return { result, previewBuffer };
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }

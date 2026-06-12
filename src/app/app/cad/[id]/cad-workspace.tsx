@@ -141,12 +141,11 @@ export function CadWorkspace({
   }
 
   const browserCad = cadFile.format === "DXF" || cadFile.format === "DWG";
-  if (browserCad && !scene && !["CALIBRATION_REQUIRED", "REVIEW_REQUIRED", "PUBLISHED"].includes(status)) {
+  if (browserCad && !scene && !["CALIBRATION_REQUIRED", "REVIEW_REQUIRED", "PUBLISHED", "FAILED"].includes(status)) {
     return (
       <BrowserExtractionWorkspace
         cadFile={cadFile}
         onComplete={() => {
-          setStatus("PARSING");
           router.refresh();
         }}
       />
@@ -754,7 +753,7 @@ function StatePanel({ icon, title, detail, children }: { icon: React.ReactNode; 
 }
 
 function ProcessingSteps({ status }: { status: string }) {
-  const steps = ["UPLOADED", "ANALYZING", "SETUP_REQUIRED", "EXTRACTING", "CALIBRATION_REQUIRED", "REVIEW_REQUIRED"];
+  const steps = ["UPLOADED", "PARSING", "ANALYZING", "SETUP_REQUIRED", "EXTRACTING", "CALIBRATION_REQUIRED", "REVIEW_REQUIRED"];
   const rank = steps.indexOf(status);
   return <div className="mx-auto mt-6 grid max-w-4xl gap-2 text-left text-xs md:grid-cols-6">{steps.map((step, index) => <div key={step} className={`rounded-md border px-3 py-2 ${index <= rank ? "border-gold-300 bg-gold-50 text-navy-950" : "border-slate-200 bg-slate-50 text-slate-500"}`}>{step.replaceAll("_", " ")}</div>)}</div>;
 }

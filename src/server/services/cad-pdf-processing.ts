@@ -88,9 +88,9 @@ async function runCadPdfProcessing(opts: {
 
     const { inspectPdf, extractPdf } = await import("./cad-pdf");
     if (opts.mode === "inspect") {
-      const result = await inspectPdf(buffer, cadFile.originalName);
+      const { result, previewBuffer } = await inspectPdf(buffer, cadFile.originalName);
       const { persistSyncInspect } = await import("./cad");
-      await persistSyncInspect(opts.tenantId, cadFile.id, result);
+      await persistSyncInspect(opts.tenantId, cadFile.id, result, previewBuffer);
       await prisma.cadFile.update({
         where: { id: cadFile.id },
         data: {

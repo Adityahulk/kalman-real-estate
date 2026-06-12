@@ -169,7 +169,10 @@ export function MlightCadMap({
     if (!current) return;
     for (const [name, layer] of layers.current) {
       const shouldHide = hiddenLayerNames.has(name);
-      if (Boolean(layer.isOff) !== shouldHide) current.curView.updateLayer(layer as never, { isOff: shouldHide });
+      if (Boolean(layer.isOff) !== shouldHide) {
+        current.curView.updateLayer(layer as never, { isOff: shouldHide });
+        layer.isOff = shouldHide;
+      }
     }
   }, [hiddenLayerNames]);
 
@@ -297,19 +300,25 @@ async function uploadExtraction(
   const created = await createResponse.json();
   const runId = created.data.id as string;
 
-  for (let index = 0; index < chunks.length; index += 1) {
-    setProgress(`Validating drawing data ${index + 1} of ${chunks.length}`);
-    const response = await fetch(`/api/v1/cad/${cadFileId}/extractions/${runId}/chunks/${index}`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ entities: chunks[index] }),
-    });
-    if (!response.ok) throw new Error(await responseError(response, `Could not upload extraction part ${index + 1}.`));
-  }
+  try {
+    for (let index = 0; index < chunks.length; index += 1) {
+      setProgress(`Validating drawing data ${index + 1} of ${chunks.length}`);
+      const response = await fetch(`/api/v1/cad/${cadFileId}/extractions/${runId}/chunks/${index}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ entities: chunks[index] }),
+      });
+      if (!response.ok) throw new Error(await responseError(response, `Could not upload extraction part ${index + 1}.`));
+    }
 
-  setProgress("Building the review scene");
-  const completeResponse = await fetch(`/api/v1/cad/${cadFileId}/extractions/${runId}/complete`, { method: "POST" });
-  if (!completeResponse.ok) throw new Error(await responseError(completeResponse, "The extracted CAD data did not pass server validation."));
+    setProgress("Building the review scene");
+    const completeResponse = await fetch(`/api/v1/cad/${cadFileId}/extractions/${runId}/complete`, { method: "POST" });
+    if (!completeResponse.ok) throw new Error(await responseError(completeResponse, "The extracted CAD data did not pass server validation."));
+  } catch (err) {
+    // Cancel the incomplete server run so the file doesn't stay stuck in PARSING.
+    await fetch(`/api/v1/cad/${cadFileId}/extractions/${runId}`, { method: "DELETE" }).catch(() => undefined);
+    throw err;
+  }
 }
 
 async function resolveSourceChecksum(bytes: ArrayBuffer, serverChecksum: string | null) {
