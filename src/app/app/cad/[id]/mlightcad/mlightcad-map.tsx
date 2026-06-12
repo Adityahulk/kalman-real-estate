@@ -103,8 +103,10 @@ export function MlightCadMap({
         const created = viewer.AcApDocManager.createInstance({
           container: container.current!,
           autoResize: true,
-          // Do not set baseUrl — lets the viewer use its CDN default for fonts.
-          // Worker scripts are provided explicitly below so they don't need baseUrl.
+          // The library default omits the trailing slash, producing broken URLs like
+          // "cad-datafonts/fonts.json". Explicitly pass the CDN URL with a trailing
+          // slash so fonts resolve to "cad-data/fonts/fonts.json".
+          baseUrl: "https://cdn.jsdelivr.net/gh/mlightcad/cad-data/",
           useMainThreadDraw: true,
           webworkerFileUrls: {
             dxfParser: "/cad-runtime/dxf-parser-worker.js",
