@@ -6,6 +6,8 @@ import { writeAuditEvent } from "../audit";
 import { enqueueCadProcessing } from "../jobs";
 import { createUploadTargets, getObjectResilient, putObjectResilient, storageKey } from "../storage";
 import { createNotification } from "./notifications";
+import { inspectPdf, extractPdf, type CadExtractionResult } from "./cad-pdf";
+import { geminiAvailable } from "./gemini-vision";
 
 export const cadUploadSchema = z.object({
   projectId: z.string().optional(),
@@ -28,6 +30,243 @@ export const deleteCadSchema = z.object({
 type StoredCadUpload = z.infer<typeof cadUploadSchema> & {
   bytes: Buffer;
 };
+
+const SYNC_TIMEOUT_MS = Number(process.env.CAD_SYNC_TIMEOUT_MS ?? 25_000);
+
+async function trySyncInspect(format: CadFormat, bytes: Buffer, originalName: string): Promise<CadExtractionResult | null> {
+  if (format !== CadFormat.VECTOR_PDF || !geminiAvailable()) return null;
+  try {
+    const result = await Promise.race([
+      inspectPdf(bytes, originalName),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), SYNC_TIMEOUT_MS)),
+    ]);
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+async function trySyncExtract(format: CadFormat, bytes: Buffer, originalName: string, analysis: Record<string, unknown>): Promise<CadExtractionResult | null> {
+  if (format !== CadFormat.VECTOR_PDF || !geminiAvailable()) return null;
+  try {
+    const result = await Promise.race([
+      extractPdf(bytes, originalName, analysis),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), SYNC_TIMEOUT_MS)),
+    ]);
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+async function persistSyncInspect(
+  tenantId: string,
+  cadFileId: string,
+  result: CadExtractionResult,
+) {
+  const analysis = result.analysis ?? {};
+  const analysisData = {
+    discipline: String(analysis.discipline ?? "AUTO"),
+    sourceKind: typeof analysis.sourceKind === "string" ? analysis.sourceKind : undefined,
+    pageNumber: typeof analysis.pageNumber === "number" ? analysis.pageNumber : 1,
+    proposedRegion: analysis.proposedRegion as Prisma.InputJsonValue | undefined,
+    excludedRegions: analysis.excludedRegions as Prisma.InputJsonValue | undefined,
+    expectedCounts: analysis.expectedCounts as Prisma.InputJsonValue | undefined,
+    inspection: analysis.inspection as Prisma.InputJsonValue | undefined,
+    scaleCalibration: analysis.scaleCalibration as Prisma.InputJsonValue | undefined,
+    calibrationConfirmedAt: analysis.calibrationConfirmed === true ? new Date() : undefined,
+    previewArtifactKey: undefined as string | undefined,
+    rawArtifactKey: "",
+  };
+  const rawKey = storageKey([tenantId, "cad", cadFileId, "artifacts", `${Date.now()}-inspect.json`]);
+  const stored = await putObjectResilient(rawKey, Buffer.from(JSON.stringify(result)), "application/json", { mirrorLocalOnS3Success: true });
+  analysisData.rawArtifactKey = stored.storageKey;
+
+  await prisma.$transaction([
+    prisma.cadAnalysis.upsert({
+      where: { cadFileId },
+      update: analysisData,
+      create: { tenantId, cadFileId, ...analysisData },
+    }),
+    prisma.cadFile.update({
+      where: { id: cadFileId },
+      data: {
+        status: CadStatus.SETUP_REQUIRED,
+        processingLog: {
+          mode: "inspect",
+          inspectedAt: new Date().toISOString(),
+          sourceKind: analysisData.sourceKind,
+          discipline: analysisData.discipline,
+          syncProcessed: true,
+        },
+      },
+    }),
+  ]);
+}
+
+export async function persistCadExtractionResult(
+  tenantId: string,
+  cadFileId: string,
+  result: CadExtractionResult,
+  analysisRecord: Prisma.CadAnalysisGetPayload<Record<string, never>>,
+  source = "server-extraction",
+) {
+  const rawEntities = result.entities;
+  if (!rawEntities.length) throw new Error("No candidates extracted.");
+
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) {
+      if (value.length === 2 && typeof value[0] === "number" && typeof value[1] === "number") {
+        xs.push(value[0]);
+        ys.push(value[1]);
+      } else value.forEach(visit);
+    } else if (value && typeof value === "object") Object.values(value).forEach(visit);
+  };
+  rawEntities.forEach((e) => visit(e.geometry));
+  if (!xs.length || !ys.length) throw new Error("No usable coordinates");
+  const bounds = { minX: Math.min(...xs), minY: Math.min(...ys), maxX: Math.max(...xs), maxY: Math.max(...ys) };
+
+  const rawKey = storageKey([tenantId, "cad", cadFileId, "artifacts", `${Date.now()}-extract.json`]);
+  await putObjectResilient(rawKey, Buffer.from(JSON.stringify(result)), "application/json", { mirrorLocalOnS3Success: true });
+
+  await prisma.$transaction(async (tx) => {
+    await tx.cadAnalysis.update({
+      where: { cadFileId },
+      data: { rawArtifactKey: rawKey },
+    });
+
+    const oldScenes = await tx.cadScene.findMany({
+      where: { tenantId, cadFileId },
+      select: { id: true, entities: { select: { id: true } } },
+    });
+    const oldEntityIds = oldScenes.flatMap((s) => s.entities.map((e) => e.id));
+    if (oldEntityIds.length) {
+      await tx.spatialLink.deleteMany({ where: { tenantId, cadEntityId: { in: oldEntityIds } } });
+      await tx.cadEntity.deleteMany({ where: { tenantId, id: { in: oldEntityIds } } });
+    }
+    if (oldScenes.length) {
+      await tx.cadLayer.deleteMany({ where: { tenantId, sceneId: { in: oldScenes.map((s) => s.id) } } });
+      await tx.cadScene.deleteMany({ where: { tenantId, id: { in: oldScenes.map((s) => s.id) } } });
+    }
+    await tx.cadReviewIssue.deleteMany({ where: { tenantId, cadFileId } });
+
+    const cadFile = await tx.cadFile.findUniqueOrThrow({ where: { id: cadFileId } });
+    const scene = await tx.cadScene.create({
+      data: {
+        tenantId,
+        cadFileId,
+        scope: cadFile.parentType,
+        parentId: cadFile.parentId,
+        bounds,
+        units: "drawing-space",
+        sceneJson: { source, entityCount: rawEntities.length, rawArtifactKey: rawKey },
+      },
+    });
+
+    const layerValues = result.layers.map((l) => typeof l === "string" ? { name: l } : l).filter((l, i, a) => l.name && a.findIndex((v) => v.name === l.name) === i);
+    const layers = [];
+    for (const layer of layerValues) {
+      layers.push(await tx.cadLayer.create({
+        data: { tenantId, sceneId: scene.id, name: layer.name, purpose: layer.purpose, color: layer.color, metadata: layer.metadata as Prisma.InputJsonValue | undefined },
+      }));
+    }
+    const layerByName = new Map(layers.map((l) => [l.name, l.id]));
+
+    const created: Array<{ id: string; label: string | null; type: CadEntityType; validation: Prisma.JsonValue | null }> = [];
+    for (const entity of rawEntities) {
+      const type = Object.values(CadEntityType).includes(entity.type as CadEntityType) ? entity.type as CadEntityType : CadEntityType.UNKNOWN;
+      const candidate = await tx.cadEntity.create({
+        data: {
+          tenantId,
+          sceneId: scene.id,
+          layerId: entity.layer ? layerByName.get(entity.layer) : undefined,
+          type,
+          label: (entity.label ?? "").slice(0, 500) || null,
+          confidence: Math.min(1, Math.max(0, Number(entity.confidence) || 0.35)),
+          geometry: entity.geometry as Prisma.InputJsonValue,
+          measurements: entity.measurements as Prisma.InputJsonValue | undefined,
+          validation: entity.validation as Prisma.InputJsonValue | undefined,
+          sourceHandle: entity.sourceHandle,
+          sourceLayer: entity.layer,
+          status: "SUGGESTED",
+        },
+      });
+      created.push({ id: candidate.id, label: candidate.label, type, validation: candidate.validation });
+
+      const issues: Array<{ severity: InsightSeverity; code: string; message: string; blocking: boolean }> = [];
+      if (type === CadEntityType.PLOT) {
+        if (!isValidPlotLabelSync(candidate.label)) {
+          issues.push(candidate.label
+            ? { severity: InsightSeverity.CRITICAL, code: "INVALID_PLOT_LABEL", message: "Plot number is not a valid unique plot identifier.", blocking: true }
+            : { severity: InsightSeverity.CRITICAL, code: "MISSING_PLOT_LABEL", message: "A likely plot boundary was found, but its plot number could not be read.", blocking: true });
+        }
+        const geo = entity.geometry as Record<string, unknown>;
+        if (!(geo.closed === true && Array.isArray(geo.points) && geo.points.length >= 4)) {
+          issues.push({ severity: InsightSeverity.CRITICAL, code: "UNCLOSED_PLOT", message: "Plot boundary is not closed.", blocking: true });
+        }
+      }
+      const vCodes = validationBlockingCodesSync(entity.validation as Record<string, unknown> | null);
+      for (const code of vCodes) {
+        issues.push({ severity: code === "SCALE_REQUIRED" ? InsightSeverity.HIGH : InsightSeverity.MEDIUM, code, message: `Candidate validation: ${code.replaceAll("_", " ").toLowerCase()}.`, blocking: code !== "DUPLICATE_OCR_LABEL" });
+      }
+      for (const issue of issues) {
+        await tx.cadReviewIssue.create({ data: { tenantId, cadFileId, entityId: candidate.id, ...issue } });
+      }
+    }
+
+    const plotEntities = created.filter((e) => e.type === CadEntityType.PLOT);
+    const labels = new Map<string, string[]>();
+    for (const e of plotEntities) {
+      const label = e.label?.trim().toUpperCase();
+      if (!label) continue;
+      labels.set(label, [...(labels.get(label) ?? []), e.id]);
+    }
+    for (const [label, ids] of labels) {
+      if (ids.length < 2) continue;
+      for (const entityId of ids) {
+        await tx.cadReviewIssue.create({ data: { tenantId, cadFileId, entityId, severity: InsightSeverity.CRITICAL, code: "DUPLICATE_PLOT_LABEL", message: `Plot number ${label} appears more than once.`, blocking: true } });
+      }
+    }
+    const expected = typeof analysisRecord.expectedCounts === "object" && analysisRecord.expectedCounts && !Array.isArray(analysisRecord.expectedCounts)
+      ? (analysisRecord.expectedCounts as Record<string, unknown>).total : undefined;
+    if (typeof expected === "number" && expected !== plotEntities.length) {
+      await tx.cadReviewIssue.create({ data: { tenantId, cadFileId, severity: InsightSeverity.CRITICAL, code: "PLOT_COUNT_MISMATCH", message: `The drawing states ${expected} plots, but ${plotEntities.length} candidates were detected.`, blocking: true, metadata: { expected, detected: plotEntities.length } } });
+    }
+
+    const blockingCount = await tx.cadReviewIssue.count({ where: { tenantId, cadFileId, blocking: true, resolved: false } });
+    const requiresCalibration = plotEntities.length > 0 && !analysisRecord.calibrationConfirmedAt;
+    await tx.cadFile.update({
+      where: { id: cadFileId },
+      data: {
+        status: requiresCalibration ? CadStatus.CALIBRATION_REQUIRED : CadStatus.REVIEW_REQUIRED,
+        errorMessage: null,
+        processingLog: {
+          mode: "extract",
+          extractedAt: new Date().toISOString(),
+          candidateCount: created.length,
+          plotCandidateCount: plotEntities.length,
+          blockingIssueCount: blockingCount,
+          syncProcessed: true,
+        },
+      },
+    });
+  }, { timeout: 180_000 });
+}
+
+function isValidPlotLabelSync(label: string | null) {
+  if (!label || label.startsWith("\\")) return false;
+  const normalized = label.trim().toUpperCase();
+  if (["PLOT", "PLOTS", "PLOTTING", "PLOT NO.", "PLOT NO"].includes(normalized)) return false;
+  return /^(?:EWS-\d+|PARK-[A-Z]?-?\d+|GREEN-\d+|COM-\d+|PARKING-\d+|(?:[A-Z]{0,2}[-/]?)?\d{1,4}[A-Z]?)$/.test(normalized);
+}
+
+function validationBlockingCodesSync(value: Record<string, unknown> | null) {
+  if (!value) return [];
+  const codes = value.blockingCodes;
+  return Array.isArray(codes) ? codes.filter((c): c is string => typeof c === "string") : [];
+}
 
 export async function createStoredCadUpload(context: RequestContext, input: StoredCadUpload) {
   await assertCadParentInTenant(context, input);
@@ -67,7 +306,61 @@ export async function createStoredCadUpload(context: RequestContext, input: Stor
     },
   });
 
-  const queue = await enqueueCadProcessing({ cadFileId: cadFile.id, tenantId: context.tenantId });
+  if (input.format === CadFormat.DXF || input.format === CadFormat.DWG) {
+    const updated = await prisma.cadFile.update({
+      where: { id: cadFile.id },
+      data: {
+        processingLog: {
+          storageProvider: stored.storageProvider,
+          fallbackStorageKey: stored.fallbackStorageKey,
+          storageWarning: stored.warning,
+          storedAt: new Date().toISOString(),
+          parserEngine: "mlightcad-browser",
+          progressLabel: "Open this drawing to parse it securely in your browser.",
+          stage: "WAITING_FOR_BROWSER",
+        },
+      },
+    });
+    await writeAuditEvent(context, {
+      action: AuditAction.UPLOAD,
+      entityType: "CadFile",
+      entityId: cadFile.id,
+      after: {
+        cadFileId: cadFile.id,
+        originalName: cadFile.originalName,
+        storageKey: cadFile.storageKey,
+        storageProvider: stored.storageProvider,
+        parserEngine: "mlightcad-browser",
+      },
+    });
+    return {
+      cadFile: updated,
+      storage: stored,
+      queue: { queued: false, reason: "browser_extraction_required" },
+    };
+  }
+
+  const syncResult = await trySyncInspect(input.format, input.bytes, originalName);
+  let queue: { queued: boolean; jobId?: string; reason?: string } = { queued: false, reason: "sync_processed" };
+  if (syncResult) {
+    await persistSyncInspect(context.tenantId, cadFile.id, syncResult);
+    const updated = await prisma.cadFile.findUniqueOrThrow({ where: { id: cadFile.id } });
+    await writeAuditEvent(context, {
+      action: AuditAction.UPLOAD,
+      entityType: "CadFile",
+      entityId: cadFile.id,
+      after: {
+        cadFileId: cadFile.id,
+        originalName: cadFile.originalName,
+        storageKey: cadFile.storageKey,
+        storageProvider: stored.storageProvider,
+        syncProcessed: true,
+      },
+    });
+    return { cadFile: updated, storage: stored, queue };
+  }
+
+  queue = await enqueueCadProcessing({ cadFileId: cadFile.id, tenantId: context.tenantId });
   await writeAuditEvent(context, {
     action: AuditAction.UPLOAD,
     entityType: "CadFile",
@@ -129,9 +422,15 @@ export async function createCadUpload(context: RequestContext, input: z.infer<ty
 }
 
 function safeCadFileName(name: string, format: CadFormat) {
-  const fallback = format === CadFormat.VECTOR_PDF ? "plan.pdf" : `${format.toLowerCase()}-plan.dxf`;
+  const fallback = format === CadFormat.VECTOR_PDF
+    ? "plan.pdf"
+    : format === CadFormat.DWG
+      ? "drawing.dwg"
+      : "drawing.dxf";
   const leaf = name.split(/[\\/]/).filter(Boolean).pop() ?? fallback;
-  const cleaned = leaf.replace(/[^a-zA-Z0-9._ -]/g, "-").replace(/\s+/g, " ").trim();
+  let decoded = leaf;
+  try { decoded = decodeURIComponent(leaf); } catch { /* keep original */ }
+  const cleaned = decoded.replace(/[^a-zA-Z0-9._ ()-]/g, "-").replace(/\s+/g, " ").trim();
   if (!cleaned || cleaned === "." || cleaned === "..") return fallback;
   if (!cleaned.toLowerCase().endsWith(".dxf") && !cleaned.toLowerCase().endsWith(".pdf") && !cleaned.toLowerCase().endsWith(".dwg")) return fallback;
   return cleaned;
@@ -317,6 +616,41 @@ export async function startCadExtraction(context: RequestContext, id: string, in
       setupConfirmedAt: new Date(),
     },
   });
+
+  const updatedAnalysis = await prisma.cadAnalysis.findUniqueOrThrow({ where: { cadFileId: id } });
+  const analysisObj = {
+    discipline: updatedAnalysis.discipline,
+    sourceKind: updatedAnalysis.sourceKind,
+    pageNumber: updatedAnalysis.pageNumber,
+    proposedRegion: updatedAnalysis.proposedRegion,
+    confirmedRegion: updatedAnalysis.confirmedRegion,
+    excludedRegions: updatedAnalysis.excludedRegions,
+    expectedCounts: updatedAnalysis.expectedCounts,
+    scaleCalibration: updatedAnalysis.scaleCalibration,
+    calibrationConfirmedAt: updatedAnalysis.calibrationConfirmedAt,
+    inspection: updatedAnalysis.inspection,
+  } as Record<string, unknown>;
+
+  let buffer: Buffer;
+  try {
+    buffer = await getObjectResilient(file.storageKey);
+  } catch {
+    throwBadRequest("The uploaded Map file is missing from storage.");
+  }
+
+  const syncResult = await trySyncExtract(file.format, buffer, file.originalName, analysisObj);
+  if (syncResult && syncResult.entities.length > 0) {
+    await prisma.cadFile.update({ where: { id }, data: { status: CadStatus.EXTRACTING, errorMessage: null } });
+    await persistCadExtractionResult(context.tenantId, id, syncResult, updatedAnalysis, "gemini-pdf");
+    await writeAuditEvent(context, {
+      action: AuditAction.REVIEW,
+      entityType: "CadFile",
+      entityId: id,
+      after: { drawingSetup: input, syncProcessed: true, candidateCount: syncResult.entities.length },
+    });
+    return { cadFileId: id, queue: { queued: false, reason: "sync_processed" } };
+  }
+
   await prisma.cadFile.update({ where: { id }, data: { status: CadStatus.EXTRACTING, errorMessage: null } });
   const queue = await enqueueCadProcessing({ cadFileId: id, tenantId: context.tenantId, mode: "extract" });
   if (!queue.queued) throwBadRequest(`Map worker queue is unavailable: ${queue.reason}`);
@@ -951,6 +1285,32 @@ export async function startCadProcessing(context: RequestContext, id: string, re
     throwBadRequest("The uploaded Map file is missing from storage. Re-upload the DXF file to repair this Map record.");
   }
 
+  if (cadFile.format === CadFormat.DXF || cadFile.format === CadFormat.DWG) {
+    const updated = await prisma.cadFile.update({
+      where: { id },
+      data: {
+        status: CadStatus.UPLOADED,
+        errorMessage: null,
+        processingLog: {
+          parserEngine: "mlightcad-browser",
+          stage: "WAITING_FOR_BROWSER",
+          progressLabel: "Reopen this drawing to parse it again in your browser.",
+          retriedAt: new Date().toISOString(),
+        },
+      },
+    });
+    await writeAuditEvent(context, {
+      action: AuditAction.UPDATE,
+      entityType: "CadFile",
+      entityId: id,
+      after: { retried, parserEngine: "mlightcad-browser" },
+    });
+    return {
+      cadFile: updated,
+      queue: { queued: false, reason: "browser_extraction_required" },
+    };
+  }
+
   const updated = await prisma.cadFile.update({
     where: { id },
     data: { status: CadStatus.UPLOADED, errorMessage: null, processingLog: Prisma.JsonNull },
@@ -1011,7 +1371,13 @@ export async function replaceCadFile(
       },
     },
   });
-  const queue = await enqueueCadProcessing({ cadFileId: cadFile.id, tenantId: context.tenantId });
+  const browserExtraction = input.format === CadFormat.DXF || input.format === CadFormat.DWG;
+  const queue = browserExtraction
+    ? { queued: false, reason: "browser_extraction_required" }
+    : await enqueueCadProcessing({ cadFileId: cadFile.id, tenantId: context.tenantId });
+  if (browserExtraction) {
+    await prisma.cadAnalysis.deleteMany({ where: { tenantId: context.tenantId, cadFileId: id } });
+  }
 
   await writeAuditEvent(context, {
     action: AuditAction.UPLOAD,
@@ -1028,6 +1394,7 @@ export async function replaceCadFile(
       storageProvider: stored.storageProvider,
       replacementUpload: true,
       processingQueued: queue.queued,
+      parserEngine: browserExtraction ? "mlightcad-browser" : undefined,
     },
   });
 
@@ -1044,6 +1411,12 @@ function validateCadBytes(bytes: Buffer, format: CadFormat) {
     const isBinaryDxf = header.startsWith("AutoCAD Binary DXF");
     if (!isAsciiDxf && !isBinaryDxf) {
       throwBadRequest("The uploaded file does not appear to be a valid DXF. Export it again from the mapping application.");
+    }
+  }
+  if (format === CadFormat.DWG) {
+    const signature = bytes.subarray(0, 6).toString("ascii");
+    if (!/^AC10\d{2}$/.test(signature)) {
+      throwBadRequest("The uploaded file does not appear to be a valid DWG drawing.");
     }
   }
 }
@@ -1119,6 +1492,7 @@ export async function deleteCadFile(context: RequestContext, id: string, input: 
     if (sceneIds.length) await tx.cadLayer.deleteMany({ where: { tenantId: context.tenantId, sceneId: { in: sceneIds } } });
     if (sceneIds.length) await tx.cadScene.deleteMany({ where: { tenantId: context.tenantId, id: { in: sceneIds } } });
     await tx.cadVersion.deleteMany({ where: { tenantId: context.tenantId, cadFileId: id } });
+    await tx.cadExtractionRun.deleteMany({ where: { tenantId: context.tenantId, cadFileId: id } });
     await tx.cadAnalysis.deleteMany({ where: { tenantId: context.tenantId, cadFileId: id } });
     return tx.cadFile.delete({ where: { id } });
   });

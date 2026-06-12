@@ -1,7 +1,9 @@
 import { access } from "node:fs/promises";
+import { resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import IORedis from "ioredis";
+import { geminiAvailable } from "./gemini-vision";
 
 const execFileAsync = promisify(execFile);
 
@@ -21,36 +23,54 @@ export async function getCadDependencyHealth() {
   const python = process.env.PYTHON_BIN ?? "python3";
   const ezdxf = await commandOk(python, ["-c", "import ezdxf"]);
   const pymupdf = await commandOk(python, ["-c", "import fitz"]);
-  const opencv = await commandOk(python, ["-c", "import cv2"]);
   const shapely = await commandOk(python, ["-c", "import shapely"]);
-  const paddleocr = await commandOk(python, ["-c", "import paddleocr"], 30_000);
+  const gemini = { ok: geminiAvailable(), ...(geminiAvailable() ? {} : { error: "GEMINI_API_KEY is not configured" }) };
   const tesseract = await commandOk(process.env.TESSERACT_BIN ?? "tesseract", ["--version"]);
-  const odaPath = process.env.ODA_CONVERTER_BIN;
-  const oda = odaPath
-    ? await access(odaPath).then(() => ({ ok: true as const })).catch((error) => ({
-        ok: false as const,
-        error: error instanceof Error ? error.message : "ODA converter not reachable",
-      }))
-    : { ok: false as const, error: "ODA_CONVERTER_BIN is not configured" };
   const worker = await getWorkerHealth();
+  const browserRuntime = await browserRuntimeHealth();
 
   return {
+    pipeline: "mlightcad-browser-and-gemini-pdf",
     worker,
+    browserRuntime,
+    gemini,
     python: { command: python, ...(await commandOk(python, ["--version"])) },
     ezdxf,
     pymupdf,
-    opencv,
     shapely,
-    paddleocr,
     tesseract,
-    oda,
     supported: {
-      dxf: ezdxf.ok && shapely.ok,
-      dwg: oda.ok && ezdxf.ok,
-      vectorPdf: pymupdf.ok && shapely.ok,
-      mixedPdf: pymupdf.ok && opencv.ok && shapely.ok && (paddleocr.ok || tesseract.ok),
+      dxf: browserRuntime.ok,
+      dwg: browserRuntime.ok,
+      vectorPdf: pymupdf.ok && gemini.ok,
+      mixedPdf: pymupdf.ok && gemini.ok,
+    },
+    notes: {
+      dxf: "Parsed and rendered in the authorized admin browser using MLightCAD.",
+      dwg: "Parsed in the browser using MLightCAD and LibreDWG; DXF remains the compatibility fallback.",
+      pdf: "Processed separately through the Gemini/PDF review pipeline.",
     },
   };
+}
+
+async function browserRuntimeHealth() {
+  const assets = [
+    "mlightcad-runtime.js",
+    "dxf-parser-worker.js",
+    "libredwg-parser-worker.js",
+    "mtext-renderer-worker.js",
+  ];
+  const missing: string[] = [];
+  for (const asset of assets) {
+    try {
+      await access(resolve(process.cwd(), "public", "cad-runtime", asset));
+    } catch {
+      missing.push(asset);
+    }
+  }
+  return missing.length
+    ? { ok: false as const, error: `Missing browser runtime assets: ${missing.join(", ")}` }
+    : { ok: true as const, version: "1.5.5", assets };
 }
 
 async function getWorkerHealth() {

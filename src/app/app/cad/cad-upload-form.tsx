@@ -41,7 +41,7 @@ export function CadUploadForm({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedFile) {
-      setMessage("Choose a DXF or PDF drawing first.");
+      setMessage("Choose a DXF, DWG, or PDF drawing first.");
       return;
     }
     setLoading(true);
@@ -68,10 +68,15 @@ export function CadUploadForm({
 
     setLoading(false);
     setStage("done");
+    const syncProcessed = payload.data.cadFile?.status === "SETUP_REQUIRED";
     setMessage(
-      payload.data.queue?.queued
-        ? `Uploaded ${payload.data.cadFile.originalName}. Map processing has been queued.`
-        : `Uploaded ${payload.data.cadFile.originalName}, but processing could not be queued: ${payload.data.queue?.reason ?? "queue unavailable"}.`,
+      syncProcessed
+        ? `Uploaded and analyzed ${payload.data.cadFile.originalName}. Ready for drawing setup.`
+        : payload.data.queue?.reason === "browser_extraction_required"
+          ? `Uploaded ${payload.data.cadFile.originalName}. Open the drawing to visualize it and prepare review candidates in your browser.`
+        : payload.data.queue?.queued
+          ? `Uploaded ${payload.data.cadFile.originalName}. Map processing has been queued.`
+          : `Uploaded ${payload.data.cadFile.originalName}. ${payload.data.queue?.reason === "sync_processed" ? "Analysis complete." : `Processing could not be queued: ${payload.data.queue?.reason ?? "queue unavailable"}.`}`,
     );
     if (redirectToReview) router.push(`/app/cad/${payload.data.cadFile.id}`);
     router.refresh();
@@ -82,13 +87,14 @@ export function CadUploadForm({
     setSelectedFile(file);
     if (file) {
       const lower = file.name.toLowerCase();
-      if (!lower.endsWith(".dxf") && !lower.endsWith(".pdf")) {
+      if (!lower.endsWith(".dxf") && !lower.endsWith(".dwg") && !lower.endsWith(".pdf")) {
         setSelectedFile(null);
-        setMessage("Please upload a DXF or PDF drawing. Mixed raster/vector PDFs are supported. DWG is disabled in this deployment.");
+        setMessage("Please upload a DXF, DWG, or PDF drawing.");
         return;
       }
       setOriginalName(file.name);
       if (lower.endsWith(".pdf")) setFormat("VECTOR_PDF");
+      else if (lower.endsWith(".dwg")) setFormat("DWG");
       else setFormat("DXF");
       setMessage("");
     }
@@ -132,7 +138,7 @@ export function CadUploadForm({
             <label>
               <span className="label">Format</span>
               <select className="input" value={format} onChange={(event) => setFormat(event.target.value as CadFormat)}>
-                {[CadFormat.DXF, CadFormat.VECTOR_PDF].map((item) => (
+                {[CadFormat.DXF, CadFormat.DWG, CadFormat.VECTOR_PDF].map((item) => (
                   <option key={item} value={item}>{item.replaceAll("_", " ")}</option>
                 ))}
               </select>
@@ -145,7 +151,7 @@ export function CadUploadForm({
         ) : null}
         <label className="md:col-span-2">
           <span className="label">Map file</span>
-          <input className="input" type="file" accept=".dxf,.pdf" onChange={chooseFile} />
+          <input className="input" type="file" accept=".dxf,.dwg,.pdf" onChange={chooseFile} />
           {selectedFile ? (
             <span className="mt-2 block text-xs text-slate-500">
               {selectedFile.name} · {(selectedFile.size / (1024 * 1024)).toFixed(2)} MB
@@ -157,7 +163,7 @@ export function CadUploadForm({
       {loading ? (
         <div className="mt-4 rounded-lg bg-gold-50 px-3 py-2 text-sm text-navy-900">
           {stage === "preparing" ? "Preparing Map upload..." : null}
-          {stage === "uploading" ? "Uploading Map file and queueing extraction..." : null}
+          {stage === "uploading" ? "Uploading the original Map file..." : null}
           {stage === "queueing" ? "Queueing extraction worker..." : null}
         </div>
       ) : null}

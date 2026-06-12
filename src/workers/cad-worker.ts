@@ -5,10 +5,12 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { tmpdir, totalmem } from "node:os";
 import { promisify } from "node:util";
-import { CadEntityType, CadStatus, InsightSeverity, Prisma, PrismaClient } from "@prisma/client";
+import { CadEntityType, CadFormat, CadStatus, InsightSeverity, Prisma, PrismaClient } from "@prisma/client";
 import { Worker } from "bullmq";
 import IORedis from "ioredis";
 import { getObjectResilient, putObjectResilient, storageKey } from "@/server/storage";
+import { inspectPdf, extractPdf } from "@/server/services/cad-pdf";
+import { geminiAvailable } from "@/server/services/gemini-vision";
 
 const execFileAsync = promisify(execFile);
 const prisma = new PrismaClient();
@@ -30,7 +32,7 @@ type ExtractedLayer = {
 
 type ExtractedEntity = {
   layer?: string;
-  label?: string;
+  label?: string | null;
   type: string;
   confidence?: number;
   geometry: Record<string, unknown>;
@@ -82,14 +84,30 @@ class CadProcessError extends Error {
 
 async function processCad(job: CadJob) {
   const startedAt = new Date();
-  await assertWorkerCapacity();
   const mode = job.mode ?? "inspect";
   const cadFile = await prisma.cadFile.findFirstOrThrow({
     where: { id: job.cadFileId, tenantId: job.tenantId },
     include: { analysis: true },
   });
+  if (cadFile.format === CadFormat.DXF || cadFile.format === CadFormat.DWG) {
+    await prisma.cadFile.update({
+      where: { id: cadFile.id },
+      data: {
+        status: CadStatus.UPLOADED,
+        errorMessage: null,
+        processingLog: {
+          parserEngine: "mlightcad-browser",
+          stage: "WAITING_FOR_BROWSER",
+          progressLabel: "Open this drawing to parse and visualize it in your browser.",
+          redirectedFromWorkerAt: new Date().toISOString(),
+        },
+      },
+    });
+    return;
+  }
+  await assertWorkerCapacity();
   const status = mode === "inspect"
-    ? cadFile.format === "DWG" ? CadStatus.CONVERTING : CadStatus.ANALYZING
+    ? CadStatus.ANALYZING
     : CadStatus.EXTRACTING;
   await prisma.cadFile.update({
     where: { id: cadFile.id },
@@ -108,6 +126,50 @@ async function processCad(job: CadJob) {
   });
 
   const buffer = await getObjectResilient(cadFile.storageKey);
+
+  const useNewPipeline = cadFile.format === CadFormat.VECTOR_PDF && geminiAvailable();
+
+  if (useNewPipeline) {
+    await updateProgress(job, startedAt, "processing", "Analyzing with AI");
+    let result;
+    if (mode === "inspect") {
+      result = await inspectPdf(buffer, cadFile.originalName);
+    } else {
+      const analysis = serializeAnalysis(cadFile.analysis);
+      result = await extractPdf(buffer, cadFile.originalName, analysis);
+    }
+
+    const rawArtifact = await persistRawArtifact(job, cadFile.id, mode, result);
+    const analysisData = analysisWriteData(result.analysis ?? {}, {}, rawArtifact);
+
+    if (mode === "inspect") {
+      await prisma.$transaction([
+        prisma.cadAnalysis.upsert({
+          where: { cadFileId: cadFile.id },
+          update: analysisData,
+          create: { tenantId: job.tenantId, cadFileId: cadFile.id, ...analysisData },
+        }),
+        prisma.cadFile.update({
+          where: { id: cadFile.id },
+          data: {
+            status: CadStatus.SETUP_REQUIRED,
+            processingLog: {
+              mode,
+              inspectedAt: new Date().toISOString(),
+              sourceKind: stringValue(result.analysis?.sourceKind),
+              discipline: stringValue(result.analysis?.discipline),
+              pipeline: "v2",
+            },
+          },
+        }),
+      ]);
+      return;
+    }
+
+    await persistCandidates(job, cadFile.id, result, analysisData);
+    return;
+  }
+
   const working = await runCadIntelligence(
     job,
     cadFile.format,
@@ -153,6 +215,23 @@ async function processCad(job: CadJob) {
   } finally {
     await rm(working.dir, { recursive: true, force: true }).catch(() => undefined);
   }
+}
+
+async function updateProgress(job: CadJob, startedAt: Date, stage: string, label: string) {
+  await prisma.cadFile.updateMany({
+    where: { id: job.cadFileId, tenantId: job.tenantId },
+    data: {
+      processingLog: {
+        mode: job.mode ?? "inspect",
+        stage,
+        progressLabel: label,
+        startedAt: startedAt.toISOString(),
+        heartbeatAt: new Date().toISOString(),
+        elapsedMs: Date.now() - startedAt.getTime(),
+        pipeline: "v2",
+      },
+    },
+  });
 }
 
 async function persistCandidates(
@@ -361,22 +440,13 @@ async function runCadIntelligence(
     const safeName = basename(originalName).replace(/[^a-zA-Z0-9._ -]/g, "-") || (format === "VECTOR_PDF" ? "plan.pdf" : "plan.dxf");
     const sourcePath = join(dir, safeName);
     await writeFile(sourcePath, buffer);
-    let extractorFormat = format;
-    let extractorPath = sourcePath;
-    if (format === "DWG") {
-      const odaBinary = process.env.ODA_CONVERTER_BIN;
-      if (!odaBinary) throw new Error("DWG conversion is not configured. Export the drawing as DXF.");
-      await execFileAsync(odaBinary, [dir, dir, "ACAD2018", "DXF", "0", "1"]);
-      extractorPath = sourcePath.replace(/\.dwg$/i, ".dxf");
-      extractorFormat = "DXF";
-    }
     const optionsPath = join(dir, "options.json");
     await writeFile(optionsPath, JSON.stringify({ analysis: serializeAnalysis(analysis) }));
     const script = join(process.cwd(), "src/workers/cad-python/cad_intelligence.py");
     const stdout = await runPythonExtractor(job, startedAt, process.env.PYTHON_BIN ?? "python3", [
       script,
-      extractorPath,
-      extractorFormat,
+      sourcePath,
+      format,
       mode,
       optionsPath,
       dir,

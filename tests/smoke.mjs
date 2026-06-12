@@ -112,6 +112,12 @@ const cadQueue = await request(`/api/v1/cad/${cadUploadFlow.json.data.cadFile.id
   headers: { cookie },
 });
 assert(cadQueue.response.status === 200, "CAD process queue failed");
+assert(cadQueue.json.data?.queue?.reason === "browser_extraction_required", "DXF did not select browser extraction");
+const cadSource = await fetch(`${baseUrl}/api/v1/cad/${cadUploadFlow.json.data.cadFile.id}/source`, {
+  headers: { cookie },
+});
+assert(cadSource.status === 200, "authorized admin could not load the raw CAD source");
+assert(/^[a-f0-9]{64}$/i.test(cadSource.headers.get("x-cad-source-sha256") ?? ""), "CAD source checksum is missing");
 
 const doc = await request("/api/v1/documents/generate", {
   method: "POST",

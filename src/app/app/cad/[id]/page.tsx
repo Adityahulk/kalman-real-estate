@@ -46,6 +46,7 @@ export default async function CadReviewPage({ params }: { params: { id: string }
         cadFile={{
           id: cadFile.id,
           originalName: cadFile.originalName,
+          format: cadFile.format,
           status: cadFile.status,
           parentType: cadFile.parentType,
           parentId: cadFile.parentId,
@@ -82,6 +83,7 @@ export default async function CadReviewPage({ params }: { params: { id: string }
             measurements: entity.measurements,
             validation: entity.validation,
             status: entity.status,
+            sourceHandle: entity.sourceHandle,
             sourceLayer: entity.sourceLayer,
             spatialLinks: entity.spatialLinks.map((link) => ({
               id: link.id,

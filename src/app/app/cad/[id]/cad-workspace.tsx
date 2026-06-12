@@ -23,6 +23,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { CadMap, CadMapEntity } from "./cad-map";
+import { MlightCadMap } from "./mlightcad/mlightcad-map";
 
 type Json = Record<string, unknown> | unknown[] | string | number | boolean | null;
 type Region = { x: number; y: number; width: number; height: number };
@@ -31,6 +32,7 @@ type Entity = CadMapEntity & {
   confidence: string | number;
   measurements: Json;
   validation: Json;
+  sourceHandle: string | null;
   sourceLayer: string | null;
   spatialLinks: Array<{ id: string; recordType: string; recordId: string; linkConfidence: string | number }>;
 };
@@ -51,6 +53,7 @@ type Scene = {
 type CadFile = {
   id: string;
   originalName: string;
+  format: string;
   status: string;
   parentType: string;
   parentId: string;
@@ -115,7 +118,7 @@ export function CadWorkspace({
       setProgressLabel(body.data.progressLabel);
       setElapsedMs(Number(body.data.elapsedMs ?? 0));
       if (["SETUP_REQUIRED", "CALIBRATION_REQUIRED", "REVIEW_REQUIRED", "PUBLISHED", "FAILED"].includes(body.data.status)) router.refresh();
-    }, 2500);
+    }, 1500);
     return () => window.clearInterval(timer);
   }, [cadFile.id, router, status]);
 
@@ -135,6 +138,19 @@ export function CadWorkspace({
       setStatus("UPLOADED");
       router.refresh();
     }
+  }
+
+  const browserCad = cadFile.format === "DXF" || cadFile.format === "DWG";
+  if (browserCad && !scene && !["CALIBRATION_REQUIRED", "REVIEW_REQUIRED", "PUBLISHED"].includes(status)) {
+    return (
+      <BrowserExtractionWorkspace
+        cadFile={cadFile}
+        onComplete={() => {
+          setStatus("PARSING");
+          router.refresh();
+        }}
+      />
+    );
   }
 
   if (status === "FAILED") {
@@ -178,6 +194,30 @@ export function CadWorkspace({
       issues={issues}
       versions={versions}
     />
+  );
+}
+
+function BrowserExtractionWorkspace({ cadFile, onComplete }: { cadFile: CadFile; onComplete: () => void }) {
+  return (
+    <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-card">
+      <header className="flex flex-col justify-between gap-3 border-b border-slate-200 px-4 py-3 md:flex-row md:items-center">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-slate-500">Browser CAD processing</div>
+          <h2 className="mt-1 font-semibold">Opening {cadFile.originalName}</h2>
+          <p className="mt-1 text-xs text-slate-500">DXF/DWG rendering and extraction run locally in this browser. Publishing still requires server validation and admin review.</p>
+        </div>
+        <span className="chip bg-emerald-50 text-emerald-800">No CAD worker required</span>
+      </header>
+      <div className="h-[calc(100dvh-18rem)] min-h-[620px]">
+        <MlightCadMap
+          cadFileId={cadFile.id}
+          fileName={cadFile.originalName}
+          autoExtract
+          hiddenLayerNames={new Set()}
+          onExtractionComplete={onComplete}
+        />
+      </div>
+    </section>
   );
 }
 
@@ -338,15 +378,25 @@ function Calibration({ cadFile, analysis, scene }: { cadFile: CadFile; analysis:
           <div><div className="text-xs uppercase tracking-wide text-slate-500">Step 2 of 3</div><h2 className="mt-1 font-semibold">Confirm drawing scale</h2></div>
           <span className="text-sm text-slate-500">Click two ends of a known dimension</span>
         </div>
-        <CadMap
-          cadFileId={cadFile.id}
-          entities={scene?.entities ?? []}
-          bounds={bounds}
-          imageRect={imageRect}
-          showPreview={Boolean(analysis.previewArtifactKey)}
-          hiddenLayerIds={new Set()}
-          onCalibrationPoints={mapPoints}
-        />
+        {cadFile.format === "DXF" || cadFile.format === "DWG" ? (
+          <MlightCadMap
+            cadFileId={cadFile.id}
+            fileName={cadFile.originalName}
+            autoExtract={false}
+            hiddenLayerNames={new Set()}
+            onCalibrationPoints={mapPoints}
+          />
+        ) : (
+          <CadMap
+            cadFileId={cadFile.id}
+            entities={scene?.entities ?? []}
+            bounds={bounds}
+            imageRect={imageRect}
+            showPreview={Boolean(analysis.previewArtifactKey)}
+            hiddenLayerIds={new Set()}
+            onCalibrationPoints={mapPoints}
+          />
+        )}
       </section>
       <form onSubmit={submit} className="h-fit rounded-lg border border-slate-200 bg-white p-5 shadow-card">
         <div className="flex items-center gap-2"><Ruler size={18} /><h2 className="font-semibold">Known measurement</h2></div>
@@ -379,6 +429,7 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [overrideReason, setOverrideReason] = useState("");
+  const [editBoundary, setEditBoundary] = useState(false);
   const entities = scene?.entities ?? [];
   const selected = entities.find((entity) => entity.id === selectedId) ?? null;
   const selectedMeasurements = objectValue(selected?.measurements ?? null);
@@ -404,6 +455,10 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
     setSelectedId(id);
     setDraftGeometry(null);
   }, []);
+  const selectSourceHandle = useCallback((sourceHandle: string) => {
+    const entity = entities.find((value) => value.sourceHandle === sourceHandle);
+    if (entity) selectEntity(entity.id);
+  }, [entities, selectEntity]);
   const geometryChanged = useCallback((id: string, geometry: Record<string, unknown>) => {
     if (id === selectedId) setDraftGeometry(geometry);
   }, [selectedId]);
@@ -599,20 +654,42 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
         </aside>
 
         <section className="relative min-h-[620px] overflow-hidden xl:min-h-0">
-          <CadMap
-            cadFileId={cadFile.id}
-            entities={entities}
-            bounds={bounds}
-            imageRect={imageRect}
-            showPreview={Boolean(analysis.previewArtifactKey)}
-            hiddenLayerIds={hiddenLayers}
-            selectedId={selectedId}
-            onSelect={selectEntity}
-            editable={cadFile.status !== "PUBLISHED" && Boolean(selected)}
-            onGeometryChange={geometryChanged}
-          />
+          {(cadFile.format === "DXF" || cadFile.format === "DWG") && !editBoundary ? (
+            <MlightCadMap
+              cadFileId={cadFile.id}
+              fileName={cadFile.originalName}
+              autoExtract={false}
+              hiddenLayerNames={new Set((scene?.layers ?? []).filter((layer) => hiddenLayers.has(layer.id)).map((layer) => layer.name))}
+              selectedSourceHandle={selected?.sourceHandle}
+              onSelectSourceHandle={selectSourceHandle}
+            />
+          ) : (
+            <CadMap
+              cadFileId={cadFile.id}
+              entities={entities}
+              bounds={bounds}
+              imageRect={imageRect}
+              showPreview={Boolean(analysis.previewArtifactKey)}
+              hiddenLayerIds={hiddenLayers}
+              selectedId={selectedId}
+              onSelect={selectEntity}
+              editable={cadFile.status !== "PUBLISHED" && Boolean(selected)}
+              onGeometryChange={geometryChanged}
+            />
+          )}
+          {(cadFile.format === "DXF" || cadFile.format === "DWG") && cadFile.status !== "PUBLISHED" ? (
+            <button
+              type="button"
+              className="btn-outline absolute bottom-3 right-3 z-20 bg-white shadow"
+              onClick={() => setEditBoundary((value) => !value)}
+            >
+              {editBoundary ? "Return to CAD drawing" : "Adjust selected boundary"}
+            </button>
+          ) : null}
           <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-slate-200 bg-white/95 px-3 py-2 text-xs text-slate-600 shadow">
-            Scroll to zoom at the cursor · Drag to pan · Drag selected plot vertices to correct geometry
+            {editBoundary
+              ? "Drag selected plot vertices to correct the reviewed boundary"
+              : "Scroll to zoom at the cursor · Use Pan mode to move around the drawing"}
           </div>
         </section>
 
@@ -704,9 +781,9 @@ function statusTitle(status: string) {
 }
 
 function statusHelp(status: string) {
-  if (status === "UPLOADED") return "The file is safely stored and waiting for the dedicated Map worker.";
-  if (status === "ANALYZING") return "The worker is separating raster layout content, vector layers, schedules, legends, and title blocks.";
-  if (status === "EXTRACTING") return "Plot cells, labels, roads, site assets, and electrical networks are being extracted into a review-only scene.";
+  if (status === "UPLOADED") return "The file is safely stored. AI analysis will begin shortly.";
+  if (status === "ANALYZING") return "AI is analyzing the drawing structure, detecting plot regions, schedules, and boundaries.";
+  if (status === "EXTRACTING") return "AI is extracting plot boundaries, labels, roads, and site assets from the confirmed region.";
   return "This page refreshes automatically when the next review step is ready.";
 }
 

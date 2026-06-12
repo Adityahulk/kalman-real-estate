@@ -43,8 +43,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.cad-worker
-      args:
-        ODA_APPIMAGE_URL: ${ODA_APPIMAGE_URL:-}
     restart: unless-stopped
     env_file:
       - .env.production
@@ -57,7 +55,6 @@ services:
         condition: service_started
     environment:
       PYTHON_BIN: /usr/bin/python3
-      ODA_CONVERTER_BIN: ${ODA_CONVERTER_BIN:-}
       CAD_EXTRACTION_TIMEOUT_MS: ${CAD_EXTRACTION_TIMEOUT_MS:-1800000}
       CAD_PDF_RENDER_SCALE: ${CAD_PDF_RENDER_SCALE:-2}
       CAD_MAX_WORKING_PIXELS: ${CAD_MAX_WORKING_PIXELS:-30000000}

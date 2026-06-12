@@ -14,7 +14,7 @@ import VectorSource from "ol/source/Vector";
 import { Fill, Stroke, Style, Circle as CircleStyle } from "ol/style";
 import { LineString, Point, Polygon } from "ol/geom";
 import { defaults as defaultControls } from "ol/control/defaults";
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 
 type Json = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
@@ -66,11 +66,25 @@ export function CadMap({
 }) {
   const target = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
+  const vectorSourceRef = useRef<VectorSource | null>(null);
+  const modifyRef = useRef<Modify | null>(null);
+  const selectedIdRef = useRef(selectedId);
+  const onSelectRef = useRef(onSelect);
+  const onCalibrationPointsRef = useRef(onCalibrationPoints);
+  const onGeometryChangeRef = useRef(onGeometryChange);
+  const calibrationPointsRef = useRef<Array<[number, number]>>([]);
+  const axisMaxYRef = useRef(0);
+
+  selectedIdRef.current = selectedId;
+  onSelectRef.current = onSelect;
+  onCalibrationPointsRef.current = onCalibrationPoints;
+  onGeometryChangeRef.current = onGeometryChange;
 
   useEffect(() => {
     if (!target.current) return;
     const sourceBounds = combinedBounds(bounds, showPreview ? imageRect : null);
     const axisMaxY = sourceBounds.maxY;
+    axisMaxYRef.current = axisMaxY;
     const extent: [number, number, number, number] = [
       sourceBounds.minX,
       axisMaxY - sourceBounds.maxY,
@@ -90,15 +104,12 @@ export function CadMap({
         opacity: 0.92,
       }));
     }
-    const features = entities
-      .filter((entity) => !entity.layerId || !hiddenLayerIds.has(entity.layerId))
-      .flatMap((entity) => {
-        const feature = featureFromEntity(entity, axisMaxY);
-        return feature ? [feature] : [];
-      });
+
+    const vectorSource = new VectorSource();
+    vectorSourceRef.current = vectorSource;
     const vector = new VectorLayer({
-      source: new VectorSource({ features }),
-      style: (feature) => styleForFeature(feature, feature.get("id") === selectedId),
+      source: vectorSource,
+      style: (feature) => styleForFeature(feature, feature.get("id") === selectedIdRef.current),
       declutter: true,
     });
     layers.push(vector);
@@ -109,50 +120,103 @@ export function CadMap({
       controls: defaultControls({ attribution: false, rotate: false }),
       view: new View({ projection, center: [(extent[0] + extent[2]) / 2, (extent[1] + extent[3]) / 2], zoom: 2, minZoom: 0, maxZoom: 20 }),
     });
-    const candidateExtent: [number, number, number, number] = [
-      bounds.minX,
-      axisMaxY - bounds.maxY,
-      bounds.maxX,
-      axisMaxY - bounds.minY,
-    ];
-    map.getView().fit(entities.length ? candidateExtent : extent, { padding: [28, 28, 28, 28], duration: 0 });
-    const selectedFeature = features.find((feature) => feature.get("id") === selectedId);
-    if (editable && selectedFeature && onGeometryChange) {
-      const modify = new Modify({ features: new Collection([selectedFeature]) });
-      modify.on("modifyend", () => {
-        const geometry = selectedFeature.getGeometry();
-        if (geometry instanceof Polygon) {
-          const points = geometry.getCoordinates()[0].map((point) => [point[0], axisMaxY - point[1]]);
-          onGeometryChange(String(selectedFeature.get("id")), { type: "polygon", points, closed: true });
-        } else if (geometry instanceof LineString) {
-          const points = geometry.getCoordinates().map((point) => [point[0], axisMaxY - point[1]]);
-          onGeometryChange(String(selectedFeature.get("id")), { type: "polyline", points, closed: false });
-        } else if (geometry instanceof Point) {
-          const point = geometry.getCoordinates();
-          onGeometryChange(String(selectedFeature.get("id")), { type: "point", point: [point[0], axisMaxY - point[1]] });
-        }
-      });
-      map.addInteraction(modify);
-    }
-    const calibrationPoints: Array<[number, number]> = [];
+    map.getView().fit(extent, { padding: [28, 28, 28, 28], duration: 0 });
+
     map.on("singleclick", (event) => {
       const feature = map.forEachFeatureAtPixel(event.pixel, (value) => value);
-      if (feature && onSelect) {
-        onSelect(String(feature.get("id")));
+      if (feature && onSelectRef.current) {
+        onSelectRef.current(String(feature.get("id")));
         return;
       }
-      if (onCalibrationPoints) {
-        calibrationPoints.push([event.coordinate[0], axisMaxY - event.coordinate[1]]);
-        if (calibrationPoints.length > 2) calibrationPoints.shift();
-        onCalibrationPoints([...calibrationPoints]);
+      if (onCalibrationPointsRef.current) {
+        const pts = calibrationPointsRef.current;
+        pts.push([event.coordinate[0], axisMaxYRef.current - event.coordinate[1]]);
+        if (pts.length > 2) pts.shift();
+        onCalibrationPointsRef.current([...pts]);
       }
     });
+
     mapRef.current = map;
     return () => {
       map.setTarget(undefined);
       mapRef.current = null;
+      vectorSourceRef.current = null;
     };
-  }, [bounds.maxX, bounds.maxY, bounds.minX, bounds.minY, cadFileId, editable, entities, hiddenLayerIds, imageRect, onCalibrationPoints, onGeometryChange, onSelect, selectedId, showPreview]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cadFileId, bounds.minX, bounds.minY, bounds.maxX, bounds.maxY, showPreview, imageRect?.[0], imageRect?.[1], imageRect?.[2], imageRect?.[3]]);
+
+  useEffect(() => {
+    const source = vectorSourceRef.current;
+    const map = mapRef.current;
+    if (!source || !map) return;
+    const axisMaxY = axisMaxYRef.current;
+
+    source.clear();
+    const features = entities
+      .filter((entity) => !entity.layerId || !hiddenLayerIds.has(entity.layerId))
+      .flatMap((entity) => {
+        const feature = featureFromEntity(entity, axisMaxY);
+        return feature ? [feature] : [];
+      });
+    source.addFeatures(features);
+
+    if (features.length) {
+      const candidateExtent: [number, number, number, number] = [
+        bounds.minX,
+        axisMaxY - bounds.maxY,
+        bounds.maxX,
+        axisMaxY - bounds.minY,
+      ];
+      map.getView().fit(candidateExtent, { padding: [28, 28, 28, 28], duration: 300 });
+    }
+  }, [entities, hiddenLayerIds, bounds.minX, bounds.minY, bounds.maxX, bounds.maxY]);
+
+  useEffect(() => {
+    const source = vectorSourceRef.current;
+    if (source) source.changed();
+  }, [selectedId]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const source = vectorSourceRef.current;
+    if (!map || !source) return;
+
+    if (modifyRef.current) {
+      map.removeInteraction(modifyRef.current);
+      modifyRef.current = null;
+    }
+
+    if (!editable || !selectedId) return;
+
+    const feature = source.getFeatures().find((f) => f.get("id") === selectedId);
+    if (!feature) return;
+
+    const axisMaxY = axisMaxYRef.current;
+    const modify = new Modify({ features: new Collection([feature]) });
+    modify.on("modifyend", () => {
+      const geometry = feature.getGeometry();
+      if (!onGeometryChangeRef.current) return;
+      if (geometry instanceof Polygon) {
+        const points = geometry.getCoordinates()[0].map((p) => [p[0], axisMaxY - p[1]]);
+        onGeometryChangeRef.current(String(feature.get("id")), { type: "polygon", points, closed: true });
+      } else if (geometry instanceof LineString) {
+        const points = geometry.getCoordinates().map((p) => [p[0], axisMaxY - p[1]]);
+        onGeometryChangeRef.current(String(feature.get("id")), { type: "polyline", points, closed: false });
+      } else if (geometry instanceof Point) {
+        const p = geometry.getCoordinates();
+        onGeometryChangeRef.current(String(feature.get("id")), { type: "point", point: [p[0], axisMaxY - p[1]] });
+      }
+    });
+    map.addInteraction(modify);
+    modifyRef.current = modify;
+
+    return () => {
+      if (map && modifyRef.current) {
+        map.removeInteraction(modifyRef.current);
+        modifyRef.current = null;
+      }
+    };
+  }, [editable, selectedId]);
 
   return <div ref={target} className="h-full min-h-[560px] w-full bg-slate-100 xl:min-h-0" />;
 }

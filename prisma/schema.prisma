@@ -103,6 +103,15 @@ enum CadEntityType {
   UNKNOWN
 }
 
+enum CadExtractionStatus {
+  CREATED
+  UPLOADING
+  VALIDATING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
 enum DocumentStatus {
   DRAFT
   GENERATED
@@ -450,14 +459,42 @@ model CadFile {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  project        Project?          @relation(fields: [projectId], references: [id])
+  project        Project?           @relation(fields: [projectId], references: [id])
   scenes         CadScene[]
   analysis       CadAnalysis?
   publishBatches CadPublishBatch[]
   versions       CadVersion[]
   reviewIssues   CadReviewIssue[]
+  extractionRuns CadExtractionRun[]
 
   @@index([tenantId, parentType, parentId])
+}
+
+model CadExtractionRun {
+  id                  String              @id @default(cuid())
+  tenantId            String
+  cadFileId           String
+  parserEngine        String
+  parserVersion       String
+  sourceSha256        String
+  drawingUnits        String?
+  bounds              Json?
+  expectedEntityCount Int
+  expectedChunkCount  Int
+  receivedChunks      Json
+  manifest            Json
+  status              CadExtractionStatus @default(CREATED)
+  warnings            Json?
+  errorMessage        String?
+  createdById         String
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  completedAt         DateTime?
+
+  cadFile CadFile @relation(fields: [cadFileId], references: [id])
+
+  @@index([tenantId, cadFileId, createdAt])
+  @@index([tenantId, status])
 }
 
 model CadAnalysis {
@@ -1002,22 +1039,22 @@ model BackgroundJob {
 }
 
 model DemoRequest {
-  id              String   @id @default(cuid())
-  name            String
-  company         String
-  phone           String
-  email           String
-  city            String
-  activeProjects  String
-  requirement     String
-  preferredTime   String
-  source          String   @default("PUBLIC_LANDING_PAGE")
-  status          String   @default("NEW")
-  notes           String?
-  ipAddress       String?
-  userAgent       String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String   @id @default(cuid())
+  name           String
+  company        String
+  phone          String
+  email          String
+  city           String
+  activeProjects String
+  requirement    String
+  preferredTime  String
+  source         String   @default("PUBLIC_LANDING_PAGE")
+  status         String   @default("NEW")
+  notes          String?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   @@index([status, createdAt])
   @@index([email, createdAt])

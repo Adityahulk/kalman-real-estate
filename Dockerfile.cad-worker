@@ -50,23 +50,6 @@ RUN addgroup --system --gid 1001 nodejs \
   && if [ -d /root/.paddleocr ]; then cp -R /root/.paddleocr/. /app/.paddleocr/; fi \
   && chown -R nextjs:nodejs /app/storage /app/.paddleocr
 
-ARG ODA_APPIMAGE_URL=""
-RUN mkdir -p /opt/oda \
-  && if [ -n "$ODA_APPIMAGE_URL" ]; then \
-    curl -fsSL "$ODA_APPIMAGE_URL" -o /tmp/ODAFileConverter.AppImage; \
-    chmod +x /tmp/ODAFileConverter.AppImage; \
-    cd /opt/oda; \
-    /tmp/ODAFileConverter.AppImage --appimage-extract >/dev/null 2>&1 || true; \
-    if [ -x /opt/oda/squashfs-root/AppRun ]; then \
-      ln -sf /opt/oda/squashfs-root/AppRun /opt/oda/ODAFileConverter; \
-    else \
-      cp /tmp/ODAFileConverter.AppImage /opt/oda/ODAFileConverter; \
-    fi; \
-    chmod +x /opt/oda/ODAFileConverter; \
-  else \
-    echo "ODA_APPIMAGE_URL not provided; DWG conversion will stay disabled until ODA_CONVERTER_BIN points to a mounted/installed converter."; \
-  fi
-
 COPY package.json package-lock.json ./
 RUN npm ci --include=dev
 
