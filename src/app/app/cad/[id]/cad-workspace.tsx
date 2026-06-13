@@ -413,6 +413,7 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
   const bounds = boundsValue(scene?.bounds, analysis);
   const imageRect = imageRectValue(analysis.inspection);
   const unresolvedBlocking = issues.filter((issue) => issue.blocking);
+  const duplicateBlocking = unresolvedBlocking.filter((issue) => issue.code === "DUPLICATE_PLOT_LABEL" && entities.find((entity) => entity.id === issue.entityId)?.status === "CONFIRMED");
   const nonCountBlocking = unresolvedBlocking.filter((issue) => issue.code !== "PLOT_COUNT_MISMATCH" && (!issue.entityId || entities.find((entity) => entity.id === issue.entityId)?.status === "CONFIRMED"));
   const confirmedCount = entities.filter((entity) => entity.status === "CONFIRMED").length;
   const pendingReviewCount = entities.filter((entity) => entity.status === "SUGGESTED").length;
@@ -472,8 +473,12 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
 
   async function batch(status: "CONFIRMED" | "REJECTED" | "SUGGESTED") {
     if (!checkedIds.size) return;
+    await batchIds([...checkedIds], status);
+  }
+
+  async function batchIds(ids: string[], status: "CONFIRMED" | "REJECTED" | "SUGGESTED") {
+    if (!ids.length) return;
     setLoading(true);
-    const ids = [...checkedIds];
     const response = await fetch(`/api/v1/cad/${cadFile.id}/review/batch`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -490,6 +495,29 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
       setCheckedIds(new Set());
       router.refresh();
     }
+  }
+
+  async function confirmAllPending() {
+    const ids = entities.filter((entity) => entity.status === "SUGGESTED").map((entity) => entity.id);
+    if (!ids.length) return;
+    if (!window.confirm(`Confirm all ${ids.length} pending candidates as reviewed? You can still correct or reject them before publishing.`)) return;
+    await batchIds(ids, "CONFIRMED");
+  }
+
+  async function resolveDuplicates() {
+    if (!duplicateBlocking.length) return;
+    if (!window.confirm("Resolve duplicate plot detections automatically? The strongest candidate for each repeated plot number will remain confirmed, and duplicate copies will move to Rejected. You can restore them later.")) return;
+    setLoading(true);
+    const response = await fetch(`/api/v1/cad/${cadFile.id}/review/resolve-duplicates`, { method: "POST" });
+    const body = await response.json().catch(() => null);
+    setLoading(false);
+    if (!response.ok) {
+      setMessage(body?.error ?? "Duplicate resolution failed.");
+      return;
+    }
+    setMessage(`${body.data.resolvedGroups} duplicate plot numbers resolved. ${body.data.rejectedDuplicateCount} duplicate copies moved to Rejected.`);
+    setFilter("ALL");
+    router.refresh();
   }
 
   async function decideSelected(status: "CONFIRMED" | "REJECTED") {
@@ -610,7 +638,12 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
             {cadFile.status === "PUBLISHED" ? (
               <button className="btn-outline h-9 text-rose-700" onClick={rollback} disabled={loading}><Trash2 size={16} /> <span className="hidden sm:inline">Roll back publish</span></button>
             ) : (
-              <button className="btn-gold h-9" onClick={publish} disabled={loading || confirmedCount === 0 || nonCountBlocking.length > 0 || (countMismatch && overrideReason.trim().length < 10)}>
+              <button
+                className="btn-gold h-9"
+                onClick={publish}
+                disabled={loading || confirmedCount === 0 || nonCountBlocking.length > 0 || (countMismatch && overrideReason.trim().length < 10)}
+                title={confirmedCount === 0 ? "Confirm reviewed candidates before publishing" : nonCountBlocking.length ? "Resolve blocking issues before publishing" : countMismatch && overrideReason.trim().length < 10 ? "Enter a plot-count override reason" : "Publish confirmed candidates"}
+              >
                 {loading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
                 <span className="hidden sm:inline">Publish to project</span>
               </button>
@@ -622,6 +655,24 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
             <span className="label">Plot-count override reason</span>
             <input className="input" value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} placeholder="Explain why the confirmed plot count intentionally differs from the drawing schedule." />
           </label>
+        ) : null}
+        {cadFile.status !== "PUBLISHED" && confirmedCount === 0 && pendingReviewCount > 0 ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            <span>The drawing is extracted, but its {pendingReviewCount} candidates are still marked “Needs review”. Confirm them before publishing.</span>
+            <button className="btn-primary h-8 px-3 text-xs" onClick={confirmAllPending} disabled={loading}>
+              {loading ? <Loader2 className="animate-spin" size={14} /> : <Check size={14} />}
+              Confirm all pending
+            </button>
+          </div>
+        ) : null}
+        {cadFile.status !== "PUBLISHED" && duplicateBlocking.length > 0 ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+            <span>{duplicateBlocking.length} blocking entries come from repeated plot numbers. Keep one copy of each number before publishing.</span>
+            <button className="btn-primary h-8 px-3 text-xs" onClick={resolveDuplicates} disabled={loading}>
+              {loading ? <Loader2 className="animate-spin" size={14} /> : <Check size={14} />}
+              Resolve duplicate detections
+            </button>
+          </div>
         ) : null}
         {cadFile.status !== "PUBLISHED" && confirmedCount > 0 && pendingReviewCount === 0 && nonCountBlocking.length === 0 ? (
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
@@ -672,6 +723,13 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
                   {(["ALL", "NEEDS_REVIEW", "BLOCKING", "CONFIRMED", "REJECTED", "PLOT", "SITE_ASSET", "ELECTRICAL"] as const).map((item) => (
                     <button key={item} className={`shrink-0 rounded border px-2 py-1.5 text-[11px] font-medium ${filter === item ? "border-navy-900 bg-navy-900 text-white" : "border-slate-200 bg-white text-slate-600"}`} onClick={() => setFilter(item)}>{item.replaceAll("_", " ")}</button>
                   ))}
+                </div>
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="text-slate-500">{checkedIds.size} selected</span>
+                  <div className="flex items-center gap-2">
+                    <button type="button" className="text-navy-800 hover:underline" onClick={() => setCheckedIds(new Set(visible.map((entity) => entity.id)))}>Select visible</button>
+                    {checkedIds.size ? <button type="button" className="text-slate-600 hover:underline" onClick={() => setCheckedIds(new Set())}>Clear</button> : null}
+                  </div>
                 </div>
               </div>
               <CandidateQueue

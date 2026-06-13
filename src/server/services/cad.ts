@@ -783,6 +783,7 @@ export async function reviewCadBatch(context: RequestContext, id: string, input:
       data: { resolved: true },
     });
   }
+  await refreshDuplicatePlotIssues(context.tenantId, id, scene.id);
   await writeAuditEvent(context, {
     action: AuditAction.REVIEW,
     entityType: "CadFile",
@@ -806,7 +807,10 @@ export const cadReviewSchema = z.object({
 });
 
 export async function reviewCad(context: RequestContext, id: string, input: z.infer<typeof cadReviewSchema>) {
-  const file = await prisma.cadFile.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  const file = await prisma.cadFile.findFirstOrThrow({
+    where: { id, tenantId: context.tenantId },
+    include: { scenes: { orderBy: { createdAt: "desc" }, take: 1, select: { id: true } } },
+  });
 
   await prisma.$transaction([
     ...input.entities.map((entity) =>
@@ -825,6 +829,7 @@ export async function reviewCad(context: RequestContext, id: string, input: z.in
       data: { resolved: true },
     }),
   ]);
+  if (file.scenes[0]) await refreshDuplicatePlotIssues(context.tenantId, id, file.scenes[0].id);
 
   await writeAuditEvent(context, {
     action: AuditAction.REVIEW,
@@ -834,6 +839,111 @@ export async function reviewCad(context: RequestContext, id: string, input: z.in
   });
 
   return getCadScene(context, id);
+}
+
+export async function resolveCadDuplicateCandidates(context: RequestContext, id: string) {
+  const file = await prisma.cadFile.findFirstOrThrow({
+    where: { id, tenantId: context.tenantId },
+    include: {
+      scenes: {
+        orderBy: { createdAt: "desc" },
+        take: 1,
+        include: {
+          entities: {
+            where: { type: CadEntityType.PLOT, status: "CONFIRMED" },
+          },
+        },
+      },
+    },
+  });
+  if (file.status === CadStatus.PUBLISHED) throwBadRequest("Published Map candidates are immutable");
+  const scene = file.scenes[0];
+  if (!scene) throwBadRequest("Map candidates are not ready");
+
+  const groups = duplicatePlotGroups(scene.entities);
+  const rejectedIds: string[] = [];
+  const resolutions = groups.map(([label, candidates]) => {
+    const ranked = [...candidates].sort((first, second) => duplicateCandidateScore(second) - duplicateCandidateScore(first));
+    rejectedIds.push(...ranked.slice(1).map((entity) => entity.id));
+    return {
+      label,
+      keptEntityId: ranked[0].id,
+      rejectedEntityIds: ranked.slice(1).map((entity) => entity.id),
+    };
+  });
+
+  if (rejectedIds.length) {
+    await prisma.cadEntity.updateMany({
+      where: { tenantId: context.tenantId, sceneId: scene.id, id: { in: rejectedIds } },
+      data: { status: "REJECTED" },
+    });
+  }
+  await refreshDuplicatePlotIssues(context.tenantId, id, scene.id);
+  await writeAuditEvent(context, {
+    action: AuditAction.REVIEW,
+    entityType: "CadFile",
+    entityId: id,
+    after: {
+      duplicateResolution: resolutions,
+      rejectedDuplicateCount: rejectedIds.length,
+    },
+  });
+  return {
+    resolvedGroups: resolutions.length,
+    rejectedDuplicateCount: rejectedIds.length,
+    candidates: await getCadCandidates(context, id),
+  };
+}
+
+async function refreshDuplicatePlotIssues(tenantId: string, cadFileId: string, sceneId: string) {
+  await prisma.cadReviewIssue.updateMany({
+    where: { tenantId, cadFileId, code: "DUPLICATE_PLOT_LABEL", resolved: false },
+    data: { resolved: true },
+  });
+  const confirmedPlots = await prisma.cadEntity.findMany({
+    where: { tenantId, sceneId, type: CadEntityType.PLOT, status: "CONFIRMED" },
+  });
+  const groups = duplicatePlotGroups(confirmedPlots);
+  if (!groups.length) return;
+  await prisma.cadReviewIssue.createMany({
+    data: groups.flatMap(([label, candidates]) => candidates.map((entity) => ({
+      tenantId,
+      cadFileId,
+      entityId: entity.id,
+      severity: InsightSeverity.CRITICAL,
+      code: "DUPLICATE_PLOT_LABEL",
+      message: `Plot number ${label} is confirmed more than once. Keep one candidate and reject or relabel the other.`,
+      blocking: true,
+    }))),
+  });
+}
+
+function duplicatePlotGroups<T extends { label: string | null }>(entities: T[]) {
+  const byLabel = new Map<string, T[]>();
+  for (const entity of entities) {
+    const label = entity.label?.trim().toUpperCase();
+    if (!label) continue;
+    byLabel.set(label, [...(byLabel.get(label) ?? []), entity]);
+  }
+  return [...byLabel.entries()].filter(([, candidates]) => candidates.length > 1);
+}
+
+function duplicateCandidateScore(entity: {
+  confidence: Prisma.Decimal;
+  sourceHandle: string | null;
+  geometry: Prisma.JsonValue;
+  measurements: Prisma.JsonValue | null;
+}) {
+  const geometry = jsonRecord(entity.geometry);
+  const measurements = jsonRecord(entity.measurements);
+  const measuredArea = typeof measurements.calculatedAreaSqft === "number"
+    || typeof measurements.areaSqft === "number"
+    || typeof measurements.areaCadUnits === "number";
+  return Number(entity.confidence)
+    + (geometry.closed === true ? 2 : 0)
+    + (Array.isArray(geometry.points) && geometry.points.length >= 4 ? 1 : 0)
+    + (measuredArea ? 0.5 : 0)
+    + (entity.sourceHandle?.startsWith("joined:") ? 0 : 0.1);
 }
 
 export async function publishCad(context: RequestContext, id: string, input: z.infer<typeof cadPublishSchema> = {}) {
@@ -1344,7 +1454,7 @@ function validateConfirmedPlots(plots: Array<{ label: string | null; geometry: P
   const seen = new Set<string>();
   for (const plot of plots) {
     const label = plot.label?.trim().toUpperCase();
-    if (!label || !/^(?:[A-Z]{0,2}[-/]?)?\d{1,4}[A-Z]?$/.test(label) || ["PLOT", "PLOTS", "PLOTTING"].includes(label)) {
+    if (!label || !/^(?:EWS-\d+|COM-\d+|(?:[A-Z]{0,3}[-/]?)?\d{1,5}[A-Z]?)$/.test(label) || ["PLOT", "PLOTS", "PLOTTING"].includes(label)) {
       throwBadRequest(`Invalid plot number cannot be published: ${plot.label ?? "blank"}`);
     }
     if (seen.has(label)) throwBadRequest(`Duplicate plot number cannot be published: ${label}`);
