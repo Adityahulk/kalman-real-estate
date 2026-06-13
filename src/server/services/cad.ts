@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "../db";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
-import { createUploadTargets, getObjectResilient, putObjectResilient, storageKey } from "../storage";
+import { createUploadTargets, deleteObjectResilient, getObjectResilient, putObjectResilient, storageKey } from "../storage";
 import { createNotification } from "./notifications";
 import { inspectPdf, extractPdf, type CadExtractionResult } from "./cad-pdf";
 import { geminiAvailable } from "./gemini-vision";
@@ -873,25 +873,29 @@ export async function publishCad(context: RequestContext, id: string, input: z.i
   if ((overrideable.length || confirmedCountMismatch) && !input.overrideReason) {
     throwBadRequest(`The drawing states ${expectedPlotCount ?? "a different number of"} plots, but ${confirmedPlots.length} reviewed plots are confirmed. Resolve the difference or provide a publish override reason.`);
   }
-  if (file.projectId && confirmedPlots.length) {
-    const existing = await prisma.plot.findMany({
-      where: {
-        tenantId: context.tenantId,
-        projectId: file.projectId,
-        archivedAt: null,
-        code: { in: confirmedPlots.map((entity) => entity.label as string) },
-      },
-      select: { code: true },
-    });
-    if (existing.length) {
-      throwBadRequest(`Plots already exist with these codes: ${existing.slice(0, 10).map((plot) => plot.code).join(", ")}. Roll back the prior Map publish or resolve duplicates first.`);
-    }
-  }
-
   const result = await prisma.$transaction(async (tx) => {
     const plots = [];
     const assets = [];
     const checklistItems = [];
+    const createdPlotIds: string[] = [];
+    const reusedPlotIds: string[] = [];
+    const createdAssetIds: string[] = [];
+    const reusedAssetIds: string[] = [];
+    const existingPlots = file.projectId
+      ? await tx.plot.findMany({
+          where: {
+            tenantId: context.tenantId,
+            projectId: file.projectId,
+          },
+        })
+      : [];
+    const plotByCode = new Map(existingPlots.map((plot) => [plot.code.trim().toUpperCase(), plot]));
+    const existingAssets = file.projectId
+      ? await tx.siteAsset.findMany({
+          where: { tenantId: context.tenantId, projectId: file.projectId, archivedAt: null },
+        })
+      : [];
+    const assetByKey = new Map(existingAssets.map((asset) => [siteAssetKey(asset.type, asset.name), asset]));
     const batch = await tx.cadPublishBatch.create({
       data: {
         tenantId: context.tenantId,
@@ -933,29 +937,76 @@ export async function publishCad(context: RequestContext, id: string, input: z.i
           },
         });
         checklistItems.push(item);
+      } else if (file.parentType === "SITE_ASSET") {
+        const parentAsset = await tx.siteAsset.findFirstOrThrow({
+          where: { id: file.parentId, tenantId: context.tenantId, archivedAt: null },
+        });
+        const item = await tx.checklistItem.create({
+          data: {
+            tenantId: context.tenantId,
+            plotId: null,
+            parentType: "SITE_ASSET",
+            parentId: parentAsset.id,
+            label: entity.label ?? entity.type.replaceAll("_", " "),
+            category: checklistCategoryFor(entity.type),
+            status: "PENDING",
+            progressPct: 0,
+          },
+        });
+        await tx.spatialLink.create({
+          data: {
+            tenantId: context.tenantId,
+            cadEntityId: entity.id,
+            recordType: "ChecklistItem",
+            recordId: item.id,
+            publishBatchId: batch.id,
+            linkConfidence: entity.confidence,
+          },
+        });
+        checklistItems.push(item);
       } else if (file.parentType === "PROJECT" && entity.type === "PLOT" && file.projectId) {
-        const plot = await tx.plot.create({
-          data: {
-            tenantId: context.tenantId,
-            projectId: file.projectId,
-            code: entity.label as string,
-            label: entity.label,
-            geometry: entity.geometry as Prisma.InputJsonValue,
-            areaSqft: calibratedAreaSqft(entity.measurements, file.analysis?.scaleCalibration),
-          },
-        });
-        await tx.ownershipRecord.create({
-          data: {
-            tenantId: context.tenantId,
-            plotId: plot.id,
-            ownerId: null,
-            kind: "COMPANY_INVENTORY",
-            amountInr: plot.priceInr,
-            sharePct: 100,
-            notes: `Company inventory created from reviewed Map publish ${batch.id}.`,
-            createdById: context.userId,
-          },
-        });
+        const plotCode = (entity.label as string).trim();
+        const existingPlot = plotByCode.get(plotCode.toUpperCase());
+        const areaSqft = calibratedAreaSqft(entity.measurements, file.analysis?.scaleCalibration);
+        const plot = existingPlot
+          ? await tx.plot.update({
+              where: { id: existingPlot.id },
+              data: {
+                label: entity.label ?? existingPlot.label,
+                geometry: entity.geometry as Prisma.InputJsonValue,
+                archivedAt: null,
+                archiveReason: null,
+                ...(areaSqft ? { areaSqft } : {}),
+              },
+            })
+          : await tx.plot.create({
+              data: {
+                tenantId: context.tenantId,
+                projectId: file.projectId,
+                code: plotCode,
+                label: entity.label,
+                geometry: entity.geometry as Prisma.InputJsonValue,
+                areaSqft,
+              },
+            });
+        if (existingPlot) {
+          reusedPlotIds.push(plot.id);
+        } else {
+          createdPlotIds.push(plot.id);
+          plotByCode.set(plotCode.toUpperCase(), plot);
+          await tx.ownershipRecord.create({
+            data: {
+              tenantId: context.tenantId,
+              plotId: plot.id,
+              ownerId: null,
+              kind: "COMPANY_INVENTORY",
+              amountInr: plot.priceInr,
+              sharePct: 100,
+              notes: `Company inventory created from reviewed Map publish ${batch.id}.`,
+              createdById: context.userId,
+            },
+          });
+        }
         await tx.spatialLink.create({
           data: {
             tenantId: context.tenantId,
@@ -968,15 +1019,29 @@ export async function publishCad(context: RequestContext, id: string, input: z.i
         });
         plots.push(plot);
       } else if (file.parentType === "PROJECT" && file.projectId) {
-        const asset = await tx.siteAsset.create({
-          data: {
-            tenantId: context.tenantId,
-            projectId: file.projectId,
-            name: entity.label ?? entity.type,
-            type: entity.type,
-            geometry: entity.geometry as Prisma.InputJsonValue,
-          },
-        });
+        const assetName = entity.label ?? entity.type.replaceAll("_", " ");
+        const key = siteAssetKey(entity.type, assetName);
+        const existingAsset = assetByKey.get(key);
+        const asset = existingAsset
+          ? await tx.siteAsset.update({
+              where: { id: existingAsset.id },
+              data: { geometry: entity.geometry as Prisma.InputJsonValue },
+            })
+          : await tx.siteAsset.create({
+              data: {
+                tenantId: context.tenantId,
+                projectId: file.projectId,
+                name: assetName,
+                type: entity.type,
+                geometry: entity.geometry as Prisma.InputJsonValue,
+              },
+            });
+        if (existingAsset) {
+          reusedAssetIds.push(asset.id);
+        } else {
+          createdAssetIds.push(asset.id);
+          assetByKey.set(key, asset);
+        }
         await tx.spatialLink.create({
           data: {
             tenantId: context.tenantId,
@@ -992,6 +1057,22 @@ export async function publishCad(context: RequestContext, id: string, input: z.i
     }
 
     await tx.cadFile.update({ where: { id }, data: { status: CadStatus.PUBLISHED } });
+    await tx.cadPublishBatch.update({
+      where: { id: batch.id },
+      data: {
+        summary: {
+          confirmedCandidates: confirmedEntities.length,
+          confirmedPlots: confirmedPlots.length,
+          expectedPlots: expectedPlotCount,
+          overrideReason: input.overrideReason,
+          createdPlotIds,
+          reusedPlotIds,
+          createdAssetIds,
+          reusedAssetIds,
+          createdChecklistItemIds: checklistItems.map((item) => item.id),
+        },
+      },
+    });
     await tx.cadScene.update({ where: { id: scene.id }, data: { publishedAt: new Date() } });
     await tx.cadVersion.create({
       data: {
@@ -1000,7 +1081,13 @@ export async function publishCad(context: RequestContext, id: string, input: z.i
         version: file.version,
         status: CadStatus.PUBLISHED,
         publishedAt: new Date(),
-        comparison: { createdPlots: plots.length, createdSiteAssets: assets.length, createdChecklistItems: checklistItems.length },
+        comparison: {
+          createdPlots: createdPlotIds.length,
+          linkedExistingPlots: reusedPlotIds.length,
+          createdSiteAssets: createdAssetIds.length,
+          linkedExistingSiteAssets: reusedAssetIds.length,
+          createdChecklistItems: checklistItems.length,
+        },
       },
     });
     if (input.overrideReason) {
@@ -1010,7 +1097,16 @@ export async function publishCad(context: RequestContext, id: string, input: z.i
       });
     }
 
-    return { batch, plots, assets, checklistItems };
+    return {
+      batch,
+      plots,
+      assets,
+      checklistItems,
+      createdPlotCount: createdPlotIds.length,
+      linkedPlotCount: reusedPlotIds.length,
+      createdAssetCount: createdAssetIds.length,
+      linkedAssetCount: reusedAssetIds.length,
+    };
   });
 
   await writeAuditEvent(context, {
@@ -1022,6 +1118,10 @@ export async function publishCad(context: RequestContext, id: string, input: z.i
       plotCount: result.plots.length,
       assetCount: result.assets.length,
       checklistItemCount: result.checklistItems.length,
+      createdPlotCount: result.createdPlotCount,
+      linkedPlotCount: result.linkedPlotCount,
+      createdAssetCount: result.createdAssetCount,
+      linkedAssetCount: result.linkedAssetCount,
       overrideReason: input.overrideReason,
     },
   });
@@ -1032,6 +1132,20 @@ export async function publishCad(context: RequestContext, id: string, input: z.i
   });
 
   return result;
+}
+
+function siteAssetKey(type: string, name: string) {
+  return `${type.trim().toUpperCase()}::${name.trim().toUpperCase()}`;
+}
+
+function objectRecord(value: Prisma.JsonValue | null | undefined) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, Prisma.JsonValue>
+    : {};
+}
+
+function stringArray(value: Prisma.JsonValue | undefined) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
 export async function getCadPreview(context: RequestContext, id: string) {
@@ -1071,6 +1185,9 @@ export async function rollbackCadPublish(context: RequestContext, id: string, in
   const plotIds = [...new Set(links.filter((link) => link.recordType === "Plot").map((link) => link.recordId))];
   const assetIds = [...new Set(links.filter((link) => link.recordType === "SiteAsset").map((link) => link.recordId))];
   const checklistIds = [...new Set(links.filter((link) => link.recordType === "ChecklistItem").map((link) => link.recordId))];
+  const batchSummary = objectRecord(batch?.summary);
+  const reusedPlotIds = new Set(stringArray(batchSummary.reusedPlotIds));
+  const reusedAssetIds = new Set(stringArray(batchSummary.reusedAssetIds));
   const plotChecks = await Promise.all(plotIds.map(async (plotId) => {
     const [plot, ownershipActivity, registryCount, fileCount, documentCount, checklistCount, progressCount, issueCount] = await Promise.all([
       prisma.plot.findFirst({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } }),
@@ -1090,6 +1207,7 @@ export async function rollbackCadPublish(context: RequestContext, id: string, in
     ]);
     const reasons = [];
     if (!plot) reasons.push("plot record missing");
+    if (reusedPlotIds.has(plotId)) reasons.push("plot existed before this Map publish");
     if (plot?.currentOwnerId) reasons.push("current owner exists");
     if (ownershipActivity) reasons.push("ownership activity exists");
     if (registryCount) reasons.push("registry records exist");
@@ -1109,6 +1227,7 @@ export async function rollbackCadPublish(context: RequestContext, id: string, in
     ]);
     const reasons = [];
     if (!asset) reasons.push("asset record missing");
+    if (reusedAssetIds.has(assetId)) reasons.push("site asset existed before this Map publish");
     if (progressCount) reasons.push("progress updates exist");
     if (issueCount) reasons.push("issues exist");
     if (fileCount) reasons.push("documents exist");
@@ -1512,6 +1631,9 @@ export async function deleteCadFile(context: RequestContext, id: string, input: 
       versions: { select: { id: true } },
       publishBatches: { select: { id: true } },
       reviewIssues: { select: { id: true } },
+      analysis: { select: { rawArtifactKey: true, previewArtifactKey: true } },
+      extractionRuns: { select: { receivedChunks: true, manifest: true } },
+      overlays: { select: { id: true } },
     },
   });
   if (before.status === CadStatus.PUBLISHED) {
@@ -1523,9 +1645,11 @@ export async function deleteCadFile(context: RequestContext, id: string, input: 
 
   const entityIds = before.scenes.flatMap((scene) => scene.entities.map((entity) => entity.id));
   const sceneIds = before.scenes.map((scene) => scene.id);
+  const storedKeys = cadStoredKeys(before);
   const file = await prisma.$transaction(async (tx) => {
     if (entityIds.length) await tx.spatialLink.deleteMany({ where: { tenantId: context.tenantId, cadEntityId: { in: entityIds } } });
     await tx.cadReviewIssue.deleteMany({ where: { tenantId: context.tenantId, cadFileId: id } });
+    await tx.cadOverlay.deleteMany({ where: { tenantId: context.tenantId, cadFileId: id } });
     if (entityIds.length) await tx.cadEntity.deleteMany({ where: { tenantId: context.tenantId, id: { in: entityIds } } });
     if (sceneIds.length) await tx.cadLayer.deleteMany({ where: { tenantId: context.tenantId, sceneId: { in: sceneIds } } });
     if (sceneIds.length) await tx.cadScene.deleteMany({ where: { tenantId: context.tenantId, id: { in: sceneIds } } });
@@ -1534,16 +1658,51 @@ export async function deleteCadFile(context: RequestContext, id: string, input: 
     await tx.cadAnalysis.deleteMany({ where: { tenantId: context.tenantId, cadFileId: id } });
     return tx.cadFile.delete({ where: { id } });
   });
+  const cleanupWarnings = (await Promise.all([...storedKeys].map((key) => deleteObjectResilient(key)))).flat();
 
   await writeAuditEvent(context, {
     action: AuditAction.DELETE,
     entityType: "CadFile",
     entityId: id,
     before: before as unknown as Prisma.InputJsonValue,
-    after: { deletedAt: new Date().toISOString(), deletedById: context.userId, deleteReason: input.reason },
+    after: {
+      deletedAt: new Date().toISOString(),
+      deletedById: context.userId,
+      deleteReason: input.reason,
+      deletedStorageObjects: storedKeys.size,
+      cleanupWarnings,
+    },
   });
 
-  return file;
+  return { file, cleanupWarnings };
+}
+
+function cadStoredKeys(cadFile: {
+  storageKey: string;
+  analysis: { rawArtifactKey: string | null; previewArtifactKey: string | null } | null;
+  extractionRuns: Array<{ receivedChunks: Prisma.JsonValue; manifest: Prisma.JsonValue }>;
+}) {
+  const keys = new Set<string>([cadFile.storageKey]);
+  if (cadFile.analysis?.rawArtifactKey) keys.add(cadFile.analysis.rawArtifactKey);
+  if (cadFile.analysis?.previewArtifactKey) keys.add(cadFile.analysis.previewArtifactKey);
+  for (const run of cadFile.extractionRuns) {
+    collectStorageKeys(run.receivedChunks, keys);
+    collectStorageKeys(run.manifest, keys);
+  }
+  return keys;
+}
+
+function collectStorageKeys(value: Prisma.JsonValue | undefined, keys: Set<string>) {
+  if (typeof value === "string") return;
+  if (Array.isArray(value)) {
+    for (const item of value) collectStorageKeys(item, keys);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const [key, child] of Object.entries(value)) {
+    if (key.toLowerCase().endsWith("storagekey") && typeof child === "string") keys.add(child);
+    else collectStorageKeys(child, keys);
+  }
 }
 
 function throwBadRequest(message: string): never {

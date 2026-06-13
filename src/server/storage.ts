@@ -1,7 +1,7 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { FileStorageProvider } from "@prisma/client";
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const endpoint = process.env.S3_ENDPOINT;
@@ -240,6 +240,37 @@ export async function getObjectResilient(key: string) {
   }
 
   return getS3Object(key);
+}
+
+export async function deleteObjectResilient(key: string) {
+  const warnings: string[] = [];
+  const localKey = localFallbackKey(key);
+
+  try {
+    await unlink(localStoragePath(localKey));
+  } catch (error) {
+    if (!isMissingFileError(error)) warnings.push(`Local cleanup failed: ${humanStorageWarning(error)}`);
+  }
+
+  if (!isLocalStorageKey(key) && shouldTryS3()) {
+    const bucket = s3Bucket();
+    if (bucket) {
+      try {
+        await withTimeout(
+          objectStorage.send(new DeleteObjectCommand({ Bucket: bucket, Key: key })),
+          "S3 object deletion timed out or failed",
+        );
+      } catch (error) {
+        warnings.push(`S3 cleanup failed: ${humanStorageWarning(error)}`);
+      }
+    }
+  }
+
+  return warnings;
+}
+
+function isMissingFileError(error: unknown) {
+  return Boolean(error && typeof error === "object" && "code" in error && error.code === "ENOENT");
 }
 
 export function generatedDocumentStorageKey(tenantId: string, documentId: string) {

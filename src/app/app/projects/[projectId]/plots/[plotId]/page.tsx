@@ -17,6 +17,7 @@ import { getPlotWorkspace } from "@/server/services/plot-workspace";
 import { prisma } from "@/server/db";
 import { fullInr } from "@/lib/format";
 import { DeleteFileButton } from "@/components/delete-file-button";
+import { DeleteCadButton } from "@/components/delete-cad-button";
 import { CadUploadForm } from "../../../../cad/cad-upload-form";
 import { DocumentApprovalButtons } from "../../../../documents/document-actions";
 import { ManualPlotZoneForm } from "../../../manual-entry-actions";
@@ -77,6 +78,10 @@ export default async function ProjectPlotWorkspacePage({
           <Link className="btn-primary" href={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=plot-map`}>
             <Map size={17} />
             Plot map
+          </Link>
+          <Link className="btn-outline" href={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=child-cad`}>
+            <Upload size={17} />
+            Upload child CAD
           </Link>
           <Link className="btn-outline" href={`/app/projects/${plot.projectId}/ownership`}>
             Back to ledger
@@ -147,6 +152,7 @@ export default async function ProjectPlotWorkspacePage({
                 {registryDocuments.length ? <Link className="btn-outline justify-center" href={`?tab=registry`}><Landmark size={17} />View registry</Link> : null}
                 <Link className="btn-outline justify-center" href={`?tab=documents`}><FileText size={17} />Documents</Link>
                 <Link className="btn-outline justify-center" href={`?tab=history`}><History size={17} />History</Link>
+                <Link className="btn-outline justify-center" href={`?tab=child-cad`}><Map size={17} />Upload child CAD</Link>
               </div>
             </AccordionRow>
           </div>
@@ -207,7 +213,7 @@ export default async function ProjectPlotWorkspacePage({
           </div>
           <aside className="space-y-4">
             <CadUploadForm projects={[{ id: plot.projectId, name: plot.project.name }]} fixedProjectId={plot.projectId} fixedParentType="PLOT" fixedParentId={plot.id} title="Upload plot map" description="Upload a DXF or PDF plot map for preview and processing." simple redirectToReview />
-            <div className="card p-4"><h3 className="font-semibold">Map versions</h3><div className="mt-3 space-y-2">{workspace.childCadFiles.map((file) => <Link className="block rounded-lg bg-slate-50 px-3 py-2 text-sm hover:bg-slate-100" href={`/app/cad/${file.id}`} key={file.id}>{file.originalName} · v{file.version}</Link>)}{!workspace.childCadFiles.length ? <div className="text-sm text-slate-500">No plot map uploaded yet.</div> : null}</div></div>
+            <div className="card p-4"><h3 className="font-semibold">Map versions</h3><div className="mt-3 space-y-2">{workspace.childCadFiles.map((file) => <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2" key={file.id}><Link className="min-w-0 flex-1 truncate text-sm hover:text-navy-700" href={`/app/cad/${file.id}`}>{file.originalName} · v{file.version}</Link><DeleteCadButton cadFileId={file.id} fileName={file.originalName} published={file.status === "PUBLISHED"} /></div>)}{!workspace.childCadFiles.length ? <div className="text-sm text-slate-500">No plot map uploaded yet.</div> : null}</div></div>
           </aside>
         </section>
       ) : null}
@@ -398,7 +404,10 @@ export default async function ProjectPlotWorkspacePage({
                     <div className="font-medium">{file.originalName}</div>
                     <div className="mt-1 text-xs text-slate-500">v{file.version} · {file.status.replaceAll("_", " ")} · {file.scenes[0]?.id ? "scene ready" : "processing"}</div>
                   </div>
-                  <Link className="btn-outline h-8 px-3 text-xs" href={`/app/cad/${file.id}`}>Open</Link>
+                  <div className="flex items-center gap-2">
+                    <Link className="btn-outline h-8 px-3 text-xs" href={`/app/cad/${file.id}`}>Open</Link>
+                    <DeleteCadButton cadFileId={file.id} fileName={file.originalName} published={file.status === "PUBLISHED"} />
+                  </div>
                 </div>
               ))}
               {!workspace.childCadFiles.length ? <div className="p-8 text-center text-sm text-slate-500">No child Map uploaded for this plot yet.</div> : null}

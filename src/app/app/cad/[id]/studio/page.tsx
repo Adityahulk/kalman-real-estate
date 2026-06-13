@@ -3,6 +3,7 @@ import { prisma } from "@/server/db";
 import { hasPermission } from "@/server/rbac";
 import { getSessionUser } from "@/server/session";
 import { CadStudio } from "./cad-studio";
+import { DeleteCadButton } from "@/components/delete-cad-button";
 
 export const dynamic = "force-dynamic";
 
@@ -46,6 +47,14 @@ export default async function CadStudioPage({ params }: { params: { id: string }
           updatedAt: overlay.updatedAt.toISOString(),
         }))}
       hasScene={cadFile.scenes.length > 0}
+      headerActions={
+        <DeleteCadButton
+          cadFileId={cadFile.id}
+          fileName={cadFile.originalName}
+          published={cadFile.status === "PUBLISHED"}
+          redirectTo={cadFile.projectId ? `/app/projects/${cadFile.projectId}/cad?view=project` : "/app"}
+        />
+      }
     />
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Eye, FileText, Loader2, X } from "lucide-react";
+import { Check, Eye, FileText, Loader2, Map, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -18,6 +18,7 @@ export function OwnershipPlotRow({
   development,
   allotmentStatus,
   document,
+  cadSource,
 }: {
   href: string;
   plot: string;
@@ -26,6 +27,7 @@ export function OwnershipPlotRow({
   development: number | null;
   allotmentStatus: string;
   document: PlotDocument | null;
+  cadSource: { id: string; originalName: string; version: number } | null;
 }) {
   const router = useRouter();
   const [status, setStatus] = useState(document?.status ?? "");
@@ -58,7 +60,10 @@ export function OwnershipPlotRow({
         if (event.key === "Enter" || event.key === " ") router.push(href);
       }}
     >
-      <td className="px-5 py-4 font-semibold text-navy-900">{plot}</td>
+      <td className="px-5 py-4">
+        <div className="font-semibold text-navy-900">{plot}</div>
+        {cadSource ? <div className="mt-1 flex items-center gap-1 text-[11px] text-emerald-700"><Map size={12} /> CAD linked · v{cadSource.version}</div> : <div className="mt-1 text-[11px] text-slate-400">Manual record</div>}
+      </td>
       <td className="px-5 py-4">{ownerName}</td>
       <td className="px-5 py-4">{area}</td>
       <td className="px-5 py-4">
@@ -92,12 +97,18 @@ export function OwnershipPlotRow({
         </div>
       </td>
       <td className="px-5 py-4">
-        <div onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+        <div className="flex flex-wrap gap-2" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+          <button className="btn-primary h-8 px-3 text-xs" type="button" onClick={() => router.push(href)}>
+            Open plot
+          </button>
+          <button className="btn-outline h-8 px-3 text-xs" type="button" onClick={() => router.push(`${href}?tab=plot-map`)}>
+            <Map size={14} /> Plot CAD
+          </button>
           {document ? (
             <button className="btn-outline h-8 px-3 text-xs" type="button" onClick={() => router.push(`${href}/letters/${document.id}`)}>
               <FileText size={14} /> Open letter
             </button>
-          ) : <span className="text-slate-400">-</span>}
+          ) : null}
         </div>
       </td>
     </tr>

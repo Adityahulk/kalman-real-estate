@@ -118,6 +118,18 @@ const cadSource = await fetch(`${baseUrl}/api/v1/cad/${cadUploadFlow.json.data.c
 });
 assert(cadSource.status === 200, "authorized admin could not load the raw CAD source");
 assert(/^[a-f0-9]{64}$/i.test(cadSource.headers.get("x-cad-source-sha256") ?? ""), "CAD source checksum is missing");
+const cadDelete = await request(`/api/v1/cad/${cadUploadFlow.json.data.cadFile.id}`, {
+  method: "DELETE",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ reason: "Smoke test cleanup" }),
+});
+assert(cadDelete.response.status === 200, "unpublished CAD deletion failed");
+assert(await prisma.cadFile.findUnique({ where: { id: cadUploadFlow.json.data.cadFile.id } }) === null, "deleted CAD record still exists");
+if ((usedCadTarget.provider ?? usedCadTarget.storageProvider) === "LOCAL") {
+  const localRoot = process.env.LOCAL_STORAGE_ROOT ?? join(process.cwd(), "storage");
+  const localPath = join(localRoot, usedCadTarget.storageKey.replace(/^local\//, ""));
+  assert(!existsSync(localPath), "deleted CAD binary still exists in local storage");
+}
 
 const doc = await request("/api/v1/documents/generate", {
   method: "POST",

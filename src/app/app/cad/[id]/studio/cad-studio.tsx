@@ -2,7 +2,7 @@
 
 import { Loader2, MessageSquareText, Save, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { CadModeHeader } from "../cad-mode-header";
 
 type StudioState = {
@@ -32,6 +32,7 @@ export function CadStudio({
   initialState,
   initialOverlays,
   hasScene,
+  headerActions,
 }: {
   cadFile: {
     id: string;
@@ -44,6 +45,7 @@ export function CadStudio({
   initialState: StudioState | null;
   initialOverlays: StudioOverlay[];
   hasScene: boolean;
+  headerActions?: ReactNode;
 }) {
   const router = useRouter();
   const frame = useRef<HTMLIFrameElement | null>(null);
@@ -198,6 +200,7 @@ export function CadStudio({
               {saving ? <Loader2 className="animate-spin" size={15} /> : <Save size={15} />}
               Save workspace
             </button>
+            {headerActions}
           </div>
         )}
       />

@@ -13,7 +13,7 @@ export default async function ProjectOwnershipPage({
   searchParams,
 }: {
   params: { projectId: string };
-  searchParams: { q?: string; status?: string; statusGroup?: string; owner?: string; docs?: string; registry?: string };
+  searchParams: { q?: string; status?: string; statusGroup?: string; owner?: string; docs?: string; registry?: string; source?: string };
 }) {
   const session = await getSessionUser();
   if (!session) return null;
@@ -28,12 +28,33 @@ export default async function ProjectOwnershipPage({
     where: { tenantId: session.tenantId, projectId: project.id, archivedAt: null },
     select: { id: true, status: true, currentOwnerId: true },
   });
+  const cadLinks = await prisma.spatialLink.findMany({
+    where: {
+      tenantId: session.tenantId,
+      recordType: "Plot",
+      recordId: { in: allProjectPlots.map((plot) => plot.id) },
+    },
+    include: {
+      entity: {
+        select: {
+          scene: { select: { cadFile: { select: { id: true, originalName: true, version: true } } } },
+        },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  const cadLinkByPlot = new Map<string, typeof cadLinks[number]>();
+  for (const link of cadLinks) {
+    if (!cadLinkByPlot.has(link.recordId)) cadLinkByPlot.set(link.recordId, link);
+  }
+  const cadLinkedPlotIds = [...cadLinkByPlot.keys()];
 
   const plots = await prisma.plot.findMany({
     where: {
       tenantId: session.tenantId,
       projectId: project.id,
       archivedAt: null,
+      ...(searchParams.source === "cad" ? { id: { in: cadLinkedPlotIds } } : {}),
       ...(status ? { status } : {}),
       ...(searchParams.statusGroup === "allotted-transferred" ? { status: { in: [PlotStatus.ALLOTTED, PlotStatus.TRANSFERRED] } } : {}),
       ...(q
@@ -91,8 +112,9 @@ export default async function ProjectOwnershipPage({
         </div>
       </div>
 
-      <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Total plots" value={String(allProjectPlots.length)} href={`/app/projects/${project.id}/ownership`} active={!searchParams.status && !searchParams.statusGroup && !searchParams.docs} />
+      <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <SummaryCard label="Total plots" value={String(allProjectPlots.length)} href={`/app/projects/${project.id}/ownership`} active={!searchParams.status && !searchParams.statusGroup && !searchParams.docs && !searchParams.source} />
+        <SummaryCard label="From CAD" value={String(cadLinkedPlotIds.length)} href={`/app/projects/${project.id}/ownership?source=cad`} active={searchParams.source === "cad"} />
         <SummaryCard label="Company inventory" value={String(statusCounts.COMPANY_OWNED ?? 0)} href={`/app/projects/${project.id}/ownership?status=COMPANY_OWNED`} active={searchParams.status === "COMPANY_OWNED"} />
         <SummaryCard label="Allotted + transferred" value={String((statusCounts.ALLOTTED ?? 0) + (statusCounts.TRANSFERRED ?? 0))} href={`/app/projects/${project.id}/ownership?statusGroup=allotted-transferred`} active={searchParams.statusGroup === "allotted-transferred"} />
         <SummaryCard label="Registered" value={String(statusCounts.REGISTERED ?? 0)} href={`/app/projects/${project.id}/ownership?status=REGISTERED`} active={searchParams.status === "REGISTERED"} />
@@ -154,6 +176,7 @@ export default async function ProjectOwnershipPage({
                     development={development}
                     allotmentStatus={plot.status === "COMPANY_OWNED" ? "Available for allotment" : plot.status.replaceAll("_", " ").toLowerCase().replace(/^\w/, (letter) => letter.toUpperCase())}
                     document={letter ? { id: letter.id, status: letter.status, fileAssetId: letter.fileAssetId } : null}
+                    cadSource={cadLinkByPlot.get(plot.id)?.entity.scene.cadFile ?? null}
                   />
                 );
               })}

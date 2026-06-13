@@ -415,6 +415,7 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
   const unresolvedBlocking = issues.filter((issue) => issue.blocking);
   const nonCountBlocking = unresolvedBlocking.filter((issue) => issue.code !== "PLOT_COUNT_MISMATCH" && (!issue.entityId || entities.find((entity) => entity.id === issue.entityId)?.status === "CONFIRMED"));
   const confirmedCount = entities.filter((entity) => entity.status === "CONFIRMED").length;
+  const pendingReviewCount = entities.filter((entity) => entity.status === "SUGGESTED").length;
   const confirmedPlotCount = entities.filter((entity) => entity.type === "PLOT" && entity.status === "CONFIRMED").length;
   const expectedPlotCountValue = objectValue(analysis.expectedCounts).total;
   const expectedPlotCount = typeof expectedPlotCountValue === "number" ? expectedPlotCountValue : undefined;
@@ -533,8 +534,16 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
     });
     const body = await response.json().catch(() => null);
     setLoading(false);
-    setMessage(response.ok ? `Published ${body.data.plots.length} plots and ${body.data.assets.length} site assets.` : body?.error ?? "Publish failed.");
-    if (response.ok) router.refresh();
+    if (!response.ok) {
+      setMessage(body?.error ?? "Publish failed.");
+      return;
+    }
+    setMessage(`Published ${body.data.plots.length} plots and ${body.data.assets.length} site assets.`);
+    if (cadFile.projectId) {
+      router.push(`/app/projects/${cadFile.projectId}/ownership?source=cad`);
+      return;
+    }
+    router.refresh();
   }
 
   async function rollback() {
@@ -603,7 +612,7 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
             ) : (
               <button className="btn-gold h-9" onClick={publish} disabled={loading || confirmedCount === 0 || nonCountBlocking.length > 0 || (countMismatch && overrideReason.trim().length < 10)}>
                 {loading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
-                <span className="hidden sm:inline">Publish reviewed records</span>
+                <span className="hidden sm:inline">Publish to project</span>
               </button>
             )}
           </div>
@@ -613,6 +622,15 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
             <span className="label">Plot-count override reason</span>
             <input className="input" value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} placeholder="Explain why the confirmed plot count intentionally differs from the drawing schedule." />
           </label>
+        ) : null}
+        {cadFile.status !== "PUBLISHED" && confirmedCount > 0 && pendingReviewCount === 0 && nonCountBlocking.length === 0 ? (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+            <span>Review is complete. Publish now to create or link plots in Ownership and site components in Development.</span>
+            <button className="btn-primary h-8 px-3 text-xs" onClick={publish} disabled={loading || (countMismatch && overrideReason.trim().length < 10)}>
+              {loading ? <Loader2 className="animate-spin" size={14} /> : <Send size={14} />}
+              Publish and open Ownership
+            </button>
+          </div>
         ) : null}
         {message ? <Notice text={message} error={message.includes("failed") || message.includes("Resolve")} /> : null}
       </header>

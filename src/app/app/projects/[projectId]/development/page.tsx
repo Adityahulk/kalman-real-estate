@@ -1,4 +1,5 @@
-import { AlertTriangle, Camera, Clock3, Hammer, Route } from "lucide-react";
+import { AlertTriangle, Camera, Clock3, ExternalLink, Hammer, Map as MapIcon, Route } from "lucide-react";
+import Link from "next/link";
 import type React from "react";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
@@ -41,6 +42,21 @@ export default async function ProjectDevelopmentPage({ params }: { params: { pro
   ]);
 
   const delayed = assets.filter((asset) => asset.deadline && asset.deadline < new Date() && !["COMPLETED", "DONE"].includes(asset.status));
+  const cadLinks = await prisma.spatialLink.findMany({
+    where: {
+      tenantId: session.tenantId,
+      recordType: "SiteAsset",
+      recordId: { in: assets.map((asset) => asset.id) },
+    },
+    include: {
+      entity: { select: { scene: { select: { cadFile: { select: { id: true, version: true } } } } } },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  const cadLinkByAsset = new Map<string, typeof cadLinks[number]>();
+  for (const link of cadLinks) {
+    if (!cadLinkByAsset.has(link.recordId)) cadLinkByAsset.set(link.recordId, link);
+  }
 
   return (
     <main className="px-4 py-6 lg:px-8">
@@ -74,7 +90,7 @@ export default async function ProjectDevelopmentPage({ params }: { params: { pro
             </div>
             <div className="grid gap-4 p-5 md:grid-cols-2">
               {assets.map((asset) => (
-                <div key={asset.id} className="rounded-lg border border-slate-200 p-4">
+                <Link key={asset.id} className="rounded-lg border border-slate-200 p-4 transition hover:border-navy-300 hover:bg-slate-50" href={`/app/projects/${project.id}/development/assets/${asset.id}`}>
                   <div className="flex items-center justify-between gap-3">
                     <div className="font-medium">{asset.name}</div>
                     <span className="chip bg-slate-100 text-slate-700">{asset.type}</span>
@@ -82,8 +98,11 @@ export default async function ProjectDevelopmentPage({ params }: { params: { pro
                   <div className="mt-3 h-2 rounded-full bg-slate-100">
                     <div className="h-2 rounded-full bg-gold-shine" style={{ width: `${asset.progressPct}%` }} />
                   </div>
-                  <div className="mt-2 text-xs text-slate-500">{asset.progressPct}% · {asset.status}</div>
-                </div>
+                  <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
+                    <span>{asset.progressPct}% · {asset.status}</span>
+                    <span className="flex items-center gap-1">{cadLinkByAsset.has(asset.id) ? <><MapIcon size={12} className="text-emerald-700" /> CAD linked · v{cadLinkByAsset.get(asset.id)?.entity.scene.cadFile.version}</> : "Manual"} <ExternalLink size={12} /></span>
+                  </div>
+                </Link>
               ))}
               {!assets.length ? <Empty label="Publish site Map assets or create assets to begin tracking." /> : null}
             </div>
