@@ -4,7 +4,7 @@ import { CadEntityType } from "@prisma/client";
 import {
   AlertTriangle,
   Check,
-  ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Eye,
   FileSearch,
@@ -15,13 +15,14 @@ import {
   Ruler,
   Save,
   Send,
+  Settings2,
   ShieldCheck,
   Trash2,
   X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CadMap, CadMapEntity } from "./cad-map";
 import { MlightCadMap } from "./mlightcad/mlightcad-map";
 
@@ -143,29 +144,28 @@ export function CadWorkspace({
   const browserCad = cadFile.format === "DXF" || cadFile.format === "DWG";
   if (browserCad && !scene && !["CALIBRATION_REQUIRED", "REVIEW_REQUIRED", "PUBLISHED", "FAILED"].includes(status)) {
     return (
-      <BrowserExtractionWorkspace
-        cadFile={cadFile}
-        onComplete={() => {
-          router.refresh();
-        }}
-      />
+      <div className="h-full overflow-y-auto p-4">
+        <StatePanel icon={<FileSearch size={24} />} title="Open CAD Studio to prepare review records" detail="The original DXF/DWG is visualized and parsed inside the dedicated CAD Studio. Review records appear here after browser extraction completes.">
+          <Link className="btn-primary" href={`/app/cad/${cadFile.id}/studio`}>Open CAD Studio</Link>
+        </StatePanel>
+      </div>
     );
   }
 
   if (status === "FAILED") {
     return (
-      <StatePanel icon={<AlertTriangle size={24} />} title="Map processing stopped" detail={errorMessage ?? "Map processing could not inspect this drawing."}>
+      <div className="h-full overflow-y-auto p-4"><StatePanel icon={<AlertTriangle size={24} />} title="Map processing stopped" detail={errorMessage ?? "Map processing could not inspect this drawing."}>
         <button className="btn-primary" onClick={retry} disabled={loading}>
           {loading ? <Loader2 className="animate-spin" size={17} /> : <RefreshCcw size={17} />}
           Retry safely
         </button>
-      </StatePanel>
+      </StatePanel></div>
     );
   }
 
   if (!analysis || !["SETUP_REQUIRED", "CALIBRATION_REQUIRED", "REVIEW_REQUIRED", "PUBLISHED"].includes(status)) {
     return (
-      <StatePanel icon={<Loader2 className="animate-spin" size={24} />} title={progressLabel ?? statusTitle(status)} detail={statusHelp(status)}>
+      <div className="h-full overflow-y-auto p-4"><StatePanel icon={<Loader2 className="animate-spin" size={24} />} title={progressLabel ?? statusTitle(status)} detail={statusHelp(status)}>
         <div className="mx-auto mt-4 flex w-fit items-center gap-3 rounded-md bg-slate-50 px-4 py-2 text-xs text-slate-600">
           <span>{processingStage?.replaceAll("_", " ") ?? status.replaceAll("_", " ")}</span>
           <span className="h-3 w-px bg-slate-300" />
@@ -173,16 +173,16 @@ export function CadWorkspace({
         </div>
         <ProcessingSteps status={status} />
         {message ? <Notice text={message} /> : null}
-      </StatePanel>
+      </StatePanel></div>
     );
   }
 
   if (status === "SETUP_REQUIRED") {
-    return <DrawingSetup cadFile={cadFile} analysis={analysis} />;
+    return <div className="h-full overflow-y-auto p-4"><DrawingSetup cadFile={cadFile} analysis={analysis} /></div>;
   }
 
   if (status === "CALIBRATION_REQUIRED") {
-    return <Calibration cadFile={cadFile} analysis={analysis} scene={scene} />;
+    return <div className="h-full overflow-y-auto p-4"><Calibration cadFile={cadFile} analysis={analysis} scene={scene} /></div>;
   }
 
   return (
@@ -193,30 +193,6 @@ export function CadWorkspace({
       issues={issues}
       versions={versions}
     />
-  );
-}
-
-function BrowserExtractionWorkspace({ cadFile, onComplete }: { cadFile: CadFile; onComplete: () => void }) {
-  return (
-    <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-card">
-      <header className="flex flex-col justify-between gap-3 border-b border-slate-200 px-4 py-3 md:flex-row md:items-center">
-        <div>
-          <div className="text-xs uppercase tracking-wide text-slate-500">Browser CAD processing</div>
-          <h2 className="mt-1 font-semibold">Opening {cadFile.originalName}</h2>
-          <p className="mt-1 text-xs text-slate-500">DXF/DWG rendering and extraction run locally in this browser. Publishing still requires server validation and admin review.</p>
-        </div>
-        <span className="chip bg-emerald-50 text-emerald-800">No CAD worker required</span>
-      </header>
-      <div className="h-[calc(100dvh-18rem)] min-h-[620px]">
-        <MlightCadMap
-          cadFileId={cadFile.id}
-          fileName={cadFile.originalName}
-          autoExtract
-          hiddenLayerNames={new Set()}
-          onExtractionComplete={onComplete}
-        />
-      </div>
-    </section>
   );
 }
 
@@ -420,9 +396,11 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
   const [selectedId, setSelectedId] = useState(scene?.entities.find((entity) => entity.status !== "REJECTED")?.id ?? "");
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
   const [hiddenLayers, setHiddenLayers] = useState<Set<string>>(new Set());
-  const [layersExpanded, setLayersExpanded] = useState(true);
-  const [reviewExpanded, setReviewExpanded] = useState(true);
-  const [filter, setFilter] = useState<"ALL" | "PLOT" | "ELECTRICAL" | "ISSUES">("ALL");
+  const [leftTab, setLeftTab] = useState<"REVIEW" | "LAYERS">("REVIEW");
+  const [leftOpen, setLeftOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [checksOpen, setChecksOpen] = useState(false);
+  const [filter, setFilter] = useState<"ALL" | "NEEDS_REVIEW" | "BLOCKING" | "CONFIRMED" | "REJECTED" | "PLOT" | "SITE_ASSET" | "ELECTRICAL">("ALL");
   const [query, setQuery] = useState("");
   const [draftGeometry, setDraftGeometry] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
@@ -444,9 +422,13 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
     || (expectedPlotCount !== undefined && confirmedPlotCount > 0 && confirmedPlotCount !== expectedPlotCount);
   const visible = useMemo(() => entities.filter((entity) => {
     if (query && !`${entity.label ?? ""} ${entity.type} ${entity.sourceLayer ?? ""}`.toLowerCase().includes(query.toLowerCase())) return false;
+    if (filter === "NEEDS_REVIEW") return entity.status === "SUGGESTED";
+    if (filter === "BLOCKING") return issues.some((issue) => issue.entityId === entity.id && issue.blocking);
+    if (filter === "CONFIRMED") return entity.status === "CONFIRMED";
+    if (filter === "REJECTED") return entity.status === "REJECTED";
     if (filter === "PLOT") return entity.type === "PLOT";
+    if (filter === "SITE_ASSET") return !["PLOT", "UTILITY", "ELECTRICAL_POINT"].includes(entity.type);
     if (filter === "ELECTRICAL") return entity.type === "UTILITY" || entity.type === "ELECTRICAL_POINT";
-    if (filter === "ISSUES") return issues.some((issue) => issue.entityId === entity.id);
     return true;
   }), [entities, filter, issues, query]);
 
@@ -509,6 +491,39 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
     }
   }
 
+  async function decideSelected(status: "CONFIRMED" | "REJECTED") {
+    if (!selected) return;
+    setLoading(true);
+    const response = await fetch(`/api/v1/cad/${cadFile.id}/review`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        entities: [{
+          entityId: selected.id,
+          label: selected.label,
+          type: selected.type,
+          status,
+          geometry: draftGeometry ?? selected.geometry,
+        }],
+        resolvedIssueIds: status === "REJECTED"
+          ? issues.filter((issue) => issue.entityId === selected.id).map((issue) => issue.id)
+          : [],
+      }),
+    });
+    const body = await response.json().catch(() => null);
+    setLoading(false);
+    if (!response.ok) {
+      setMessage(body?.error ?? "Candidate update failed.");
+      return;
+    }
+    const currentIndex = visible.findIndex((entity) => entity.id === selected.id);
+    const next = [...visible.slice(currentIndex + 1), ...visible.slice(0, currentIndex)]
+      .find((entity) => entity.status === "SUGGESTED" && entity.id !== selected.id);
+    if (next) selectEntity(next.id);
+    setMessage(`${selected.label ?? "Candidate"} marked ${status.toLowerCase()}.`);
+    router.refresh();
+  }
+
   async function publish() {
     setLoading(true);
     const response = await fetch(`/api/v1/cad/${cadFile.id}/publish`, {
@@ -560,26 +575,35 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
     if (response.ok) router.refresh();
   }
 
+  const desktopColumns = leftOpen && inspectorOpen
+    ? "xl:grid-cols-[300px_minmax(0,1fr)_340px]"
+    : leftOpen
+      ? "xl:grid-cols-[300px_minmax(0,1fr)]"
+      : inspectorOpen
+        ? "xl:grid-cols-[minmax(0,1fr)_340px]"
+        : "xl:grid-cols-1";
+
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-card xl:flex xl:h-[calc(100dvh-13rem)] xl:min-h-[560px] xl:flex-col">
-      <header className="border-b border-slate-200 bg-white px-4 py-3">
-        <div className="flex flex-col justify-between gap-3 xl:flex-row xl:items-center">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-white">
+      <header className="shrink-0 border-b border-slate-200 bg-white px-3 py-2">
+        <div className="flex items-center justify-between gap-3">
           <div>
-            <div className="text-xs uppercase tracking-wide text-slate-500">{cadFile.status === "PUBLISHED" ? "Published spatial records" : "Step 3 of 3 · Candidate review"}</div>
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <h2 className="font-semibold">{cadFile.originalName}</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-sm font-semibold">{cadFile.status === "PUBLISHED" ? "Published spatial records" : "Candidate review"}</h2>
               <span className="chip bg-slate-100 text-slate-700">{cadFile.status.replaceAll("_", " ")}</span>
-              <span className="chip bg-amber-50 text-amber-800">{unresolvedBlocking.length} blocking</span>
+              <button className="chip bg-amber-50 text-amber-800" onClick={() => setChecksOpen(true)}>{unresolvedBlocking.length} blocking</button>
               <span className="chip bg-emerald-50 text-emerald-800">{confirmedCount} confirmed</span>
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <button className={`btn-ghost h-9 w-9 px-0 ${leftOpen ? "bg-slate-100" : ""}`} onClick={() => setLeftOpen((value) => !value)} title="Toggle review panel"><FileSearch size={16} /></button>
+            <button className={`btn-ghost h-9 w-9 px-0 ${inspectorOpen ? "bg-slate-100" : ""}`} onClick={() => setInspectorOpen((value) => !value)} title="Toggle candidate inspector"><Settings2 size={16} /></button>
             {cadFile.status === "PUBLISHED" ? (
-              <button className="btn-outline text-rose-700" onClick={rollback} disabled={loading}><Trash2 size={16} /> Roll back Map publish</button>
+              <button className="btn-outline h-9 text-rose-700" onClick={rollback} disabled={loading}><Trash2 size={16} /> <span className="hidden sm:inline">Roll back publish</span></button>
             ) : (
-              <button className="btn-gold" onClick={publish} disabled={loading || confirmedCount === 0 || nonCountBlocking.length > 0 || (countMismatch && overrideReason.trim().length < 10)}>
+              <button className="btn-gold h-9" onClick={publish} disabled={loading || confirmedCount === 0 || nonCountBlocking.length > 0 || (countMismatch && overrideReason.trim().length < 10)}>
                 {loading ? <Loader2 className="animate-spin" size={16} /> : <Send size={16} />}
-                Publish reviewed records
+                <span className="hidden sm:inline">Publish reviewed records</span>
               </button>
             )}
           </div>
@@ -593,26 +617,24 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
         {message ? <Notice text={message} error={message.includes("failed") || message.includes("Resolve")} /> : null}
       </header>
 
-      <div className="grid min-h-[720px] xl:min-h-0 xl:flex-1 xl:grid-cols-[280px_minmax(0,1fr)_350px]">
-        <aside className="border-r border-slate-200 bg-slate-50 p-4 xl:flex xl:min-h-0 xl:flex-col xl:overflow-hidden">
-          <label className="block"><span className="label">Search candidates</span><input className="input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Plot number, layer, type" /></label>
-          <div className="mt-3 grid grid-cols-2 gap-2">
-            {(["ALL", "PLOT", "ELECTRICAL", "ISSUES"] as const).map((item) => (
-              <button key={item} className={`rounded-md border px-2 py-2 text-xs font-medium ${filter === item ? "border-navy-900 bg-navy-900 text-white" : "border-slate-200 bg-white text-slate-600"}`} onClick={() => setFilter(item)}>{item}</button>
-            ))}
+      <div className={`relative grid min-h-0 flex-1 grid-cols-1 ${desktopColumns}`}>
+        {leftOpen ? <aside className="absolute inset-y-0 left-0 z-30 flex w-[min(88vw,320px)] min-h-0 flex-col border-r border-slate-200 bg-slate-50 shadow-xl xl:static xl:w-auto xl:shadow-none">
+          <div className="flex h-11 shrink-0 border-b border-slate-200 bg-white p-1">
+            <button className={`flex-1 rounded text-xs font-medium ${leftTab === "REVIEW" ? "bg-navy-900 text-white" : "text-slate-600"}`} onClick={() => setLeftTab("REVIEW")}>Review queue <span className="opacity-70">{visible.length}</span></button>
+            <button className={`flex-1 rounded text-xs font-medium ${leftTab === "LAYERS" ? "bg-navy-900 text-white" : "text-slate-600"}`} onClick={() => setLeftTab("LAYERS")}>Layers <span className="opacity-70">{scene?.layers.length ?? 0}</span></button>
+            <button className="btn-ghost h-9 w-9 px-0 xl:hidden" onClick={() => setLeftOpen(false)}><ChevronLeft size={16} /></button>
           </div>
-          <section className="mt-4 shrink-0 border-t border-slate-200 pt-3">
-            <button type="button" className="flex w-full items-center justify-between text-left xl:pointer-events-none" onClick={() => setLayersExpanded((current) => !current)}>
-              <h3 className="flex items-center gap-2 text-sm font-semibold"><Layers3 size={15} /> Layers <span className="font-normal text-slate-500">{scene?.layers.length ?? 0}</span></h3>
-              <ChevronDown className={`transition-transform xl:hidden ${layersExpanded ? "rotate-180" : ""}`} size={16} />
-            </button>
-            <div className={`${layersExpanded ? "block" : "hidden"} xl:block`}>
-              <div className="mt-2 flex items-center gap-2 text-xs">
+          {leftTab === "LAYERS" ? (
+            <section className="flex min-h-0 flex-1 flex-col p-3">
+              <div className="flex shrink-0 items-center justify-between">
+                <h3 className="flex items-center gap-2 text-sm font-semibold"><Layers3 size={15} /> Drawing layers</h3>
+                <div className="flex items-center gap-2 text-xs">
                 <button type="button" className="text-navy-800 hover:underline" onClick={() => setHiddenLayers(new Set())}>Show all</button>
                 <span className="text-slate-300">|</span>
                 <button type="button" className="text-slate-600 hover:underline" onClick={() => setHiddenLayers(new Set((scene?.layers ?? []).map((layer) => layer.id)))}>Hide all</button>
               </div>
-              <div className="mt-2 max-h-48 space-y-1 overflow-y-auto pr-1 xl:max-h-[24dvh]">
+              </div>
+              <div className="mt-3 min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
                 {scene?.layers.map((layer) => {
                   const hidden = hiddenLayers.has(layer.id);
                   return (
@@ -623,36 +645,35 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
                   );
                 })}
               </div>
-            </div>
-          </section>
-          <section className="mt-4 border-t border-slate-200 pt-3 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
-            <button type="button" className="flex w-full items-center justify-between text-left xl:pointer-events-none" onClick={() => setReviewExpanded((current) => !current)}>
-              <span className="text-sm font-semibold">Review queue <span className="font-normal text-slate-500">{visible.length}</span></span>
-              <ChevronDown className={`transition-transform xl:hidden ${reviewExpanded ? "rotate-180" : ""}`} size={16} />
-            </button>
-            <div className={`${reviewExpanded ? "mt-2 flex" : "hidden"} max-h-[420px] min-h-0 flex-col xl:mt-2 xl:flex xl:max-h-none xl:flex-1`}>
-              <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
-              {visible.map((entity) => (
-                <label key={entity.id} className={`flex cursor-pointer items-start gap-2 rounded-md border p-2 ${selectedId === entity.id ? "border-gold-400 bg-gold-50" : "border-transparent hover:bg-white"}`}>
-                  <input className="mt-1" type="checkbox" checked={checkedIds.has(entity.id)} onChange={() => setCheckedIds((current) => toggleSet(current, entity.id))} />
-                  <button type="button" className="min-w-0 flex-1 text-left" onClick={() => selectEntity(entity.id)}>
-                    <span className="block truncate text-sm font-medium">{entity.label ?? "Unlabelled"}</span>
-                    <span className="text-xs text-slate-500">{entity.type.replaceAll("_", " ")} · {Math.round(Number(entity.confidence) * 100)}% · {entity.status}</span>
-                  </button>
-                </label>
-              ))}
+            </section>
+          ) : (
+            <section className="flex min-h-0 flex-1 flex-col">
+              <div className="shrink-0 space-y-2 border-b border-slate-200 bg-white p-3">
+                <input className="input h-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search plot, layer, type or handle" />
+                <div className="flex gap-1 overflow-x-auto pb-1">
+                  {(["ALL", "NEEDS_REVIEW", "BLOCKING", "CONFIRMED", "REJECTED", "PLOT", "SITE_ASSET", "ELECTRICAL"] as const).map((item) => (
+                    <button key={item} className={`shrink-0 rounded border px-2 py-1.5 text-[11px] font-medium ${filter === item ? "border-navy-900 bg-navy-900 text-white" : "border-slate-200 bg-white text-slate-600"}`} onClick={() => setFilter(item)}>{item.replaceAll("_", " ")}</button>
+                  ))}
+                </div>
               </div>
+              <CandidateQueue
+                entities={visible}
+                selectedId={selectedId}
+                checkedIds={checkedIds}
+                onSelect={selectEntity}
+                onToggle={(entityId) => setCheckedIds((current) => toggleSet(current, entityId))}
+              />
               {checkedIds.size ? (
-                <div className="mt-3 grid shrink-0 grid-cols-2 gap-2">
+                <div className="grid shrink-0 grid-cols-2 gap-2 border-t border-slate-200 bg-white p-3">
                   <button className="btn-primary h-9 px-2 text-xs" onClick={() => batch("CONFIRMED")} disabled={loading}><Check size={14} /> Confirm</button>
                   <button className="btn-outline h-9 px-2 text-xs" onClick={() => batch("REJECTED")} disabled={loading}><X size={14} /> Reject</button>
                 </div>
               ) : null}
-            </div>
-          </section>
-        </aside>
+            </section>
+          )}
+        </aside> : null}
 
-        <section className="relative min-h-[620px] overflow-hidden xl:min-h-0">
+        <section className="relative min-h-0 overflow-hidden bg-slate-950">
           {(cadFile.format === "DXF" || cadFile.format === "DWG") && !editBoundary ? (
             <MlightCadMap
               cadFileId={cadFile.id}
@@ -685,17 +706,17 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
               {editBoundary ? "Return to CAD drawing" : "Adjust selected boundary"}
             </button>
           ) : null}
-          <div className="pointer-events-none absolute bottom-3 left-3 rounded-md border border-slate-200 bg-white/95 px-3 py-2 text-xs text-slate-600 shadow">
-            {editBoundary
-              ? "Drag selected plot vertices to correct the reviewed boundary"
-              : "Scroll to zoom at the cursor · Use Pan mode to move around the drawing"}
-          </div>
         </section>
 
-        <aside className="border-l border-slate-200 p-4 xl:min-h-0 xl:overflow-y-auto">
+        {inspectorOpen ? <aside className="absolute inset-y-0 right-0 z-30 flex w-[min(92vw,360px)] min-h-0 flex-col border-l border-slate-200 bg-white shadow-xl xl:static xl:w-auto xl:shadow-none">
+          <div className="flex h-11 shrink-0 items-center justify-between border-b border-slate-200 px-3">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Candidate inspector</span>
+            <button className="btn-ghost h-8 w-8 px-0" onClick={() => setInspectorOpen(false)} title="Close inspector"><ChevronRight size={16} /></button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {selected ? (
-            <form key={selected.id} onSubmit={saveSelected} className="space-y-4">
-              <div><div className="text-xs uppercase tracking-wide text-slate-500">Selected candidate</div><h2 className="mt-1 text-lg font-semibold">{selected.label ?? selected.type}</h2></div>
+            <form id={`candidate-form-${selected.id}`} key={selected.id} onSubmit={saveSelected} className="space-y-4">
+              <div><h2 className="text-lg font-semibold">{selected.label ?? selected.type}</h2><div className="mt-1 text-xs text-slate-500">{selected.sourceHandle ? `CAD handle ${selected.sourceHandle}` : "Reconstructed business boundary"}</div></div>
               <div className="grid grid-cols-2 gap-2 rounded-lg bg-slate-50 p-3 text-sm">
                 <Metric label="Confidence" value={`${Math.round(Number(selected.confidence) * 100)}%`} />
                 <Metric label="Layer" value={selected.sourceLayer ?? "-"} />
@@ -713,27 +734,107 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
                 </div>
               ))}
               {draftGeometry ? <Notice text="Boundary edited on the map. Save this candidate to keep the change." /> : null}
-              {cadFile.status !== "PUBLISHED" ? <button className="btn-primary w-full justify-center" disabled={loading}><Save size={16} /> Save candidate</button> : null}
               {selected.spatialLinks[0] && cadFile.projectId ? <BusinessLink projectId={cadFile.projectId} link={selected.spatialLinks[0]} /> : null}
             </form>
           ) : <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">Select a candidate on the map or in the review queue.</div>}
-
-          <div className="mt-6 border-t border-slate-200 pt-4">
-            <h3 className="flex items-center gap-2 text-sm font-semibold"><ShieldCheck size={16} /> Publish checks</h3>
-            <div className="mt-2 space-y-2">
-              {issues.filter((issue) => !issue.entityId).map((issue) => (
-                <div key={issue.id} className={`rounded-md p-3 text-xs ${issue.blocking ? "bg-rose-50 text-rose-800" : "bg-amber-50 text-amber-800"}`}>{issue.message}</div>
-              ))}
-              {expectedPlotCount !== undefined && confirmedPlotCount !== expectedPlotCount ? (
-                <div className="rounded-md bg-rose-50 p-3 text-xs text-rose-800">
-                  {confirmedPlotCount} of {expectedPlotCount} scheduled plots are currently confirmed.
-                </div>
-              ) : null}
-              {!issues.filter((issue) => !issue.entityId).length && !countMismatch ? <div className="rounded-md bg-emerald-50 p-3 text-xs text-emerald-800">No drawing-level validation issues.</div> : null}
-            </div>
           </div>
-          {versions.length ? <div className="mt-5 text-xs text-slate-500">Published versions: {versions.map((version) => `v${version.version}`).join(", ")}</div> : null}
-        </aside>
+          {selected && cadFile.status !== "PUBLISHED" ? (
+            <div className="grid shrink-0 grid-cols-2 gap-2 border-t border-slate-200 bg-white p-3">
+              <button className="btn-outline h-9 px-2 text-xs text-rose-700" onClick={() => decideSelected("REJECTED")} disabled={loading}><X size={14} /> Reject & next</button>
+              <button className="btn-primary h-9 px-2 text-xs" onClick={() => decideSelected("CONFIRMED")} disabled={loading}><Check size={14} /> Confirm & next</button>
+              <button className="btn-outline col-span-2 h-9 text-xs" type="submit" form={`candidate-form-${selected.id}`} disabled={loading}><Save size={14} /> Save candidate details</button>
+            </div>
+          ) : null}
+        </aside> : null}
+      </div>
+      {checksOpen ? (
+        <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/35" onMouseDown={() => setChecksOpen(false)}>
+          <aside className="h-full w-full max-w-md overflow-y-auto bg-white p-5 shadow-2xl" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="flex items-center justify-between"><h2 className="flex items-center gap-2 font-semibold"><ShieldCheck size={18} /> Publish checks</h2><button className="btn-ghost h-9 w-9 px-0" onClick={() => setChecksOpen(false)}><X size={17} /></button></div>
+            <div className="mt-5 space-y-2">
+              {issues.filter((issue) => !issue.entityId).map((issue) => <div key={issue.id} className={`rounded-md p-3 text-sm ${issue.blocking ? "bg-rose-50 text-rose-800" : "bg-amber-50 text-amber-800"}`}>{issue.message}</div>)}
+              {expectedPlotCount !== undefined && confirmedPlotCount !== expectedPlotCount ? <div className="rounded-md bg-rose-50 p-3 text-sm text-rose-800">{confirmedPlotCount} of {expectedPlotCount} scheduled plots are confirmed.</div> : null}
+              {!issues.filter((issue) => !issue.entityId).length && !countMismatch ? <div className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-800">No drawing-level validation issues.</div> : null}
+            </div>
+            {versions.length ? <div className="mt-6 border-t border-slate-200 pt-4 text-xs text-slate-500">Published versions: {versions.map((version) => `v${version.version}`).join(", ")}</div> : null}
+          </aside>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CandidateQueue({
+  entities,
+  selectedId,
+  checkedIds,
+  onSelect,
+  onToggle,
+}: {
+  entities: Entity[];
+  selectedId: string | null;
+  checkedIds: Set<string>;
+  onSelect: (entityId: string) => void;
+  onToggle: (entityId: string) => void;
+}) {
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(600);
+  const rowHeight = 62;
+  const overscan = 8;
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const measure = () => setViewportHeight(viewport.clientHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !selectedId) return;
+    const selectedIndex = entities.findIndex((entity) => entity.id === selectedId);
+    if (selectedIndex < 0) return;
+    const rowTop = selectedIndex * rowHeight;
+    const rowBottom = rowTop + rowHeight;
+    if (rowTop < viewport.scrollTop) viewport.scrollTo({ top: rowTop, behavior: "smooth" });
+    else if (rowBottom > viewport.scrollTop + viewport.clientHeight) {
+      viewport.scrollTo({ top: rowBottom - viewport.clientHeight, behavior: "smooth" });
+    }
+  }, [entities, selectedId]);
+
+  if (!entities.length) {
+    return <div className="min-h-0 flex-1 p-6 text-center text-sm text-slate-500">No candidates match this filter.</div>;
+  }
+
+  const start = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+  const end = Math.min(entities.length, Math.ceil((scrollTop + viewportHeight) / rowHeight) + overscan);
+  const rendered = entities.slice(start, end);
+
+  return (
+    <div
+      ref={viewportRef}
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2"
+      onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+    >
+      <div className="relative" style={{ height: entities.length * rowHeight }}>
+        <div className="absolute inset-x-0 top-0 space-y-1" style={{ transform: `translateY(${start * rowHeight}px)` }}>
+          {rendered.map((entity) => (
+            <label
+              key={entity.id}
+              className={`flex h-[58px] cursor-pointer items-start gap-2 rounded-md border p-2 ${selectedId === entity.id ? "border-gold-400 bg-gold-50" : "border-transparent hover:bg-white"}`}
+            >
+              <input className="mt-1" type="checkbox" checked={checkedIds.has(entity.id)} onChange={() => onToggle(entity.id)} />
+              <button type="button" className="min-w-0 flex-1 text-left" onClick={() => onSelect(entity.id)}>
+                <span className="block truncate text-sm font-medium">{entity.label ?? "Unlabelled"}</span>
+                <span className="block truncate text-xs text-slate-500">{entity.type.replaceAll("_", " ")} · {Math.round(Number(entity.confidence) * 100)}% · {entity.status}</span>
+              </button>
+            </label>
+          ))}
+        </div>
       </div>
     </div>
   );

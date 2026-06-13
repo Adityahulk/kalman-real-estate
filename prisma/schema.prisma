@@ -466,8 +466,27 @@ model CadFile {
   versions       CadVersion[]
   reviewIssues   CadReviewIssue[]
   extractionRuns CadExtractionRun[]
+  overlays       CadOverlay[]
 
   @@index([tenantId, parentType, parentId])
+}
+
+model CadOverlay {
+  id           String   @id @default(cuid())
+  tenantId     String
+  cadFileId    String
+  kind         String
+  label        String?
+  sourceHandle String?
+  geometry     Json?
+  metadata     Json?
+  createdById  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  cadFile CadFile @relation(fields: [cadFileId], references: [id])
+
+  @@index([tenantId, cadFileId, kind])
 }
 
 model CadExtractionRun {

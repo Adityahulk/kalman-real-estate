@@ -140,6 +140,11 @@ export function AppShell({
     router.refresh();
   }
 
+  const dedicatedCadMode = /^\/app\/cad\/[^/]+\/(studio|review)$/.test(pathname);
+  if (dedicatedCadMode) {
+    return <div className="h-dvh overflow-hidden bg-slate-950 text-navy-950">{children}</div>;
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-navy-950">
       <button

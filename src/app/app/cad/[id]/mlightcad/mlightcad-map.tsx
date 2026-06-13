@@ -20,6 +20,7 @@ type RuntimeManager = {
   curView: {
     mode: number;
     curPos: { x: number; y: number };
+    zoomTo(box: never, margin?: number): void;
     zoomToFitDrawing(timeout?: number): void;
     updateLayer(layer: never, changes: { isOff: boolean }): void;
     selectionSet: {
@@ -42,6 +43,7 @@ type RuntimeManager = {
 type MlightRuntime = {
   AcEdOpenMode: { Review: number };
   AcEdViewMode: { SELECTION: number; PAN: number };
+  AcGeBox2d?: new (min: { x: number; y: number }, max: { x: number; y: number }) => unknown;
   AcApDocManager: {
     createInstance(options: Record<string, unknown>): RuntimeManager | undefined;
   };
@@ -183,6 +185,14 @@ export function MlightCadMap({
     if (selection.count === 1 && selection.has(selectedSourceHandle)) return;
     selection.clear();
     selection.add(selectedSourceHandle);
+    const database = current.curDocument.database as unknown as {
+      tables?: { blockTable?: { getEntityById?(id: string): { geometricExtents?: { min?: { x: number; y: number }; max?: { x: number; y: number } } } } };
+    };
+    const extents = database.tables?.blockTable?.getEntityById?.(selectedSourceHandle)?.geometricExtents;
+    const Box = runtime.current?.AcGeBox2d;
+    if (Box && extents?.min && extents.max) {
+      current.curView.zoomTo?.(new Box(extents.min, extents.max) as never, 0.16);
+    }
   }, [selectedSourceHandle]);
 
   useEffect(() => {
@@ -212,7 +222,7 @@ export function MlightCadMap({
   }
 
   return (
-    <div className={`relative h-full min-h-[620px] overflow-hidden ${dark ? "bg-[#15191f]" : "bg-white"}`}>
+    <div className={`relative h-full min-h-0 overflow-hidden ${dark ? "bg-[#15191f]" : "bg-white"}`}>
       <div ref={container} className="absolute inset-0" />
       <div className="absolute left-3 top-3 z-10 flex flex-wrap items-center gap-1 rounded-md border border-slate-200 bg-white/95 p-1.5 shadow-lg backdrop-blur">
         <ToolButton active={mode === "select"} label="Select" onClick={() => changeMode("select")} icon={<BoxSelect size={16} />} />

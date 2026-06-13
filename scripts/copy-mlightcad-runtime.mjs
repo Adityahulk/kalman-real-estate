@@ -13,8 +13,10 @@ const assets = [
 ];
 
 await mkdir(output, { recursive: true });
+await mkdir(join(output, "assets"), { recursive: true });
 for (const [source, target] of assets) {
   await copyFile(join(root, source), join(output, target));
+  await copyFile(join(root, source), join(output, "assets", target));
 }
 
 await build({
@@ -29,6 +31,22 @@ await build({
   platform: "browser",
   target: ["es2022"],
   outfile: join(output, "mlightcad-runtime.js"),
+  alias: {
+    "three/examples/jsm/controls/OrbitControls": "three/examples/jsm/controls/OrbitControls.js",
+    "three/examples/jsm/libs/stats.module": "three/examples/jsm/libs/stats.module.js",
+  },
+  sourcemap: false,
+  minify: true,
+  logLevel: "warning",
+});
+
+await build({
+  entryPoints: [join(root, "scripts", "mlightcad-studio-entry.ts")],
+  bundle: true,
+  format: "esm",
+  platform: "browser",
+  target: ["es2022"],
+  outfile: join(output, "mlightcad-studio.js"),
   alias: {
     "three/examples/jsm/controls/OrbitControls": "three/examples/jsm/controls/OrbitControls.js",
     "three/examples/jsm/libs/stats.module": "three/examples/jsm/libs/stats.module.js",
@@ -53,6 +71,24 @@ for (const packageName of [
 await writeFile(
   join(output, "manifest.json"),
   JSON.stringify({ generatedAt: new Date().toISOString(), packages: packageVersions }, null, 2),
+);
+
+await writeFile(
+  join(output, "studio.html"),
+  `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WIDESTATE CAD Studio</title>
+    <link rel="stylesheet" href="/cad-runtime/mlightcad-studio.css" />
+    <style>html,body,#app{width:100%;height:100%;margin:0;overflow:hidden;background:#10151c}</style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/cad-runtime/mlightcad-studio.js"></script>
+  </body>
+</html>`,
 );
 
 console.log(`MLightCAD runtime copied to ${output}`);
