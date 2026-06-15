@@ -140,6 +140,32 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
     else setLayout(next);
   }
 
+  function updateBlockText(blockId: string, text: string, overflow: boolean, fittedFontSize?: number) {
+    if (!layout) return;
+    const previous = layout.pages.flatMap((page) => page.blocks).find((block) => block.id === blockId);
+    if (!previous) return;
+    const fields = rebaseFields(layout.fields, previous, text);
+    const next = {
+      ...layout,
+      fields,
+      pages: layout.pages.map((page) => ({
+        ...page,
+        blocks: page.blocks.map((block) => block.id === blockId
+          ? {
+              ...block,
+              text,
+              style: fittedFontSize && fittedFontSize !== block.style.fontSize
+                ? { ...block.style, fontSize: fittedFontSize, lineHeight: fittedFontSize * (block.style.lineHeight / block.style.fontSize) }
+                : block.style,
+              changed: text !== block.originalText,
+              overflow,
+            }
+          : block),
+      })),
+    };
+    commit(next);
+  }
+
   function undo() {
     const previous = undoRef.current.pop();
     if (!previous || !layout) return;
@@ -294,15 +320,7 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
               layout={layout}
               selectedBlockId={selectedBlockId}
               onBlockSelection={rememberSelection}
-              onBlockChange={(blockId, text, overflow, fittedFontSize) => updateBlock(blockId, (block) => ({
-                ...block,
-                text,
-                style: fittedFontSize && fittedFontSize !== block.style.fontSize
-                  ? { ...block.style, fontSize: fittedFontSize, lineHeight: fittedFontSize * (block.style.lineHeight / block.style.fontSize) }
-                  : block.style,
-                changed: text !== block.originalText,
-                overflow,
-              }), false)}
+              onBlockChange={updateBlockText}
               onConfirmOcr={(blockId) => updateBlock(blockId, (block) => ({ ...block, confirmed: true }))}
             />
           ) : (
@@ -366,6 +384,16 @@ export function PdfLayoutCanvas({ sourceUrl, layout, selectedBlockId, onBlockSel
   onConfirmOcr: (blockId: string) => void;
 }) {
   const canvasRefs = useRef(new Map<number, HTMLCanvasElement>());
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [availableWidth, setAvailableWidth] = useState(860);
+
+  useEffect(() => {
+    const element = containerRef.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => setAvailableWidth(Math.max(320, entry.contentRect.width)));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -377,13 +405,13 @@ export function PdfLayoutCanvas({ sourceUrl, layout, selectedBlockId, onBlockSel
         const canvas = canvasRefs.current.get(pageData.pageNumber);
         if (!canvas || cancelled) continue;
         const page = await pdf.getPage(pageData.pageNumber);
-        const scale = Math.min(1.45, 860 / pageData.width);
+        const scale = Math.min(1.75, 860 / pageData.width);
         const viewport = page.getViewport({ scale });
         const dpr = Math.min(2, window.devicePixelRatio || 1);
         canvas.width = Math.ceil(viewport.width * dpr);
         canvas.height = Math.ceil(viewport.height * dpr);
-        canvas.style.width = `${viewport.width}px`;
-        canvas.style.height = `${viewport.height}px`;
+        canvas.style.width = "100%";
+        canvas.style.height = "100%";
         const context = canvas.getContext("2d");
         if (!context) continue;
         await page.render({ canvasContext: context, viewport, transform: dpr === 1 ? undefined : [dpr, 0, 0, dpr, 0, 0] }).promise;
@@ -392,9 +420,9 @@ export function PdfLayoutCanvas({ sourceUrl, layout, selectedBlockId, onBlockSel
     return () => { cancelled = true; };
   }, [sourceUrl, layout.pageCount]);
 
-  return <div className="space-y-6">
+  return <div className="space-y-6" ref={containerRef}>
     {layout.pages.map((page) => {
-      const displayWidth = Math.min(860, page.width * 1.45);
+      const displayWidth = Math.min(860, availableWidth, page.width * 1.45);
       const displayHeight = displayWidth * page.height / page.width;
       return (
         <div className="relative mx-auto bg-white shadow-xl" key={page.pageNumber} style={{ width: displayWidth, height: displayHeight }}>
@@ -406,6 +434,7 @@ export function PdfLayoutCanvas({ sourceUrl, layout, selectedBlockId, onBlockSel
             <EditablePdfBlock
               key={block.id}
               block={block}
+              displayScale={displayWidth / page.width}
               selected={selectedBlockId === block.id}
               dynamic={layout.fields.some((field) => field.blockId === block.id)}
               onSelection={onBlockSelection}
@@ -420,8 +449,9 @@ export function PdfLayoutCanvas({ sourceUrl, layout, selectedBlockId, onBlockSel
   </div>;
 }
 
-function EditablePdfBlock({ block, selected, dynamic, onSelection, onChange, onConfirmOcr }: {
+function EditablePdfBlock({ block, displayScale, selected, dynamic, onSelection, onChange, onConfirmOcr }: {
   block: PdfLayoutBlock;
+  displayScale: number;
   selected: boolean;
   dynamic: boolean;
   onSelection: (event: MouseEvent<HTMLElement>, block: PdfLayoutBlock) => void;
@@ -439,7 +469,7 @@ function EditablePdfBlock({ block, selected, dynamic, onSelection, onChange, onC
     minHeight: `${block.rect.height * 100}%`,
     maxHeight: `${Math.max(block.rect.height, block.rect.height * 1.35) * 100}%`,
     fontFamily: block.style.fontFamily,
-    fontSize: `${block.style.fontSize * Math.min(1.45, 860 / 595)}px`,
+    fontSize: `${block.style.fontSize * displayScale}px`,
     fontWeight: block.style.fontWeight,
     fontStyle: block.style.italic ? "italic" : "normal",
     textDecoration: block.style.underline ? "underline" : "none",
@@ -464,7 +494,7 @@ function EditablePdfBlock({ block, selected, dynamic, onSelection, onChange, onC
       onMouseUp={(event) => onSelection(event, block)}
       onInput={(event) => {
         const element = event.currentTarget;
-        const scale = Math.min(1.45, 860 / 595);
+        const scale = displayScale;
         let displaySize = parseFloat(element.style.fontSize) || block.style.fontSize * scale;
         const minimum = block.style.fontSize * 0.62 * scale;
         while ((element.scrollHeight > element.clientHeight + 2 || element.scrollWidth > element.clientWidth + 2) && displaySize > minimum) {
@@ -648,8 +678,18 @@ async function ocrPage(page: PDFPageProxy, pageNumber: number, pageWidth: number
   const context = canvas.getContext("2d");
   if (!context) return [];
   await page.render({ canvasContext: context, viewport }).promise;
-  const { recognize } = await import("tesseract.js");
-  const result = await recognize(canvas, "eng");
+  const { createWorker } = await import("tesseract.js");
+  const worker = await createWorker("eng", 1, {
+    workerPath: "/ocr/worker.min.js",
+    langPath: "/ocr/",
+    corePath: "/ocr/core/",
+  });
+  let result;
+  try {
+    result = await worker.recognize(canvas);
+  } finally {
+    await worker.terminate();
+  }
   const data = result.data as unknown as { words?: Array<{ text: string; confidence: number; bbox: { x0: number; y0: number; x1: number; y1: number } }> };
   return (data.words ?? []).filter((word) => word.text.trim()).map((word): PdfLayoutBlock => {
     const width = word.bbox.x1 - word.bbox.x0;
@@ -739,6 +779,45 @@ function uniqueFieldKey(label: string, fields: PdfLayoutField[]) {
 
 function rangesOverlap(startA: number, endA: number, startB: number, endB: number) {
   return Math.max(startA, startB) < Math.min(endA, endB);
+}
+
+function rebaseFields(fields: PdfLayoutField[], previous: PdfLayoutBlock, nextText: string) {
+  if (previous.text === nextText) return fields;
+  let prefix = 0;
+  while (prefix < previous.text.length && prefix < nextText.length && previous.text[prefix] === nextText[prefix]) prefix += 1;
+  let suffix = 0;
+  while (
+    suffix < previous.text.length - prefix
+    && suffix < nextText.length - prefix
+    && previous.text[previous.text.length - 1 - suffix] === nextText[nextText.length - 1 - suffix]
+  ) suffix += 1;
+  const oldChangeEnd = previous.text.length - suffix;
+  const newChangeEnd = nextText.length - suffix;
+  const delta = newChangeEnd - oldChangeEnd;
+  return fields.flatMap((field): PdfLayoutField[] => {
+    if (field.blockId !== previous.id || field.end <= prefix) return [field];
+    if (field.start >= oldChangeEnd) return [{ ...field, start: field.start + delta, end: field.end + delta }];
+    if (field.start >= prefix && field.end <= oldChangeEnd) {
+      const start = Math.min(field.start, nextText.length);
+      const end = Math.min(nextText.length, Math.max(start + 1, start + (newChangeEnd - prefix)));
+      return [{ ...field, start, end, sourceText: nextText.slice(start, end) }];
+    }
+    const occurrences = allOccurrences(nextText, field.sourceText);
+    if (!occurrences.length) return [];
+    const nearest = occurrences.sort((a, b) => Math.abs(a - field.start) - Math.abs(b - field.start))[0];
+    return [{ ...field, start: nearest, end: nearest + field.sourceText.length }];
+  });
+}
+
+function allOccurrences(value: string, search: string) {
+  const output: number[] = [];
+  if (!search) return output;
+  let cursor = value.indexOf(search);
+  while (cursor >= 0) {
+    output.push(cursor);
+    cursor = value.indexOf(search, cursor + Math.max(1, search.length));
+  }
+  return output;
 }
 
 function categoryFor(mapping: string, categories: FieldCategory[]) {

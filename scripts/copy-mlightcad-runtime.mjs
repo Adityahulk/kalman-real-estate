@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
@@ -6,6 +6,7 @@ import { build } from "esbuild";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const output = join(root, "public", "cad-runtime");
 const pdfjsOutput = join(root, "public", "pdfjs");
+const ocrOutput = join(root, "public", "ocr");
 
 const assets = [
   ["node_modules/@mlightcad/data-model/dist/dxf-parser-worker.js", "dxf-parser-worker.js"],
@@ -16,10 +17,24 @@ const assets = [
 await mkdir(output, { recursive: true });
 await mkdir(join(output, "assets"), { recursive: true });
 await mkdir(pdfjsOutput, { recursive: true });
+await mkdir(join(ocrOutput, "core"), { recursive: true });
 await copyFile(
   join(root, "node_modules", "pdfjs-dist", "build", "pdf.worker.min.mjs"),
   join(pdfjsOutput, "pdf.worker.min.mjs"),
 );
+await copyFile(
+  join(root, "node_modules", "tesseract.js", "dist", "worker.min.js"),
+  join(ocrOutput, "worker.min.js"),
+);
+await copyFile(
+  join(root, "node_modules", "@tesseract.js-data", "eng", "4.0.0", "eng.traineddata.gz"),
+  join(ocrOutput, "eng.traineddata.gz"),
+);
+for (const file of await readdir(join(root, "node_modules", "tesseract.js-core"))) {
+  if (file.startsWith("tesseract-core") && (file.endsWith(".js") || file.endsWith(".wasm"))) {
+    await copyFile(join(root, "node_modules", "tesseract.js-core", file), join(ocrOutput, "core", file));
+  }
+}
 for (const [source, target] of assets) {
   await copyFile(join(root, source), join(output, target));
   await copyFile(join(root, source), join(output, "assets", target));
