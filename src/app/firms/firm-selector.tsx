@@ -3,6 +3,7 @@
 import { ChangeEvent, FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Building2, Eye, EyeOff, Loader2, Plus, Trash2, Upload } from "lucide-react";
+import { requestJson } from "@/lib/api-client";
 
 type Firm = {
   id: string;
@@ -31,19 +32,19 @@ export function FirmSelector({ firms, customFields }: { firms: Firm[]; customFie
     if (!tenantId) return;
     setLoading(true);
     setMessage("");
-    const response = await fetch("/api/v1/firms/select", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ tenantId }),
-    });
-    const body = await response.json();
-    if (!response.ok) {
+    try {
+      await requestJson<Firm>("/api/v1/firms/select", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tenantId }),
+      });
+      router.push("/app");
+      router.refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not open firm");
+    } finally {
       setLoading(false);
-      setMessage(body.error ?? "Could not open firm");
-      return;
     }
-    router.push("/app");
-    router.refresh();
   }
 
   function readLogo(event: ChangeEvent<HTMLInputElement>) {
@@ -63,27 +64,26 @@ export function FirmSelector({ firms, customFields }: { firms: Firm[]; customFie
     setLoading(true);
     setMessage("");
     const form = new FormData(event.currentTarget);
-    const response = await fetch("/api/v1/firms", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        name: form.get("name"),
-        address: form.get("address"),
-        pan: form.get("pan"),
-        email: form.get("email"),
-        editKey: form.get("editKey"),
-        authorizedPersons: authorizedPersons.filter((person) => person.trim()),
-        logoDataUrl: logoDataUrl || undefined,
-        customFields: Object.fromEntries(customFields.map((field) => [field.key, String(form.get(`custom-${field.key}`) ?? "")])),
-      }),
-    });
-    const body = await response.json();
-    if (!response.ok) {
+    try {
+      const firm = await requestJson<Firm>("/api/v1/firms", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: form.get("name"),
+          address: form.get("address"),
+          pan: form.get("pan"),
+          email: form.get("email"),
+          editKey: form.get("editKey"),
+          authorizedPersons: authorizedPersons.filter((person) => person.trim()),
+          logoDataUrl: logoDataUrl || undefined,
+          customFields: Object.fromEntries(customFields.map((field) => [field.key, String(form.get(`custom-${field.key}`) ?? "")])),
+        }),
+      });
+      await selectFirm(firm.id);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not create firm");
       setLoading(false);
-      setMessage(body.error ?? "Could not create firm");
-      return;
     }
-    await selectFirm(body.data.id);
   }
 
   return (

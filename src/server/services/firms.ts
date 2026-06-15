@@ -48,11 +48,6 @@ export async function firmFieldsForUser(userId: string) {
 }
 
 export async function createFirm(user: SessionUser, input: z.infer<typeof createFirmSchema>) {
-  if (user.role !== Role.PLATFORM_ADMIN && user.role !== Role.BUILDER_OWNER) {
-    const error = new Error("Only a platform admin or firm owner can add a firm");
-    error.name = "ForbiddenError";
-    throw error;
-  }
   const editKeyHash = await bcrypt.hash(input.editKey, 12);
   const slugBase = input.name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "firm";
   const slug = `${slugBase}-${Date.now().toString(36)}`;

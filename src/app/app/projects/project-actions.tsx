@@ -3,6 +3,9 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Building2, Loader2, Plus, Trash2 } from "lucide-react";
+import { requestJson } from "@/lib/api-client";
+
+type CreatedProject = { id: string };
 
 export function CreateProjectForm({ compact = false }: { compact?: boolean }) {
   const router = useRouter();
@@ -22,29 +25,29 @@ export function CreateProjectForm({ compact = false }: { compact?: boolean }) {
     event.preventDefault();
     setLoading(true);
     setMessage("");
-    const response = await fetch("/api/v1/projects", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        name,
-        city,
-        state,
-        address: address || undefined,
-        developmentLicenses: developmentLicenses.filter((value) => value.trim()),
-        reraNumber: reraNumber || undefined,
-        landAreaAcres: landAreaAcres ? Number(landAreaAcres) : undefined,
-        siteContactPhone: siteContactPhone || undefined,
-        totalPlots: Number(totalPlots),
-      }),
-    });
-    const body = await response.json();
-    setLoading(false);
-    if (!response.ok) {
-      setMessage(body.error ?? "Project creation failed");
-      return;
+    try {
+      const project = await requestJson<CreatedProject>("/api/v1/projects", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name,
+          city,
+          state,
+          address: address || undefined,
+          developmentLicenses: developmentLicenses.filter((value) => value.trim()),
+          reraNumber: reraNumber || undefined,
+          landAreaAcres: landAreaAcres ? Number(landAreaAcres) : undefined,
+          siteContactPhone: siteContactPhone || undefined,
+          totalPlots: Number(totalPlots),
+        }),
+      });
+      router.push(`/app/projects/${project.id}`);
+      router.refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Project creation failed");
+    } finally {
+      setLoading(false);
     }
-    router.push(`/app/projects/${body.data.id}`);
-    router.refresh();
   }
 
   return (

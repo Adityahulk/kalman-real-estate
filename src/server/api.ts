@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Role } from "@prisma/client";
+import { Prisma, Role } from "@prisma/client";
 import { z } from "zod";
 import { assertPermission, Permission } from "./rbac";
 import { verifySessionToken } from "./session";
+import { logServerError, namedErrorStatus, prismaStatus } from "./logger";
 
 export type RequestContext = {
   tenantId: string;
@@ -62,26 +63,34 @@ export function created<T>(data: T) {
 }
 
 export function apiError(error: unknown) {
+  if (isNextDynamicServerError(error)) throw error;
+  logServerError(error);
   if (error instanceof z.ZodError) {
     return NextResponse.json({ ok: false, error: "Invalid request", issues: error.issues }, { status: 400 });
   }
 
-  if (error instanceof Error && error.name === "ForbiddenError") {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 403 });
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    const status = prismaStatus(error.code);
+    const message = error.code === "P2002"
+      ? "A record with the same unique details already exists."
+      : error.code === "P2003"
+        ? "This record is still referenced by other data."
+        : error.code === "P2025"
+          ? "The requested record was not found."
+          : "A database operation failed.";
+    return NextResponse.json({ ok: false, error: message }, { status });
   }
 
-  if (error instanceof Error && error.name === "UnauthorizedError") {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 401 });
+  if (error instanceof Error) {
+    const status = namedErrorStatus(error.name);
+    return NextResponse.json(
+      { ok: false, error: status >= 500 ? "Unexpected server error" : error.message },
+      { status },
+    );
   }
+  return NextResponse.json({ ok: false, error: "Unexpected server error" }, { status: 500 });
+}
 
-  if (error instanceof Error && error.name === "BadRequestError") {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
-  }
-
-  if (error instanceof Error && error.name === "NotFoundError") {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 404 });
-  }
-
-  const message = error instanceof Error ? error.message : "Unexpected server error";
-  return NextResponse.json({ ok: false, error: message }, { status: 500 });
+function isNextDynamicServerError(error: unknown) {
+  return error instanceof Error && error.message.startsWith("Dynamic server usage:");
 }

@@ -1,6 +1,7 @@
 import "../styles/globals.css";
 import "ol/ol.css";
 import type { Metadata } from "next";
+import { ClientErrorLogger } from "@/components/client-error-logger";
 
 export const metadata: Metadata = {
   title: {
@@ -15,7 +16,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <ClientErrorLogger />
+        {children}
+      </body>
     </html>
   );
 }

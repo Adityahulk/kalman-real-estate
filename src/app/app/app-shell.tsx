@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
+import { requestJson } from "@/lib/api-client";
 
 type ShellProject = {
   id: string;
@@ -126,18 +127,22 @@ export function AppShell({
   async function switchFirm(tenantId: string) {
     if (!tenantId || tenantId === activeFirmId || switchingFirmId) return;
     setSwitchingFirmId(tenantId);
-    const response = await fetch("/api/v1/firms/select", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ tenantId }),
-    });
-    setSwitchingFirmId("");
-    if (!response.ok) return;
-    window.localStorage.removeItem("kalman-selected-project-id");
-    setFallbackProjectId("");
-    setFirmMenuOpen(false);
-    router.push("/app");
-    router.refresh();
+    try {
+      await requestJson<ShellFirm>("/api/v1/firms/select", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tenantId }),
+      });
+      window.localStorage.removeItem("kalman-selected-project-id");
+      setFallbackProjectId("");
+      setFirmMenuOpen(false);
+      router.push("/app");
+      router.refresh();
+    } catch (error) {
+      console.error("[widestate:switch-firm]", error);
+    } finally {
+      setSwitchingFirmId("");
+    }
   }
 
   const dedicatedCadMode = /^\/app\/cad\/[^/]+\/(studio|review)$/.test(pathname);
