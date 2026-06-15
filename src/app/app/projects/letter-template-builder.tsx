@@ -803,7 +803,11 @@ function rebaseFields(fields: PdfLayoutField[], previous: PdfLayoutBlock, nextTe
       return [{ ...field, start, end, sourceText: nextText.slice(start, end) }];
     }
     const occurrences = allOccurrences(nextText, field.sourceText);
-    if (!occurrences.length) return [];
+    if (!occurrences.length) {
+      const start = Math.min(Math.max(0, prefix), nextText.length);
+      const end = Math.min(nextText.length, Math.max(start + 1, newChangeEnd));
+      return [{ ...field, start, end, sourceText: nextText.slice(start, end) }];
+    }
     const nearest = occurrences.sort((a, b) => Math.abs(a - field.start) - Math.abs(b - field.start))[0];
     return [{ ...field, start: nearest, end: nearest + field.sourceText.length }];
   });

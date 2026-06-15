@@ -9,4 +9,5 @@ next-env.d.ts
 .env.production
 storage/
 public/cad-runtime/
+public/ocr/
 .vercel
