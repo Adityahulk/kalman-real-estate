@@ -483,6 +483,7 @@ function classifyCandidate(entity: BrowserEntity, geometry: Record<string, unkno
   const block = entity.blockPath.join(" ").toUpperCase();
   const text = `${layer} ${block} ${(entity.label ?? "").toUpperCase()}`;
   const closed = geometry.closed === true;
+  const mappedType = mappedEntityType(entity.validation);
 
   if (scope !== CadScope.PROJECT) {
     if (/BATH|TOILET|WC/.test(text)) return CadEntityType.BATHROOM;
@@ -497,6 +498,9 @@ function classifyCandidate(entity: BrowserEntity, geometry: Record<string, unkno
     if (/PARKING|CAR/.test(text)) return CadEntityType.PARKING;
     if (/ROOM|BED|LOUNGE|DINING|HALL/.test(text) && closed) return CadEntityType.ROOM;
   } else {
+    if (mappedType && mappedType !== CadEntityType.UNKNOWN) {
+      if (mappedType !== CadEntityType.PLOT || closed) return mappedType;
+    }
     // A topology-derived, closed cell with a valid plot identifier is stronger
     // evidence than a consultant's layer name. Shared plot boundaries are often
     // drawn on ROAD, SITE, or numeric layers in real project files.
@@ -616,6 +620,26 @@ function normalizedConfidence(entity: BrowserEntity, type: CadEntityType) {
   if (typeof entity.confidence === "number") return Math.min(1, Math.max(0, entity.confidence));
   if (type === CadEntityType.UNKNOWN) return 0.25;
   return isValidPlotLabel(entity.label) || entity.blockPath.length ? 0.88 : 0.68;
+}
+
+function mappedEntityType(validation?: Record<string, unknown>) {
+  const role = typeof validation?.mappedLayerRole === "string"
+    ? validation.mappedLayerRole.toUpperCase()
+    : "";
+  const mapping: Partial<Record<string, CadEntityType>> = {
+    PLOT: CadEntityType.PLOT,
+    ROAD: CadEntityType.ROAD,
+    PARK: CadEntityType.PARK,
+    BOUNDARY: CadEntityType.BOUNDARY,
+    UTILITY: CadEntityType.UTILITY,
+    DRAINAGE: CadEntityType.DRAINAGE,
+    ELECTRICAL_POINT: CadEntityType.ELECTRICAL_POINT,
+    GATE: CadEntityType.GATE,
+    CLUBHOUSE: CadEntityType.CLUBHOUSE,
+    IGNORE: CadEntityType.UNKNOWN,
+    UNKNOWN: CadEntityType.UNKNOWN,
+  };
+  return mapping[role] ?? null;
 }
 
 function deduplicateLayers(layers: z.infer<typeof layerSchema>[]) {

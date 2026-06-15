@@ -10,6 +10,7 @@ import { acdbHostApplicationServices } from "@mlightcad/data-model";
 import {
   extractMlightCadDatabase,
   type BrowserCadExtraction,
+  type BrowserCadLayerRole,
 } from "../src/app/app/cad/[id]/mlightcad/mlightcad-extractor";
 
 type StudioMessage =
@@ -140,6 +141,7 @@ async function onDrawingReady() {
     }, 80);
   };
   acdbHostApplicationServices().layoutManager.events.layoutSwitched.addEventListener(layoutSwitchedListener);
+  post("kalman:studio-layers", { layers: readLayers() });
   post("kalman:studio-ready", { state: readState() });
   if (openOptions?.autoExtract) {
     await runExtraction();
@@ -160,19 +162,20 @@ function executeCommand(command: string, payload: unknown) {
   } else if (command === "get-state") {
     postState();
   } else if (command === "extract") {
-    void runExtraction();
+    void runExtraction(readLayerRoles(payload));
   } else {
     manager.sendStringToExecute(command);
   }
 }
 
-async function runExtraction() {
+async function runExtraction(layerRoles: Record<string, BrowserCadLayerRole> = {}) {
   const manager = currentManager();
   if (!manager || !openOptions) return;
   try {
-    post("kalman:studio-extraction-progress", { message: "Reconstructing individual plots from CAD topology" });
+    post("kalman:studio-extraction-progress", { message: "Reconstructing mapped plot and site polygons" });
     const extraction = extractMlightCadDatabase(
       manager.curDocument.database as unknown as Parameters<typeof extractMlightCadDatabase>[0],
+      { layerRoles },
     );
     await uploadExtraction(
       openOptions.cadFileId,
@@ -201,6 +204,18 @@ function readState(): StudioState {
     hiddenLayers,
     activeLayout: database?.currentSpaceId ? String(database.currentSpaceId) : null,
   };
+}
+
+function readLayers() {
+  const manager = AcApDocManager.instance;
+  const database = manager.curDocument?.database;
+  if (!database?.tables?.layerTable?.newIterator) return [];
+  return Array.from(database.tables.layerTable.newIterator()).map((layer) => ({
+    name: String(layer.name),
+    color: colorString(layer.color),
+    visible: !layer.isOff && !layer.isFrozen,
+    suggestedRole: suggestLayerRole(String(layer.name)),
+  }));
 }
 
 function restoreState(state: Partial<StudioState>) {
@@ -297,6 +312,62 @@ function cadMimeType(fileName: string) {
   return fileName.toLowerCase().endsWith(".dwg")
     ? "application/acad"
     : "application/dxf";
+}
+
+function readLayerRoles(payload: unknown) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return {};
+  const raw = (payload as { layerRoles?: unknown }).layerRoles;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const output: Record<string, BrowserCadLayerRole> = {};
+  for (const [name, role] of Object.entries(raw)) {
+    const normalized = normalizeLayerRole(role);
+    if (normalized) output[name] = normalized;
+  }
+  return output;
+}
+
+function normalizeLayerRole(value: unknown): BrowserCadLayerRole | null {
+  const role = String(value ?? "").trim().toUpperCase();
+  const allowed: BrowserCadLayerRole[] = [
+    "PLOT",
+    "PLOT_LABEL",
+    "ROAD",
+    "PARK",
+    "BOUNDARY",
+    "UTILITY",
+    "DRAINAGE",
+    "ELECTRICAL_POINT",
+    "GATE",
+    "CLUBHOUSE",
+    "IGNORE",
+    "UNKNOWN",
+  ];
+  return allowed.includes(role as BrowserCadLayerRole) ? role as BrowserCadLayerRole : null;
+}
+
+function suggestLayerRole(name: string): BrowserCadLayerRole {
+  const normalized = name.toUpperCase();
+  if (/PLOT.?NO|PLOT.?NUM|PLOT.?ID|PLOT.*(?:TEXT|TXT|LABEL)|(?:^|[-_\s])P?NO(?:[-_\s]|$)|LABEL|NUMBER|NUMBERS/.test(normalized)) return "PLOT_LABEL";
+  if (/PLOT|PARCEL|PCL\b|LOT\b|PROPERTY|SALE|UNIT.?BND|PL\b|PLT\b/.test(normalized)) return "PLOT";
+  if (/ROAD|STREET|R\.?O\.?W\.?|ROW\b|RD\b|LANE|DRIVEWAY|CARRIAGE|PATHWAY|RASTA/.test(normalized)) return "ROAD";
+  if (/PARK|GREEN|GARDEN|LANDSCAPE|OPEN.?SPACE|OPEN\b|OS\b|TOT.?LOT|AMENITY/.test(normalized)) return "PARK";
+  if (/BOUNDARY|PERIMETER|BDY\b|BND\b|SITE.?B|COMPOUND|FENCE|EXTENT|LIMIT/.test(normalized)) return "BOUNDARY";
+  if (/DRAIN|SEWER|STORM|SWD\b|S\.?W\.?D\.?/.test(normalized)) return "DRAINAGE";
+  if (/ELECT|TRANSFORMER|RMU|MPB|HT\b|LT\b|POLE|CABLE|POWER|LIGHT|DB\b|PANEL/.test(normalized)) return "ELECTRICAL_POINT";
+  if (/GATE|ENTRY|ENTRANCE|EXIT|ACCESS/.test(normalized)) return "GATE";
+  if (/CLUB|COMMUNITY|SOCIETY|OFFICE/.test(normalized)) return "CLUBHOUSE";
+  if (/DIM|DIMENSION|ANNO(?!.*PLOT)|TITLE|LEGEND|GRID|CENTER|CENTRE|AXIS|SECTION|DETAIL|REVISION|NORTH/.test(normalized)) return "IGNORE";
+  return "UNKNOWN";
+}
+
+function colorString(color: unknown) {
+  if (!color || typeof color !== "object") return undefined;
+  const value = color as { toCssColor?: () => string };
+  try {
+    return value.toCssColor?.();
+  } catch {
+    return undefined;
+  }
 }
 
 function requiredRoot() {

@@ -10,6 +10,25 @@ export type BrowserCadLayer = {
   color?: string;
   visible: boolean;
   purpose?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type BrowserCadLayerRole =
+  | "PLOT"
+  | "PLOT_LABEL"
+  | "ROAD"
+  | "PARK"
+  | "BOUNDARY"
+  | "UTILITY"
+  | "DRAINAGE"
+  | "ELECTRICAL_POINT"
+  | "GATE"
+  | "CLUBHOUSE"
+  | "IGNORE"
+  | "UNKNOWN";
+
+export type BrowserCadExtractionOptions = {
+  layerRoles?: Record<string, BrowserCadLayerRole>;
 };
 
 export type BrowserCadEntity = {
@@ -72,13 +91,18 @@ const IDENTITY: Matrix = [1, 0, 0, 1, 0, 0];
 const MAX_FLATTENED_ENTITIES = 250_000;
 const MAX_TOPOLOGY_SEGMENTS = 120_000;
 
-export function extractMlightCadDatabase(database: DatabaseLike): BrowserCadExtraction {
+export function extractMlightCadDatabase(
+  database: DatabaseLike,
+  options: BrowserCadExtractionOptions = {},
+): BrowserCadExtraction {
   const bounds = databaseBounds(database);
+  const layerRoles = normalizeLayerRoles(options.layerRoles);
   const layers = Array.from(database.tables.layerTable.newIterator()).map((layer) => ({
     name: layer.name,
     color: colorString(layer.color),
     visible: !layer.isOff && !layer.isFrozen,
-    purpose: inferLayerPurpose(layer.name),
+    purpose: layerPurpose(layer.name, layerRoles),
+    metadata: { role: roleForLayer(layer.name, layerRoles) },
   }));
   const segments: Segment[] = [];
   const texts: TextRecord[] = [];
@@ -91,7 +115,7 @@ export function extractMlightCadDatabase(database: DatabaseLike): BrowserCadExtr
     if (stats.visited >= MAX_FLATTENED_ENTITIES) break;
   }
 
-  const topology = extractTopologyCandidates(segments, closedRings, texts, bounds);
+  const topology = extractTopologyCandidates(segments, closedRings, texts, bounds, layerRoles);
   const entities = deduplicateEntities([...topology.entities, ...assets]);
   return {
     bounds,
@@ -107,6 +131,7 @@ export function extractMlightCadDatabase(database: DatabaseLike): BrowserCadExtr
       plotCandidateCount: entities.filter((entity) => entity.suggestedType === "PLOT").length,
       candidateCount: entities.length,
       textEntityCount: texts.length,
+      layerRoleCount: Object.keys(layerRoles).length,
       parser: "MLightCAD",
       extractionMethod: "topology-v2",
     },
@@ -246,9 +271,11 @@ function extractTopologyCandidates(
   closedRings: RingRecord[],
   texts: TextRecord[],
   bounds: Bounds,
+  layerRoles: Record<string, BrowserCadLayerRole>,
 ) {
   const tolerance = topologyTolerance(bounds, segments);
   const topologySegments = segments
+    .filter((segment) => roleForLayer(segment.layer, layerRoles) !== "IGNORE")
     .slice(0, MAX_TOPOLOGY_SEGMENTS)
     .map((segment) => ({
       ...segment,
@@ -264,11 +291,14 @@ function extractTopologyCandidates(
   const layerByHandle = new Map(topologySegments.map((segment) => [segment.sourceHandle, segment.layer]));
   const rings = deduplicateRings([
     ...polygonized,
-    ...closedRings.map((ring) => ring.points),
+    ...closedRings
+      .filter((ring) => roleForLayer(ring.layer, layerRoles) !== "IGNORE")
+      .map((ring) => ring.points),
   ], tolerance);
-  const validTexts = texts.filter((text) => isValidPlotLabel(text.text));
-  const assignments = assignLabelsToRings(validTexts, rings, topologySegments, bounds);
+  const validTexts = texts.filter((text) => isValidPlotLabel(text.text) && isUsablePlotLabelLayer(text.layer, layerRoles));
+  const assignments = assignLabelsToRings(validTexts, rings, topologySegments, bounds, segmentIndex, layerByHandle, layerRoles);
   const assignedRingKeys = new Set(assignments.map((assignment) => ringKey(assignment.ring, tolerance)));
+  const emittedRingKeys = new Set(assignedRingKeys);
   const labelledAreas = assignments.map((assignment) => polygonArea(assignment.ring)).filter((area) => area > 0);
   const medianArea = median(labelledAreas);
 
@@ -277,22 +307,26 @@ function extractTopologyCandidates(
     const area = polygonArea(assignment.ring);
     const perimeter = polygonPerimeter(assignment.ring);
     const sourceHandle = topologyHandle(assignment.text.text, assignment.ring, index, tolerance);
+    const dominant = dominantLayer(provenance, layerByHandle) || assignment.text.layer || "0";
+    const role = roleForLayer(dominant, layerRoles);
+    const suggestedType = polygonTypeForRole(role) ?? "PLOT";
     return {
       sourceHandle,
       sourceHandles: provenance,
       nativeType: "TOPOLOGY_POLYGON",
-      layer: dominantLayer(provenance, layerByHandle) || assignment.text.layer || "0",
+      layer: dominant,
       blockPath: assignment.text.blockPath,
       label: normalizePlotLabel(assignment.text.text),
       geometry: { type: "polygon", points: assignment.ring, closed: true },
       measurements: { areaCadUnits: area, perimeterCadUnits: perimeter },
-      suggestedType: "PLOT",
-      confidence: assignment.confidence,
+      suggestedType,
+      confidence: suggestedType === "PLOT" ? assignment.confidence : Math.min(assignment.confidence, 0.78),
       validation: {
         extractionMethod: "topology-polygonization",
         sourceHandles: provenance,
         labelSourceHandle: assignment.text.sourceHandle,
         labelMatch: assignment.match,
+        mappedLayerRole: role,
         topologyConfidence: assignment.confidence,
       },
     };
@@ -304,16 +338,24 @@ function extractTopologyCandidates(
       .filter((ring) => {
         const area = polygonArea(ring);
         const ratio = area / medianArea;
+        const provenance = sourceHandlesForRing(ring, segmentIndex, tolerance);
+        const dominant = dominantLayer(provenance, layerByHandle) || "0";
+        const role = roleForLayer(dominant, layerRoles);
+        if (role === "IGNORE" || nonPlotPolygonTypeForRole(role)) return false;
+        if (role === "PLOT") return ratio >= 0.25 && ratio <= 4.5;
         return ratio >= 0.45 && ratio <= 2.2 && nearbyAssignedCount(ring, assignments, medianArea) >= 2;
       })
       .slice(0, 2_000);
     for (const [index, ring] of unlabelled.entries()) {
       const provenance = sourceHandlesForRing(ring, segmentIndex, tolerance);
+      const dominant = dominantLayer(provenance, layerByHandle) || "0";
+      const role = roleForLayer(dominant, layerRoles);
+      emittedRingKeys.add(ringKey(ring, tolerance));
       entities.push({
         sourceHandle: topologyHandle("unlabelled", ring, index, tolerance),
         sourceHandles: provenance,
         nativeType: "TOPOLOGY_POLYGON",
-        layer: dominantLayer(provenance, layerByHandle) || "0",
+        layer: dominant,
         blockPath: [],
         label: null,
         geometry: { type: "polygon", points: ring, closed: true },
@@ -322,14 +364,86 @@ function extractTopologyCandidates(
           perimeterCadUnits: polygonPerimeter(ring),
         },
         suggestedType: "PLOT",
-        confidence: 0.58,
+        confidence: role === "PLOT" ? 0.72 : 0.58,
         validation: {
           extractionMethod: "topology-polygonization",
           sourceHandles: provenance,
+          mappedLayerRole: role,
           blockingCodes: ["MISSING_PLOT_LABEL"],
         },
       });
     }
+  }
+
+  const mappedPlotPolygons = rings
+    .filter((ring) => !emittedRingKeys.has(ringKey(ring, tolerance)))
+    .map((ring) => {
+      const provenance = sourceHandlesForRing(ring, segmentIndex, tolerance);
+      const dominant = dominantLayer(provenance, layerByHandle) || "0";
+      const role = roleForLayer(dominant, layerRoles);
+      return role === "PLOT" ? { ring, provenance, dominant, role } : null;
+    })
+    .filter((value): value is NonNullable<typeof value> => Boolean(value))
+    .slice(0, 2_000);
+
+  for (const [index, candidate] of mappedPlotPolygons.entries()) {
+    emittedRingKeys.add(ringKey(candidate.ring, tolerance));
+    entities.push({
+      sourceHandle: topologyHandle("mapped-unlabelled", candidate.ring, index, tolerance),
+      sourceHandles: candidate.provenance,
+      nativeType: "TOPOLOGY_POLYGON",
+      layer: candidate.dominant,
+      blockPath: [],
+      label: null,
+      geometry: { type: "polygon", points: candidate.ring, closed: true },
+      measurements: {
+        areaCadUnits: polygonArea(candidate.ring),
+        perimeterCadUnits: polygonPerimeter(candidate.ring),
+      },
+      suggestedType: "PLOT",
+      confidence: 0.72,
+      validation: {
+        extractionMethod: "mapped-layer-polygonization",
+        sourceHandles: candidate.provenance,
+        mappedLayerRole: candidate.role,
+        blockingCodes: ["MISSING_PLOT_LABEL"],
+      },
+    });
+  }
+
+  const mappedSitePolygons = rings
+    .filter((ring) => !emittedRingKeys.has(ringKey(ring, tolerance)))
+    .map((ring) => {
+      const provenance = sourceHandlesForRing(ring, segmentIndex, tolerance);
+      const dominant = dominantLayer(provenance, layerByHandle) || "0";
+      const role = roleForLayer(dominant, layerRoles);
+      const suggestedType = nonPlotPolygonTypeForRole(role);
+      return suggestedType ? { ring, provenance, dominant, role, suggestedType } : null;
+    })
+    .filter((value): value is NonNullable<typeof value> => Boolean(value))
+    .slice(0, 1_000);
+
+  for (const [index, candidate] of mappedSitePolygons.entries()) {
+    entities.push({
+      sourceHandle: topologyHandle(candidate.suggestedType.toLowerCase(), candidate.ring, index, tolerance),
+      sourceHandles: candidate.provenance,
+      nativeType: "TOPOLOGY_POLYGON",
+      layer: candidate.dominant,
+      blockPath: [],
+      label: null,
+      geometry: { type: "polygon", points: candidate.ring, closed: true },
+      measurements: {
+        areaCadUnits: polygonArea(candidate.ring),
+        perimeterCadUnits: polygonPerimeter(candidate.ring),
+      },
+      suggestedType: candidate.suggestedType,
+      confidence: 0.74,
+      validation: {
+        extractionMethod: "mapped-layer-polygonization",
+        sourceHandles: candidate.provenance,
+        mappedLayerRole: candidate.role,
+      },
+    });
   }
 
   return { entities, polygonCount: rings.length };
@@ -368,11 +482,16 @@ function assignLabelsToRings(
   rings: Point[][],
   segments: Segment[],
   bounds: Bounds,
+  segmentIndex: RBush<IndexedSegment>,
+  layerByHandle: Map<string, string>,
+  layerRoles: Record<string, BrowserCadLayerRole>,
 ): LabelAssignment[] {
   const diagonal = Math.hypot(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
-  const maxNearestDistance = Math.max(diagonal * 0.0025, topologyTolerance(bounds, segments) * 8);
+  const labelTolerance = topologyTolerance(bounds, segments);
+  const maxNearestDistance = Math.max(diagonal * 0.0025, labelTolerance * 8);
   const proposals: LabelAssignment[] = texts.flatMap((text): LabelAssignment[] => {
     const containing = rings
+      .filter((ring) => canAssignPlotLabel(ring, segmentIndex, layerByHandle, layerRoles, labelTolerance))
       .filter((ring) => pointInPolygon(text.point, ring))
       .sort((first, second) => polygonArea(first) - polygonArea(second));
     if (containing[0]) {
@@ -381,6 +500,7 @@ function assignLabelsToRings(
     let best: Point[] | null = null;
     let bestDistance = Number.POSITIVE_INFINITY;
     for (const ring of rings) {
+      if (!canAssignPlotLabel(ring, segmentIndex, layerByHandle, layerRoles, labelTolerance)) continue;
       const candidateDistance = distance(text.point, polygonCentroid(ring));
       if (candidateDistance < bestDistance) {
         best = ring;
@@ -731,29 +851,114 @@ function median(values: number[]) {
 }
 
 function explicitPointAssetType(value: string) {
-  if (/ELECT|TRANSFORMER|RMU|MPB|POLE|LIGHT|PANEL|DB\b/i.test(value)) return "ELECTRICAL_POINT";
-  if (/GATE|ENTRY|ENTRANCE/i.test(value)) return "GATE";
+  if (/ELECT|TRANSFORMER|RMU|MPB|POLE|LIGHT|PANEL|DB\b|POWER|HT\b|LT\b/i.test(value)) return "ELECTRICAL_POINT";
+  if (/GATE|ENTRY|ENTRANCE|EXIT|ACCESS/i.test(value)) return "GATE";
   if (/UTILITY|WATER|VALVE|HYDRANT/i.test(value)) return "UTILITY";
   return null;
 }
 
 function linearAssetType(value: string) {
-  if (/ROAD|STREET|ROW\b/i.test(value)) return "ROAD";
-  if (/DRAIN|SEWER/i.test(value)) return "DRAINAGE";
-  if (/BOUNDARY|PERIMETER/i.test(value)) return "BOUNDARY";
+  if (/ROAD|STREET|R\.?O\.?W\.?|ROW\b|RD\b|LANE|DRIVEWAY|CARRIAGE|PATHWAY|RASTA/i.test(value)) return "ROAD";
+  if (/DRAIN|SEWER|STORM|SWD\b|S\.?W\.?D\.?/i.test(value)) return "DRAINAGE";
+  if (/BOUNDARY|PERIMETER|BDY\b|BND\b|SITE.?B|COMPOUND|FENCE|EXTENT|LIMIT/i.test(value)) return "BOUNDARY";
   return "UTILITY";
 }
 
 function isLinearAssetLayer(value: string) {
-  return /ROAD|STREET|DRAIN|SEWER|PIPE|CABLE|HT\b|LT\b|WATER|BOUNDARY/i.test(value);
+  return /ROAD|STREET|R\.?O\.?W\.?|ROW\b|RD\b|LANE|DRIVEWAY|DRAIN|SEWER|STORM|SWD\b|PIPE|CABLE|HT\b|LT\b|WATER|BOUNDARY|BDY\b|BND\b|PERIMETER/i.test(value);
+}
+
+function normalizeLayerRoles(input?: Record<string, BrowserCadLayerRole>) {
+  const output: Record<string, BrowserCadLayerRole> = {};
+  for (const [name, role] of Object.entries(input ?? {})) {
+    const normalized = normalizeLayerRole(role);
+    if (normalized && name.trim()) output[name.trim().toUpperCase()] = normalized;
+  }
+  return output;
+}
+
+function normalizeLayerRole(value: unknown): BrowserCadLayerRole | null {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  const allowed: BrowserCadLayerRole[] = [
+    "PLOT",
+    "PLOT_LABEL",
+    "ROAD",
+    "PARK",
+    "BOUNDARY",
+    "UTILITY",
+    "DRAINAGE",
+    "ELECTRICAL_POINT",
+    "GATE",
+    "CLUBHOUSE",
+    "IGNORE",
+    "UNKNOWN",
+  ];
+  return allowed.includes(normalized as BrowserCadLayerRole) ? normalized as BrowserCadLayerRole : null;
+}
+
+function roleForLayer(layer: string, roles: Record<string, BrowserCadLayerRole>) {
+  return roles[layer.trim().toUpperCase()] ?? "UNKNOWN";
+}
+
+function layerPurpose(layer: string, roles: Record<string, BrowserCadLayerRole>) {
+  const role = roleForLayer(layer, roles);
+  if (role === "PLOT") return "Plot boundaries";
+  if (role === "PLOT_LABEL") return "Plot labels";
+  if (role === "ROAD") return "Roads";
+  if (role === "PARK") return "Parks and open spaces";
+  if (role === "BOUNDARY") return "Site boundary";
+  if (role === "UTILITY") return "Utilities";
+  if (role === "DRAINAGE") return "Drainage";
+  if (role === "ELECTRICAL_POINT") return "Electrical";
+  if (role === "GATE") return "Gates and entries";
+  if (role === "CLUBHOUSE") return "Clubhouse";
+  if (role === "IGNORE") return "Ignored by extraction";
+  return inferLayerPurpose(layer);
+}
+
+function polygonTypeForRole(role: BrowserCadLayerRole) {
+  if (role === "PLOT") return "PLOT";
+  return nonPlotPolygonTypeForRole(role);
+}
+
+function nonPlotPolygonTypeForRole(role: BrowserCadLayerRole) {
+  if (role === "ROAD") return "ROAD";
+  if (role === "PARK") return "PARK";
+  if (role === "BOUNDARY") return "BOUNDARY";
+  if (role === "UTILITY") return "UTILITY";
+  if (role === "DRAINAGE") return "DRAINAGE";
+  if (role === "GATE") return "GATE";
+  if (role === "CLUBHOUSE") return "CLUBHOUSE";
+  return null;
+}
+
+function isUsablePlotLabelLayer(layer: string, roles: Record<string, BrowserCadLayerRole>) {
+  const role = roleForLayer(layer, roles);
+  return role !== "IGNORE" && role !== "ROAD" && role !== "PARK" && role !== "BOUNDARY"
+    && role !== "UTILITY" && role !== "DRAINAGE" && role !== "ELECTRICAL_POINT"
+    && role !== "GATE" && role !== "CLUBHOUSE";
+}
+
+function canAssignPlotLabel(
+  ring: Point[],
+  segmentIndex: RBush<IndexedSegment>,
+  layerByHandle: Map<string, string>,
+  layerRoles: Record<string, BrowserCadLayerRole>,
+  tolerance: number,
+) {
+  const provenance = sourceHandlesForRing(ring, segmentIndex, tolerance);
+  const dominant = dominantLayer(provenance, layerByHandle);
+  const role = dominant ? roleForLayer(dominant, layerRoles) : "UNKNOWN";
+  return role !== "IGNORE" && !nonPlotPolygonTypeForRole(role);
 }
 
 function inferLayerPurpose(value: string) {
-  if (/PLOT|PARCEL|LOT\b|SITE|PROPERTY/i.test(value)) return "Plot boundaries";
-  if (/ROAD|STREET/i.test(value)) return "Roads";
-  if (/ELECT|TRANSFORMER|RMU|MPB|HT\b|LT\b|POLE|CABLE/i.test(value)) return "Electrical";
-  if (/DRAIN|SEWER|WATER|PIPE/i.test(value)) return "Utilities";
-  if (/PARK|GREEN|GARDEN/i.test(value)) return "Landscape";
+  if (/PLOT|PARCEL|PCL\b|LOT\b|SITE|PROPERTY|SALE|UNIT.?BND|PL\b|PLT\b/i.test(value)) return "Plot boundaries";
+  if (/ROAD|STREET|R\.?O\.?W\.?|ROW\b|RD\b|LANE|DRIVEWAY|CARRIAGE|PATHWAY|RASTA/i.test(value)) return "Roads";
+  if (/ELECT|TRANSFORMER|RMU|MPB|HT\b|LT\b|POLE|CABLE|POWER|LIGHT|DB\b|PANEL/i.test(value)) return "Electrical";
+  if (/DRAIN|SEWER|STORM|SWD\b|WATER|PIPE|UTILITY/i.test(value)) return "Utilities";
+  if (/PARK|GREEN|GARDEN|LANDSCAPE|OPEN.?SPACE|OS\b|AMENITY/i.test(value)) return "Landscape";
+  if (/BOUNDARY|PERIMETER|BDY\b|BND\b|COMPOUND|FENCE|EXTENT|LIMIT/i.test(value)) return "Site boundary";
   return undefined;
 }
 
