@@ -4,6 +4,8 @@ import Link from "next/link";
 import { FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, Bold, CheckCircle2, Download, Eye, FileText, Italic, Loader2, Plus, Save, Send, Underline, Wand2, X } from "lucide-react";
+import { PdfLayoutBlock, PdfLayoutDocument } from "@/lib/pdf-layout";
+import { PdfLayoutCanvas, PdfLayoutFormattingToolbar } from "./letter-template-builder";
 
 type ProjectInfo = {
   id: string;
@@ -411,6 +413,7 @@ export function LetterStudioEditor({
       mapping: string | null;
       value: string;
     }>;
+    editableLayout?: PdfLayoutDocument | null;
   };
   missingVariables: string[];
   backHref?: string;
@@ -425,6 +428,7 @@ export function LetterStudioEditor({
   const [approvalLoading, setApprovalLoading] = useState<"APPROVED" | "ISSUED" | "REJECTED" | "">("");
   const [dirty, setDirty] = useState(false);
   const isExactPdfTemplate = Boolean(letter.exactPdfTemplate);
+  const isPdfLayout = Boolean(letter.editableLayout);
   const [view, setView] = useState<"edit" | "preview">(isExactPdfTemplate ? "edit" : letter.fileAssetId ? "preview" : "edit");
   const [draftHtml, setDraftHtml] = useState(letter.editableHtml ?? "");
   const [fileAssetId, setFileAssetId] = useState(letter.fileAssetId);
@@ -433,13 +437,14 @@ export function LetterStudioEditor({
   const [exactPdfValues, setExactPdfValues] = useState<Record<string, string>>(
     Object.fromEntries((letter.exactPdfFields ?? []).map((field) => [field.key, field.value])),
   );
+  const [editableLayout, setEditableLayout] = useState<PdfLayoutDocument | null>(letter.editableLayout ?? null);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
   function currentHtml() {
-    if (isExactPdfTemplate) return draftHtml;
+    if (isExactPdfTemplate || isPdfLayout) return draftHtml;
     return editorRef.current?.innerHTML ?? draftHtml;
   }
 
@@ -461,7 +466,11 @@ export function LetterStudioEditor({
     const response = await fetch(`/api/v1/documents/${letter.id}/draft`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ editableHtml, exactPdfValues: isExactPdfTemplate ? exactPdfValues : undefined }),
+      body: JSON.stringify({
+        editableHtml: isPdfLayout ? undefined : editableHtml,
+        editableLayout: isPdfLayout ? editableLayout : undefined,
+        exactPdfValues: isExactPdfTemplate ? exactPdfValues : undefined,
+      }),
     });
     const body = await response.json();
     setLoading("");
@@ -480,7 +489,11 @@ export function LetterStudioEditor({
     const saveResponse = await fetch(`/api/v1/documents/${letter.id}/draft`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ editableHtml, exactPdfValues: isExactPdfTemplate ? exactPdfValues : undefined }),
+      body: JSON.stringify({
+        editableHtml: isPdfLayout ? undefined : editableHtml,
+        editableLayout: isPdfLayout ? editableLayout : undefined,
+        exactPdfValues: isExactPdfTemplate ? exactPdfValues : undefined,
+      }),
     });
     const saveBody = await saveResponse.json();
     if (!saveResponse.ok) {
@@ -564,13 +577,13 @@ export function LetterStudioEditor({
                   PDF Preview
                 </button>
               </div>
-              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("bold")} disabled={view !== "edit" || isExactPdfTemplate}>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("bold")} disabled={view !== "edit" || isExactPdfTemplate || isPdfLayout}>
                 <Bold size={14} />
               </button>
-              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("italic")} disabled={view !== "edit" || isExactPdfTemplate}>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("italic")} disabled={view !== "edit" || isExactPdfTemplate || isPdfLayout}>
                 <Italic size={14} />
               </button>
-              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("underline")} disabled={view !== "edit" || isExactPdfTemplate}>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("underline")} disabled={view !== "edit" || isExactPdfTemplate || isPdfLayout}>
                 <Underline size={14} />
               </button>
               <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={saveDraft} disabled={Boolean(loading)}>
@@ -648,6 +661,14 @@ export function LetterStudioEditor({
           <section className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-card">
             Opening letter studio...
           </section>
+        ) : view === "edit" && isPdfLayout && editableLayout ? (
+          <PdfLayoutDraftEditor
+            layout={editableLayout}
+            onChange={(next) => {
+              setEditableLayout(next);
+              setDirty(true);
+            }}
+          />
         ) : view === "edit" && isExactPdfTemplate ? (
           <ExactPdfDraftEditor
             fields={letter.exactPdfFields ?? []}
@@ -706,6 +727,57 @@ function LetterDraftCanvas({
         className="letter-paper-editor"
         onInput={onInput}
       />
+    </section>
+  );
+}
+
+function PdfLayoutDraftEditor({ layout, onChange }: {
+  layout: PdfLayoutDocument;
+  onChange: (layout: PdfLayoutDocument) => void;
+}) {
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  const selectedBlock = layout.pages.flatMap((page) => page.blocks).find((block) => block.id === selectedBlockId) ?? null;
+
+  function updateBlock(blockId: string, update: (block: PdfLayoutBlock) => PdfLayoutBlock) {
+    onChange({
+      ...layout,
+      pages: layout.pages.map((page) => ({
+        ...page,
+        blocks: page.blocks.map((block) => block.id === blockId ? update(block) : block),
+      })),
+    });
+  }
+
+  return (
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-200/70 shadow-inner">
+      {selectedBlock ? (
+        <PdfLayoutFormattingToolbar
+          block={selectedBlock}
+          onChange={(style) => updateBlock(selectedBlock.id, (block) => ({ ...block, style, changed: true }))}
+        />
+      ) : (
+        <div className="border-b border-slate-200 bg-white px-4 py-2 text-sm text-slate-500">
+          Click any text in the letter to edit or format it.
+        </div>
+      )}
+      <div className="max-h-[calc(100dvh-13rem)] overflow-auto p-3 md:p-6">
+        <PdfLayoutCanvas
+          sourceUrl={`/api/v1/files/${layout.sourceFileId}/download?disposition=inline&proxy=1`}
+          layout={layout}
+          selectedBlockId={selectedBlockId}
+          onBlockSelection={(_event, block) => setSelectedBlockId(block.id)}
+          onBlockChange={(blockId, text, overflow, fittedFontSize) => updateBlock(blockId, (block) => ({
+            ...block,
+            text,
+            style: fittedFontSize && fittedFontSize !== block.style.fontSize
+              ? { ...block.style, fontSize: fittedFontSize, lineHeight: fittedFontSize * (block.style.lineHeight / block.style.fontSize) }
+              : block.style,
+            changed: text !== block.originalText,
+            overflow,
+          }))}
+          onConfirmOcr={(blockId) => updateBlock(blockId, (block) => ({ ...block, confirmed: true }))}
+        />
+      </div>
     </section>
   );
 }

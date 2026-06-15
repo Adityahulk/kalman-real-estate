@@ -4,6 +4,7 @@ import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
 import { ambeyAllotmentTemplate, transferLetterTemplate, registryStatusLetterTemplate } from "./letter-templates";
+import { pdfLayoutDocumentSchema } from "@/lib/pdf-layout";
 
 const templateFieldSchema = z.object({
   id: z.string().min(1),
@@ -27,6 +28,18 @@ export const saveProjectLetterTemplateSchema = z.object({
   body: z.string().min(20).optional(),
   sourceFileId: z.string().optional(),
   fields: z.array(templateFieldSchema).default([]),
+});
+
+export const importPdfTemplateSchema = z.object({
+  name: z.string().min(2).max(120),
+  type: z.enum(["allotment_letter", "transfer_letter", "registry_status_letter"]),
+  sourceFileId: z.string().min(1),
+  layoutData: pdfLayoutDocumentSchema,
+});
+
+export const updatePdfTemplateLayoutSchema = z.object({
+  name: z.string().min(2).max(120).optional(),
+  layoutData: pdfLayoutDocumentSchema,
 });
 
 function defaultLetterBody(type: string): string {
@@ -67,6 +80,66 @@ export async function deleteProjectLetterTemplate(context: RequestContext, id: s
   const deleted = await prisma.documentTemplate.delete({ where: { id } });
   await writeAuditEvent(context, { action: AuditAction.DELETE, entityType: "DocumentTemplate", entityId: id, before: template as unknown as Prisma.InputJsonValue });
   return deleted;
+}
+
+export async function importPdfTemplate(context: RequestContext, projectId: string, input: z.infer<typeof importPdfTemplateSchema>) {
+  await prisma.project.findFirstOrThrow({ where: { id: projectId, tenantId: context.tenantId } });
+  await prisma.fileAsset.findFirstOrThrow({ where: { id: input.sourceFileId, tenantId: context.tenantId, deletedAt: null } });
+  if (input.layoutData.sourceFileId !== input.sourceFileId) throwBadRequest("PDF layout does not match the uploaded source file.");
+  const template = await prisma.documentTemplate.create({
+    data: {
+      tenantId: context.tenantId,
+      projectId,
+      sourceFileId: input.sourceFileId,
+      name: input.name,
+      type: input.type,
+      body: "<div data-pdf-layout-template=\"true\"></div>",
+      variables: { fields: input.layoutData.fields } as Prisma.InputJsonValue,
+      editorMode: "PDF_LAYOUT",
+      analysisStatus: "READY",
+      layoutData: input.layoutData as unknown as Prisma.InputJsonValue,
+      layoutVersion: 1,
+      active: false,
+    },
+  });
+  await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "DocumentTemplate", entityId: template.id, after: template as unknown as Prisma.InputJsonValue });
+  return template;
+}
+
+export async function getPdfTemplateAnalysis(context: RequestContext, projectId: string, templateId: string) {
+  return prisma.documentTemplate.findFirstOrThrow({
+    where: { id: templateId, projectId, tenantId: context.tenantId, editorMode: "PDF_LAYOUT" },
+  });
+}
+
+export async function updatePdfTemplateLayout(context: RequestContext, projectId: string, templateId: string, input: z.infer<typeof updatePdfTemplateLayoutSchema>) {
+  const before = await getPdfTemplateAnalysis(context, projectId, templateId);
+  if (input.layoutData.sourceFileId !== before.sourceFileId) throwBadRequest("PDF layout does not match the template source file.");
+  const template = await prisma.documentTemplate.update({
+    where: { id: templateId },
+    data: {
+      name: input.name,
+      layoutData: input.layoutData as unknown as Prisma.InputJsonValue,
+      variables: { fields: input.layoutData.fields } as Prisma.InputJsonValue,
+      analysisStatus: "READY",
+      analysisError: null,
+      layoutVersion: { increment: 1 },
+    },
+  });
+  await writeAuditEvent(context, { action: AuditAction.UPDATE, entityType: "DocumentTemplate", entityId: template.id, before: before as unknown as Prisma.InputJsonValue, after: template as unknown as Prisma.InputJsonValue });
+  return template;
+}
+
+export async function activatePdfTemplate(context: RequestContext, projectId: string, templateId: string) {
+  const template = await getPdfTemplateAnalysis(context, projectId, templateId);
+  pdfLayoutDocumentSchema.parse(template.layoutData);
+  return prisma.$transaction(async (tx) => {
+    await tx.documentTemplate.updateMany({
+      where: { tenantId: context.tenantId, projectId, type: template.type, active: true },
+      data: { active: false },
+    });
+    return tx.documentTemplate.update({ where: { id: template.id }, data: { active: true } });
+  });
 }
 
 export function templateFields(value: unknown) {

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getSessionUser } from "@/server/session";
 import { prisma } from "@/server/db";
 import { LetterStudioEditor } from "../../../../../workflow-action-forms";
+import { pdfLayoutDocumentSchema } from "@/lib/pdf-layout";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,9 @@ export default async function LetterStudioPage({ params }: { params: { projectId
           fileAssetId: document.fileAssetId,
           exactPdfTemplate: hasExactPdfTemplate(document.data),
           exactPdfFields: exactPdfFields(document.data),
+          editableLayout: pdfLayoutDocumentSchema.safeParse(document.editableLayout).success
+            ? pdfLayoutDocumentSchema.parse(document.editableLayout)
+            : null,
         }}
         missingVariables={missingVariables}
         backHref={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=documents`}

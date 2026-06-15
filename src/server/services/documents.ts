@@ -1,4 +1,4 @@
-import { AuditAction, DocumentStatus, FileVisibility, Prisma, RealEstateDocumentType } from "@prisma/client";
+import { AuditAction, DocumentStatus, FileVisibility, GeneratedDocument, Prisma, RealEstateDocumentType } from "@prisma/client";
 import { z } from "zod";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
@@ -10,7 +10,8 @@ import { buildGeneratedDocumentPdf, buildGeneratedDocumentPdfFromHtml } from "./
 import { createNotification } from "./notifications";
 import { ambeyAllotmentTemplate, registryStatusLetterTemplate, transferLetterTemplate } from "./letter-templates";
 import { templateFields } from "./document-templates";
-import { buildPdfFromExactTemplate, type PdfTemplateField } from "./pdf-template-render";
+import { buildPdfFromExactTemplate, buildPdfFromLayout, type PdfTemplateField } from "./pdf-template-render";
+import { pdfLayoutBlockingIssues, pdfLayoutDocumentSchema, resolvePdfLayoutFields } from "@/lib/pdf-layout";
 
 export const generateDocumentSchema = z.object({
   templateId: z.string().optional(),
@@ -28,9 +29,10 @@ export const createDocumentDraftSchema = z.object({
 });
 
 export const updateDocumentDraftSchema = z.object({
-  editableHtml: z.string().min(20),
+  editableHtml: z.string().min(20).optional(),
+  editableLayout: pdfLayoutDocumentSchema.optional(),
   exactPdfValues: z.record(z.string()).optional(),
-});
+}).refine((input) => input.editableHtml || input.editableLayout, "An editable document draft is required.");
 
 export async function generateDocument(context: RequestContext, input: z.infer<typeof generateDocumentSchema>) {
   const count = await prisma.generatedDocument.count({ where: { tenantId: context.tenantId, type: input.type } });
@@ -105,6 +107,42 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
       ? snapshot.variables[field.mapping] || fallback
       : snapshot.variables[`manual.${field.key}`] || fallback;
   }
+  if (template?.editorMode === "PDF_LAYOUT") {
+    const sourceLayout = pdfLayoutDocumentSchema.parse(template.layoutData);
+    for (const field of sourceLayout.fields) {
+      const fallback = field.sourceText || field.label;
+      snapshot.variables[`field.${field.id}`] = field.mapping
+        ? snapshot.variables[field.mapping] || fallback
+        : snapshot.variables[`manual.${field.key}`] || fallback;
+    }
+    const editableLayout = resolvePdfLayoutFields(sourceLayout, snapshot.variables);
+    const missingVariables = sourceLayout.fields
+      .filter((field) => field.mapping && !snapshot.variables[field.mapping])
+      .map((field) => field.mapping as string);
+    const document = await prisma.generatedDocument.create({
+      data: {
+        tenantId: context.tenantId,
+        templateId: template.id,
+        type: input.type,
+        recordType: input.recordType,
+        recordId: input.recordId,
+        data: {
+          ...snapshot,
+          templateBody: template.body,
+          pdfLayoutTemplate: true,
+          missingVariables,
+        } as Prisma.InputJsonValue,
+        editableHtml: null,
+        editableLayout: editableLayout as unknown as Prisma.InputJsonValue,
+        status: DocumentStatus.DRAFT,
+        number: documentNumber,
+        createdById: context.userId,
+      },
+    });
+    await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "GeneratedDocument", entityId: document.id, after: document as unknown as Prisma.InputJsonValue });
+    return { document, missingVariables };
+  }
+
   const templateSourceFileId = sourceFileIdOfTemplate(template);
   const exactPdfTemplate = templateSourceFileId && configuredFields.some((field) => field.rects?.length)
     ? {
@@ -153,6 +191,7 @@ export async function updateDocumentDraft(context: RequestContext, id: string, i
     where: { id },
     data: {
       editableHtml: input.editableHtml,
+      editableLayout: input.editableLayout as unknown as Prisma.InputJsonValue | undefined,
       data: input.exactPdfValues
         ? {
             ...beforeData,
@@ -175,6 +214,21 @@ export async function updateDocumentDraft(context: RequestContext, id: string, i
 export async function renderDocumentDraft(context: RequestContext, id: string) {
   const document = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
   const tenant = await prisma.tenant.findUnique({ where: { id: context.tenantId } });
+  const editableLayout = pdfLayoutDocumentSchema.safeParse(document.editableLayout);
+  if (editableLayout.success) {
+    const blockingIssues = pdfLayoutBlockingIssues(editableLayout.data);
+    if (blockingIssues.length) {
+      const error = new Error(blockingIssues.join(". "));
+      error.name = "BadRequestError";
+      throw error;
+    }
+    const source = await prisma.fileAsset.findFirstOrThrow({
+      where: { id: editableLayout.data.sourceFileId, tenantId: context.tenantId, deletedAt: null },
+    });
+    const sourceBytes = await getObjectResilient(source.storageKey);
+    const pdf = await buildPdfFromLayout({ bytes: sourceBytes, layout: editableLayout.data });
+    return persistRenderedDocument(context, document, pdf);
+  }
   const exactPdfTemplate = exactPdfTemplateFromData(document.data);
   if (exactPdfTemplate) {
     const data = jsonRecord(document.data);
@@ -198,6 +252,14 @@ export async function renderDocumentDraft(context: RequestContext, id: string) {
     tenantName: tenant?.name ?? "WIDESTATE OS",
     html,
   });
+  return persistRenderedDocument(context, document, pdf);
+}
+
+async function persistRenderedDocument(
+  context: RequestContext,
+  document: GeneratedDocument,
+  pdf: Buffer,
+) {
   const key = generatedDocumentStorageKey(context.tenantId, document.id);
   const stored = await putGeneratedObject(key, pdf, "application/pdf");
   const file = await createGeneratedFileAsset(context, {
@@ -213,7 +275,7 @@ export async function renderDocumentDraft(context: RequestContext, id: string) {
     ownerId: document.recordId,
   });
   const rendered = await prisma.generatedDocument.update({
-    where: { id },
+    where: { id: document.id },
     data: {
       fileAssetId: file.id,
       status: DocumentStatus.GENERATED,
@@ -225,7 +287,7 @@ export async function renderDocumentDraft(context: RequestContext, id: string) {
     body: `${rendered.number ?? rendered.type} is ready to review.`,
     data: { documentId: rendered.id, fileAssetId: file.id },
   });
-  await writeAuditEvent(context, { action: AuditAction.UPDATE, entityType: "GeneratedDocument", entityId: id, after: rendered as unknown as Prisma.InputJsonValue });
+  await writeAuditEvent(context, { action: AuditAction.UPDATE, entityType: "GeneratedDocument", entityId: document.id, after: rendered as unknown as Prisma.InputJsonValue });
   return { document: rendered, file, storage: stored };
 }
 
@@ -235,6 +297,23 @@ export const approveDocumentSchema = z.object({
 });
 
 export async function approveDocument(context: RequestContext, id: string, input: z.infer<typeof approveDocumentSchema>) {
+  const current = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  if (input.status === "APPROVED" || input.status === "ISSUED") {
+    if (!current.fileAssetId) {
+      const error = new Error("Generate the PDF before approving or issuing it.");
+      error.name = "BadRequestError";
+      throw error;
+    }
+    const layout = pdfLayoutDocumentSchema.safeParse(current.editableLayout);
+    if (layout.success) {
+      const issues = pdfLayoutBlockingIssues(layout.data);
+      if (issues.length) {
+        const error = new Error(issues.join(". "));
+        error.name = "BadRequestError";
+        throw error;
+      }
+    }
+  }
   const document = await prisma.generatedDocument.update({
     where: { id, tenantId: context.tenantId },
     data: {

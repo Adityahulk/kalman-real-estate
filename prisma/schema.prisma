@@ -734,17 +734,22 @@ model FileAsset {
 }
 
 model DocumentTemplate {
-  id           String   @id @default(cuid())
-  tenantId     String
-  projectId    String?
-  sourceFileId String?
-  name         String
-  type         String
-  body         String
-  variables    Json?
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id             String   @id @default(cuid())
+  tenantId       String
+  projectId      String?
+  sourceFileId   String?
+  name           String
+  type           String
+  body           String
+  variables      Json?
+  editorMode     String   @default("HTML")
+  analysisStatus String   @default("READY")
+  layoutData     Json?
+  analysisError  String?
+  layoutVersion Int      @default(1)
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
@@ -762,6 +767,7 @@ model GeneratedDocument {
   fileAssetId  String?
   number       String?
   editableHtml String?
+  editableLayout Json?
   data         Json
   createdById  String?
   approvedById String?
