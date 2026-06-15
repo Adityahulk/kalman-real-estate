@@ -3,6 +3,7 @@ import { z } from "zod";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
+import { ambeyAllotmentTemplate, transferLetterTemplate, registryStatusLetterTemplate } from "./letter-templates";
 
 const templateFieldSchema = z.object({
   id: z.string().min(1),
@@ -15,14 +16,23 @@ const templateFieldSchema = z.object({
 export const saveProjectLetterTemplateSchema = z.object({
   name: z.string().min(2).max(120),
   type: z.enum(["allotment_letter", "transfer_letter", "registry_status_letter"]).default("allotment_letter"),
-  body: z.string().min(20),
+  body: z.string().min(20).optional(),
   sourceFileId: z.string().optional(),
   fields: z.array(templateFieldSchema).default([]),
 });
 
+function defaultLetterBody(type: string): string {
+  if (type === "transfer_letter") return transferLetterTemplate();
+  if (type === "registry_status_letter") return registryStatusLetterTemplate();
+  return ambeyAllotmentTemplate();
+}
+
 export async function saveProjectLetterTemplate(context: RequestContext, projectId: string, input: z.infer<typeof saveProjectLetterTemplateSchema>) {
   await prisma.project.findFirstOrThrow({ where: { id: projectId, tenantId: context.tenantId } });
   if (input.sourceFileId) await prisma.fileAsset.findFirstOrThrow({ where: { id: input.sourceFileId, tenantId: context.tenantId, deletedAt: null } });
+  // When a PDF is the source (no custom HTML body provided), use the default letter template.
+  // The PDF is used purely for visual field mapping, not as the body content.
+  const body = input.body ?? defaultLetterBody(input.type);
   await prisma.documentTemplate.updateMany({
     where: { tenantId: context.tenantId, projectId, type: input.type, active: true },
     data: { active: false },
@@ -34,7 +44,7 @@ export async function saveProjectLetterTemplate(context: RequestContext, project
       sourceFileId: input.sourceFileId,
       name: input.name,
       type: input.type,
-      body: input.body,
+      body,
       variables: { fields: input.fields } as Prisma.InputJsonValue,
       active: true,
     },

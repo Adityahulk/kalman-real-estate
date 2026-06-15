@@ -109,43 +109,15 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: { pr
     setFields((items) => items.filter((field) => field.id !== id));
   }
 
-  /**
-   * Builds the template body as structured letter HTML that is fully compatible with
-   * the downstream letter generation pipeline (isLetterStudioHtml → buildLetterStudioPdfFromHtml).
-   *
-   * When the viewer shows live PDF pages (canvas + textLayer), we extract the text
-   * content from each page's textLayer — preserving any <mark data-template-field>
-   * field tokens the user inserted — and wrap it in <section data-letter-page> sections.
-   *
-   * When the viewer shows an already-saved body (loaded from a saved template), we
-   * return that HTML directly since it already has the right structure.
-   */
-  function buildBodyHtml(): string {
-    if (!viewerRef.current) return "";
-
-    const pdfPages = viewerRef.current.querySelectorAll<HTMLElement>(".pdf-template-page");
-
-    // No canvas-based pages → viewer is showing a previously-saved letter body
-    if (!pdfPages.length) return viewerRef.current.innerHTML;
-
-    const sections = Array.from(pdfPages).map((page, index) => {
-      const textLayer = page.querySelector<HTMLElement>(".textLayer");
-      const pageHtml = textLayer ? extractLetterPageHtml(textLayer) : "";
-      return `<section data-letter-page="${index + 1}" data-top="790">${pageHtml}</section>`;
-    }).join("\n\n");
-
-    return `<div data-letter-template="pdf-source">\n${sections}\n</div>`;
-  }
-
   async function save() {
     if (!pdfLoaded) return setMessage("Upload a PDF and prepare the template first.");
-    const body = buildBodyHtml();
-    if (!body.trim()) return setMessage("Upload a PDF and prepare the template first.");
     setLoading(true);
+    // Body is intentionally omitted — the server uses the default allotment letter template.
+    // The PDF is purely a visual reference for selecting and mapping field definitions.
     const response = await fetch(`/api/v1/projects/${projectId}/letter-templates`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, type: "allotment_letter", body, fields, sourceFileId }),
+      body: JSON.stringify({ name, type: "allotment_letter", fields, sourceFileId }),
     });
     const result = await response.json();
     setLoading(false);
@@ -163,6 +135,7 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: { pr
     setName(template.name);
     setFields(template.fields);
     setSourceFileId(template.sourceFileId ?? undefined);
+    // Show the stored body so field markers remain visible for reference
     if (viewerRef.current) viewerRef.current.innerHTML = template.body;
     setPdfLoaded(true);
   }
@@ -188,10 +161,10 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: { pr
     <aside className="space-y-4">
       <section className="rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="font-semibold">Letter fields</h2>
-        <p className="mt-1 text-xs text-slate-500">Mapped fields auto-fill. Manual fields are requested during allotment.</p>
+        <p className="mt-1 text-xs text-slate-500">Select text from your PDF to create a field, then map it to a system variable. The letter itself uses the standard allotment template.</p>
         <div className="mt-4 space-y-3">
           {fields.map((field) => <FieldEditor field={field} categories={categories} key={field.id} onChange={(next) => setFields((items) => items.map((item) => item.id === field.id ? next : item))} onDelete={() => removeField(field.id)} />)}
-          {!fields.length ? <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">Select text inside the document, then add it as a field.</div> : null}
+          {!fields.length ? <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">Select text inside the PDF, then click &quot;Add selected text as field&quot;.</div> : null}
         </div>
       </section>
       <section className="rounded-lg border border-slate-200 bg-white p-4">
@@ -200,88 +173,6 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: { pr
       </section>
     </aside>
   </div>;
-}
-
-/**
- * Extracts readable paragraph-structured HTML from a pdf.js textLayer.
- *
- * Approach:
- * 1. Collect all text spans (and any top-level <mark> field tokens inserted by the user).
- * 2. Sort by their rendered screen position (top → bottom, left → right).
- * 3. Cluster into lines (spans within 2 px vertically).
- * 4. Cluster lines into paragraphs (gap > 1.6× the median inter-line gap).
- * 5. Output <p> elements with <br> for intra-paragraph line breaks,
- *    preserving any <mark data-template-field> tokens intact.
- *
- * The resulting HTML is compatible with renderSection() in ambey-allotment-pdf.ts
- * and renders correctly in both LetterStudioEditor and buildLetterStudioPdfFromHtml().
- */
-function extractLetterPageHtml(textLayer: HTMLElement): string {
-  type Chunk = { top: number; left: number; html: string };
-  const chunks: Chunk[] = [];
-
-  function spanHtml(el: HTMLElement): string {
-    let out = "";
-    for (const child of Array.from(el.childNodes)) {
-      if (child.nodeType === Node.TEXT_NODE) {
-        const t = (child.textContent ?? "").replace(/\s+/g, " ");
-        if (t.trim()) out += t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      } else {
-        const c = child as HTMLElement;
-        if (c.tagName === "MARK" && c.dataset.templateField) out += c.outerHTML;
-      }
-    }
-    return out;
-  }
-
-  for (const child of Array.from(textLayer.children) as HTMLElement[]) {
-    const rect = child.getBoundingClientRect();
-    if (child.tagName === "MARK" && child.dataset.templateField) {
-      // Field token inserted at a span boundary (direct child of textLayer)
-      chunks.push({ top: rect.top, left: rect.left, html: child.outerHTML });
-    } else if (child.tagName === "SPAN") {
-      const html = spanHtml(child);
-      if (html) chunks.push({ top: rect.top, left: rect.left, html });
-    }
-    // br and markedContent structural divs are skipped intentionally
-  }
-
-  if (!chunks.length) return "";
-
-  // Sort top-to-bottom, left-to-right
-  chunks.sort((a, b) => a.top !== b.top ? a.top - b.top : a.left - b.left);
-
-  // Cluster into lines (within 2 px of each other vertically)
-  const lines: Array<{ avgTop: number; parts: string[] }> = [];
-  for (const chunk of chunks) {
-    const last = lines[lines.length - 1];
-    if (last && Math.abs(chunk.top - last.avgTop) <= 2) {
-      last.parts.push(chunk.html);
-    } else {
-      lines.push({ avgTop: chunk.top, parts: [chunk.html] });
-    }
-  }
-
-  // Compute median inter-line gap to detect paragraph breaks
-  const gaps = lines.slice(1).map((l, i) => l.avgTop - lines[i].avgTop).filter((g) => g > 0.5);
-  const sorted = [...gaps].sort((a, b) => a - b);
-  const medianGap = sorted[Math.floor(sorted.length / 2)] ?? 14;
-
-  // Cluster lines into paragraphs
-  const paragraphs: string[] = [];
-  let current: string[] = [];
-
-  for (let i = 0; i < lines.length; i++) {
-    current.push(lines[i].parts.join(" "));
-    const gap = i + 1 < lines.length ? lines[i + 1].avgTop - lines[i].avgTop : 9999;
-    if (gap > medianGap * 1.6) {
-      paragraphs.push(`<p>${current.join("<br>")}</p>`);
-      current = [];
-    }
-  }
-  if (current.length) paragraphs.push(`<p>${current.join("<br>")}</p>`);
-
-  return paragraphs.join("\n");
 }
 
 async function uploadTemplateSource(file: File) {
