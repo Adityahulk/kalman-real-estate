@@ -3,6 +3,7 @@
 import { ChangeEvent, useRef, useState } from "react";
 import { Loader2, Plus, Save, Trash2, UploadCloud } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { createClientId } from "@/lib/id";
 import { loadBrowserPdfJs } from "@/lib/pdfjs-browser";
 
 type TemplateField = { id: string; label: string; sourceText?: string; key: string; mapping: string | null };
@@ -91,7 +92,7 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: { pr
     const range = selectionRef.current;
     const selected = range?.toString().trim();
     if (!range || !selected) return setMessage("Select text in the document first.");
-    const id = crypto.randomUUID();
+    const id = createClientId();
     const field: TemplateField = { id, label: selected.slice(0, 100), sourceText: selected, key: keyFromLabel(selected, fields), mapping: null };
     range.deleteContents();
     const marker = document.createElement("mark");
