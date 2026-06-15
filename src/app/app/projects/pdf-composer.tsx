@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, CheckCircle2, Download, Eye, FilePlus2, Loader2, RefreshCcw, Trash2, UploadCloud } from "lucide-react";
+import { loadBrowserPdfJs } from "@/lib/pdfjs-browser";
 
 type RevisionOperation = {
   id: string;
@@ -373,11 +374,10 @@ export function PdfComposer({
 
 async function renderThumbnails(fileAssetId: string, pageCount: number) {
   if (!pageCount) return [];
-  const pdfjs = await import("pdfjs-dist");
+  const pdfjs = await loadBrowserPdfJs();
   const task = pdfjs.getDocument({
     url: `/api/v1/files/${fileAssetId}/download?disposition=inline&proxy=1`,
-    disableWorker: true,
-  } as never);
+  });
   const pdf = await task.promise;
   const images: string[] = [];
   for (let pageNo = 1; pageNo <= pdf.numPages; pageNo += 1) {

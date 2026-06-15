@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, PointerEvent, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Building2, Loader2, Minus, Plus, Route, Wrench, ZoomIn } from "lucide-react";
 
@@ -8,12 +8,15 @@ export function ManualPlotForm({ projectId, cadFileId }: { projectId: string; ca
   const router = useRouter();
   const [code, setCode] = useState("");
   const [areaSqYards, setAreaSqYards] = useState("");
-  const [priceInr, setPriceInr] = useState("");
   const [primeLocation, setPrimeLocation] = useState("");
+  const [allottedBy, setAllottedBy] = useState("");
+  const [dimensions, setDimensions] = useState("");
   const [boundaries, setBoundaries] = useState({ north: "", south: "", east: "", west: "" });
   const [zoom, setZoom] = useState(100);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const mapViewport = useRef<HTMLDivElement>(null);
+  const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -25,8 +28,9 @@ export function ManualPlotForm({ projectId, cadFileId }: { projectId: string; ca
       body: JSON.stringify({
         code,
         areaSqYards: areaSqYards ? Number(areaSqYards) : undefined,
-        priceInr: priceInr ? Number(priceInr) : undefined,
         primeLocation: primeLocation || undefined,
+        allottedBy: allottedBy || undefined,
+        dimensions: dimensions || undefined,
         boundaries,
       }),
     });
@@ -39,6 +43,20 @@ export function ManualPlotForm({ projectId, cadFileId }: { projectId: string; ca
     router.push(`/app/projects/${projectId}/ownership?created=${encodeURIComponent(body.data.plot.code)}`);
   }
 
+  function startPan(event: PointerEvent<HTMLDivElement>) {
+    const viewport = mapViewport.current;
+    if (!viewport) return;
+    viewport.setPointerCapture(event.pointerId);
+    drag.current = { x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
+  }
+
+  function pan(event: PointerEvent<HTMLDivElement>) {
+    const viewport = mapViewport.current;
+    if (!viewport || !drag.current) return;
+    viewport.scrollLeft = drag.current.left - (event.clientX - drag.current.x);
+    viewport.scrollTop = drag.current.top - (event.clientY - drag.current.y);
+  }
+
   return (
     <form onSubmit={submit} className="grid gap-5">
       <section className="rounded-xl border border-slate-200 bg-white p-5">
@@ -49,8 +67,9 @@ export function ManualPlotForm({ projectId, cadFileId }: { projectId: string; ca
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <label><span className="label">Plot code</span><input className="input" value={code} onChange={(event) => setCode(event.target.value)} placeholder="A-101" /></label>
           <label><span className="label">Plot area (square yards)</span><input className="input" inputMode="decimal" value={areaSqYards} onChange={(event) => setAreaSqYards(event.target.value)} /></label>
-          <label><span className="label">Sale price</span><input className="input" inputMode="numeric" value={priceInr} onChange={(event) => setPriceInr(event.target.value)} /></label>
           <label><span className="label">Prime location <span className="font-normal text-slate-400">(optional)</span></span><input className="input" value={primeLocation} onChange={(event) => setPrimeLocation(event.target.value)} placeholder="Corner, park facing, main road..." /></label>
+          <label><span className="label">Who is allotting</span><input className="input" value={allottedBy} onChange={(event) => setAllottedBy(event.target.value)} placeholder="Name / designation" /></label>
+          <label><span className="label">Dimensions</span><input className="input" value={dimensions} onChange={(event) => setDimensions(event.target.value)} placeholder="For example, 30 ft x 60 ft" /></label>
       </div>
       </section>
 
@@ -68,7 +87,7 @@ export function ManualPlotForm({ projectId, cadFileId }: { projectId: string; ca
             </div>
           ) : null}
         </div>
-        <div className="mt-4 h-72 overflow-auto rounded-lg border border-slate-200 bg-slate-50">
+        <div ref={mapViewport} className="mt-4 h-72 cursor-grab touch-none overflow-auto rounded-lg border border-slate-200 bg-slate-50 active:cursor-grabbing" onPointerDown={startPan} onPointerMove={pan} onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }}>
           {cadFileId ? (
             <img
               src={`/api/v1/cad/${cadFileId}/preview`}

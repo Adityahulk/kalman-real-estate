@@ -112,7 +112,7 @@ const constructionFeatures = [
 ];
 
 const costFeatures = [
-  "Project budgets, BOQ quantities and CAD-linked measurements",
+  "Project budgets, BOQ quantities and map-linked measurements",
   "Vendors, contractors, purchase orders, invoices and payments",
   "Planned versus actual quantity and consumption variance",
   "Human-reviewed AI summaries for cost, delay and wastage risks",

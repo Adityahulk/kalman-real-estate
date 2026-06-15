@@ -4,6 +4,7 @@ import { getSessionUser } from "@/server/session";
 import { prisma } from "@/server/db";
 import { ActionHint, ActionPageShell } from "../../../action-page-shell";
 import { ProjectAllotmentFlow } from "../../../workflow-action-forms";
+import { templateFields } from "@/server/services/document-templates";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +19,7 @@ export default async function NewAllotmentPage({
   if (!session) return null;
   const project = await prisma.project.findFirst({ where: { id: params.projectId, tenantId: session.tenantId } });
   if (!project) notFound();
-  const [plots, firm] = await Promise.all([
+  const [plots, firm, letterTemplate] = await Promise.all([
     prisma.plot.findMany({
       where: { tenantId: session.tenantId, projectId: project.id, status: PlotStatus.COMPANY_OWNED, archivedAt: null },
       orderBy: { code: "asc" },
@@ -28,6 +29,7 @@ export default async function NewAllotmentPage({
       where: { id: session.tenantId },
       select: { name: true, address: true, pan: true, contactEmail: true, authorizedPersons: true },
     }),
+    prisma.documentTemplate.findFirst({ where: { tenantId: session.tenantId, projectId: project.id, type: "allotment_letter", active: true }, orderBy: { createdAt: "desc" } }),
   ]);
   const authorizedPersons = Array.isArray(firm.authorizedPersons)
     ? firm.authorizedPersons.map((person) => {
@@ -56,6 +58,7 @@ export default async function NewAllotmentPage({
           priceInr: plot.priceInr?.toString() ?? null,
         }))}
         firm={{ ...firm, authorizedPersons }}
+        manualLetterFields={templateFields(letterTemplate?.variables).filter((field) => !field.mapping).map((field) => ({ key: field.key, label: field.label }))}
       />
     </ActionPageShell>
   );

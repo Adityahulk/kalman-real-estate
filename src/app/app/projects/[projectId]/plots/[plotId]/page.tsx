@@ -97,7 +97,8 @@ export default async function ProjectPlotWorkspacePage({
                 <Info label="Plot code" value={plot.code} />
                 <Info label="Area" value={`${plot.areaSqYards?.toString() ?? (plot.areaSqft ? String(Number(plot.areaSqft) / 9) : "-")} sq yd`} />
                 <Info label="Prime location" value={plot.primeLocation ?? "-"} />
-                <Info label="Sale price" value={plot.priceInr ? fullInr(Number(plot.priceInr)) : "-"} />
+                <Info label="Who allotted" value={plot.allottedBy ?? "-"} />
+                <Info label="Dimensions" value={plot.dimensions ?? "-"} />
                 <Info label="North boundary" value={boundaryValue(plot.boundaries, "north")} />
                 <Info label="South boundary" value={boundaryValue(plot.boundaries, "south")} />
                 <Info label="East boundary" value={boundaryValue(plot.boundaries, "east")} />
@@ -549,13 +550,14 @@ function OwnerHistoryRows({
   return (
     <table className="w-full text-left text-sm">
       <thead className="bg-slate-100 text-xs uppercase tracking-wide text-slate-500">
-        <tr><th className="px-4 py-3">Owner</th><th className="px-4 py-3">Record</th><th className="px-4 py-3">Phone</th><th className="px-4 py-3">Email</th><th className="px-4 py-3">Date</th></tr>
+        <tr><th className="px-4 py-3">Owner</th><th className="px-4 py-3">Record</th><th className="px-4 py-3">Done by</th><th className="px-4 py-3">Phone</th><th className="px-4 py-3">Email</th><th className="px-4 py-3">Date</th></tr>
       </thead>
       <tbody className="divide-y divide-slate-100 bg-white">
         {records.map((record) => (
           <tr key={record.id}>
             <td className="px-4 py-3 font-medium">{record.owner?.name ?? firmName}</td>
             <td className="px-4 py-3">{record.kind.replaceAll("_", " ")}</td>
+            <td className="px-4 py-3">{record.createdBy?.name ?? "-"}</td>
             <td className="px-4 py-3">{record.owner?.phone ?? "-"}</td>
             <td className="px-4 py-3">{record.owner?.email ?? "-"}</td>
             <td className="whitespace-nowrap px-4 py-3">{record.effectiveAt.toLocaleDateString("en-IN")}</td>

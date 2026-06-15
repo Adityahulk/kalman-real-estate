@@ -100,7 +100,7 @@ export default async function ProjectDevelopmentPage({ params }: { params: { pro
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-3 text-xs text-slate-500">
                     <span>{asset.progressPct}% · {asset.status}</span>
-                    <span className="flex items-center gap-1">{cadLinkByAsset.has(asset.id) ? <><MapIcon size={12} className="text-emerald-700" /> CAD linked · v{cadLinkByAsset.get(asset.id)?.entity.scene.cadFile.version}</> : "Manual"} <ExternalLink size={12} /></span>
+                    <span className="flex items-center gap-1">{cadLinkByAsset.has(asset.id) ? <><MapIcon size={12} className="text-emerald-700" /> Map linked · v{cadLinkByAsset.get(asset.id)?.entity.scene.cadFile.version}</> : "Manual"} <ExternalLink size={12} /></span>
                   </div>
                 </Link>
               ))}

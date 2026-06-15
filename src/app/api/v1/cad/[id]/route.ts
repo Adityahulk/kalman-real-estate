@@ -1,6 +1,15 @@
 import { NextRequest } from "next/server";
 import { apiError, getRequestContext, ok, parseJson } from "@/server/api";
-import { deleteCadFile, deleteCadSchema } from "@/server/services/cad";
+import { deleteCadFile, deleteCadSchema, renameCadFile, renameCadSchema } from "@/server/services/cad";
+
+export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+  try {
+    const context = await getRequestContext(request, "cad.upload");
+    return ok(await renameCadFile(context, params.id, await parseJson(request, renameCadSchema)));
+  } catch (error) {
+    return apiError(error);
+  }
+}
 
 export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
   try {

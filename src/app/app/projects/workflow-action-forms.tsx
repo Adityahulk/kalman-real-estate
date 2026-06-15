@@ -32,6 +32,12 @@ type FirmInfo = {
   authorizedPersons: string[];
 };
 
+type PaymentEntry = {
+  mode: "Cash" | "Cheque" | "Bank transfer" | "UPI" | "Other";
+  amount: string;
+  reference: string;
+};
+
 export function ProjectSiteInfoForm({
   project,
   defaultShareText,
@@ -125,29 +131,33 @@ export function ProjectAllotmentFlow({
   plots,
   firm,
   defaultPlotId,
+  manualLetterFields = [],
 }: {
   projectId: string;
   plots: PlotOption[];
   firm: FirmInfo;
   defaultPlotId?: string;
+  manualLetterFields?: Array<{ key: string; label: string }>;
 }) {
   const router = useRouter();
   const [plotId, setPlotId] = useState(defaultPlotId && plots.some((plot) => plot.id === defaultPlotId) ? defaultPlotId : "");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [amountInr, setAmountInr] = useState("");
-  const [paymentMode, setPaymentMode] = useState("");
+  const [totalAreaPrice, setTotalAreaPrice] = useState("");
+  const [perUnitPrice, setPerUnitPrice] = useState("");
+  const [paymentEntries, setPaymentEntries] = useState<PaymentEntry[]>([{ mode: "Cash", amount: "", reference: "" }]);
   const [effectiveAt, setEffectiveAt] = useState(new Date().toISOString().slice(0, 10));
   const [eStampNumber, setEStampNumber] = useState("");
   const [witnessDetails, setWitnessDetails] = useState("");
   const [extraFields, setExtraFields] = useState<Array<{ label: string; value: string }>>([]);
+  const [letterFields, setLetterFields] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
   const selectedPlot = useMemo(() => plots.find((plot) => plot.id === plotId), [plotId, plots]);
-  useEffect(() => {
-    if (selectedPlot?.priceInr && !amountInr) setAmountInr(selectedPlot.priceInr);
-  }, [selectedPlot, amountInr]);
+  const calculatedFromUnitPrice = Number(perUnitPrice || 0) * Number(selectedPlot?.areaSqYards || 0);
+  const calculatedPrice = Number(totalAreaPrice || 0) || calculatedFromUnitPrice;
+  const paymentTotal = paymentEntries.reduce((total, entry) => total + Number(entry.amount || 0), 0);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -171,14 +181,27 @@ export function ProjectAllotmentFlow({
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         ownerId: ownerBody.data.id,
-        amountInr: amountInr ? Number(amountInr) : undefined,
+        amountInr: calculatedPrice || undefined,
         sharePct: 100,
-        paymentMode: paymentMode || undefined,
+        paymentMode: paymentEntries.map((entry) => entry.mode).filter((mode, index, modes) => modes.indexOf(mode) === index).join(", ") || undefined,
         effectiveAt: effectiveAt ? new Date(effectiveAt).toISOString() : undefined,
         extraDetails: {
           eStampNumber: eStampNumber || undefined,
           eStampDate: effectiveAt || undefined,
           witnessDetails: witnessDetails || undefined,
+          pricing: {
+            type: "TOTAL_AND_PER_UNIT",
+            totalAreaPrice: totalAreaPrice ? Number(totalAreaPrice) : undefined,
+            perUnitPrice: perUnitPrice ? Number(perUnitPrice) : undefined,
+            unit: "square yard",
+            calculatedPrice,
+          },
+          payments: paymentEntries.filter((entry) => entry.amount || entry.reference).map((entry) => ({
+            mode: entry.mode,
+            amount: entry.amount ? Number(entry.amount) : undefined,
+            reference: entry.reference || undefined,
+          })),
+          customLetterFields: letterFields,
           customFields: Object.fromEntries(extraFields.filter((field) => field.label).map((field) => [field.label, field.value])),
         },
       }),
@@ -227,7 +250,7 @@ export function ProjectAllotmentFlow({
           <Link className="btn-outline shrink-0" href={`/app/projects/${projectId}/ownership/add-plot`}><Plus size={17} />Plot</Link>
         </div>
         {selectedPlot ? <div className="mt-3 rounded-lg bg-navy-50 px-3 py-2 text-sm text-navy-900">
-          Selected: <span className="font-semibold">{selectedPlot.code}</span>{selectedPlot.priceInr ? ` · INR ${selectedPlot.priceInr}` : ""}
+          Selected: <span className="font-semibold">{selectedPlot.code}</span>{selectedPlot.areaSqYards ? ` · ${selectedPlot.areaSqYards} sq yd` : ""}
         </div> : null}
       </FormSection>
 
@@ -249,9 +272,21 @@ export function ProjectAllotmentFlow({
       </FormSection>
 
       <FormSection number="4" title="Payment">
-        <div className="grid gap-3 md:grid-cols-2">
-          <label><span className="label">Price</span><input className="input" inputMode="numeric" value={amountInr} onChange={(event) => setAmountInr(event.target.value)} /></label>
-          <label><span className="label">Mode</span><select className="input" value={paymentMode} onChange={(event) => setPaymentMode(event.target.value)}><option value="">Select payment mode</option><option>Cash</option><option>Cheque</option><option>Bank transfer</option><option>UPI</option><option>Other</option></select></label>
+        <div className="grid gap-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <label><span className="label">Total price</span><input className="input" inputMode="decimal" value={totalAreaPrice} onChange={(event) => setTotalAreaPrice(event.target.value)} placeholder={calculatedFromUnitPrice ? String(calculatedFromUnitPrice) : ""} /></label>
+            <label><span className="label">Per-unit price <span className="font-normal text-slate-400">(per square yard)</span></span><input className="input" inputMode="decimal" value={perUnitPrice} onChange={(event) => setPerUnitPrice(event.target.value)} /></label>
+          </div>
+          <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">Final total price: INR {calculatedPrice.toLocaleString("en-IN")}{!totalAreaPrice && calculatedFromUnitPrice ? " (calculated from per-unit price and plot area)" : ""} · Payment entries: INR {paymentTotal.toLocaleString("en-IN")}</div>
+          <div className="space-y-3">
+            {paymentEntries.map((entry, index) => <div className="grid gap-2 rounded-lg border border-slate-200 p-3 md:grid-cols-[1fr_1fr_1.4fr_auto]" key={index}>
+              <label><span className="label">Mode</span><select className="input" value={entry.mode} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, mode: event.target.value as PaymentEntry["mode"], reference: "" } : item))}><option>Cash</option><option>Cheque</option><option>Bank transfer</option><option>UPI</option><option>Other</option></select></label>
+              <label><span className="label">Amount</span><input className="input" inputMode="decimal" value={entry.amount} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, amount: event.target.value } : item))} /></label>
+              <label><span className="label">{entry.mode === "Cheque" ? "Cheque number" : entry.mode === "Bank transfer" ? "Bank details / reference" : entry.mode === "UPI" ? "UPI ID" : entry.mode === "Other" ? "Payment details" : "Reference (optional)"}</span><input className="input" value={entry.reference} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, reference: event.target.value } : item))} /></label>
+              <button className="btn-outline self-end px-3" type="button" aria-label="Remove payment entry" disabled={paymentEntries.length === 1} onClick={() => setPaymentEntries((entries) => entries.filter((_, itemIndex) => itemIndex !== index))}><X size={16} /></button>
+            </div>)}
+          </div>
+          <button className="btn-outline w-fit" type="button" onClick={() => setPaymentEntries((entries) => [...entries, { mode: "Cash", amount: "", reference: "" }])}><Plus size={16} />Add payment entry</button>
         </div>
       </FormSection>
 
@@ -267,6 +302,10 @@ export function ProjectAllotmentFlow({
               <button type="button" className="btn-outline px-3" aria-label="Remove field" onClick={() => setExtraFields((fields) => fields.filter((_, itemIndex) => itemIndex !== index))}><X size={16} /></button>
             </div>
           ))}
+          {manualLetterFields.length ? <div className="md:col-span-2 rounded-lg border border-amber-200 bg-amber-50 p-4">
+            <div className="font-semibold text-amber-950">Letter fields required before generation</div>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">{manualLetterFields.map((field) => <label key={field.key}><span className="label text-amber-950">{field.label}</span><input className="input bg-white" required value={letterFields[field.key] ?? ""} onChange={(event) => setLetterFields((values) => ({ ...values, [field.key]: event.target.value }))} /></label>)}</div>
+          </div> : null}
         </div>
         <button type="button" className="btn-outline mt-3 w-fit" onClick={() => setExtraFields((fields) => [...fields, { label: "", value: "" }])}><Plus size={16} />Additional field</button>
       </FormSection>
@@ -628,6 +667,7 @@ function LetterDraftCanvas({
   useEffect(() => {
     if (!editorRef.current) return;
     editorRef.current.innerHTML = draftHtml;
+    normalizeEditableTemplateFields(editorRef.current);
   }, [draftHtml, editorRef]);
 
   return (
@@ -644,6 +684,19 @@ function LetterDraftCanvas({
   );
 }
 
+function normalizeEditableTemplateFields(editor: HTMLDivElement) {
+  const markers = [...editor.querySelectorAll<HTMLElement>("mark[data-template-field]")];
+  for (const marker of markers) {
+    marker.removeAttribute("contenteditable");
+    const id = marker.dataset.templateField;
+    const nested = id ? marker.querySelector<HTMLElement>(`mark[data-template-field="${id}"]`) : null;
+    if (nested) {
+      nested.removeAttribute("contenteditable");
+      marker.replaceWith(nested);
+    }
+  }
+}
+
 function LetterPdfPreview({
   fileAssetId,
   loading,
@@ -656,11 +709,12 @@ function LetterPdfPreview({
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-card">
       {fileAssetId ? (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-slate-200">
+        <div className="pdf-scroll-viewer h-[calc(100dvh-13rem)] min-h-[640px] overflow-auto rounded-xl border border-slate-200 bg-slate-200">
           <iframe
             title="Generated PDF preview"
-            className="h-[calc(100vh-15rem)] min-h-[640px] w-full bg-white"
+            className="h-full min-h-[640px] w-full border-0 bg-white"
             src={`/api/v1/files/${fileAssetId}/download?disposition=inline&proxy=1`}
+            scrolling="yes"
           />
         </div>
       ) : (

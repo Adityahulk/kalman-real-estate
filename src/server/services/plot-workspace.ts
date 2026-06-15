@@ -7,7 +7,7 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
     include: {
       project: true,
       currentOwner: true,
-      ownershipRecords: { include: { owner: true }, orderBy: { effectiveAt: "desc" } },
+      ownershipRecords: { include: { owner: true, createdBy: { select: { name: true, email: true } } }, orderBy: { effectiveAt: "desc" } },
       registryRecords: { orderBy: { createdAt: "desc" } },
       checklistItems: { orderBy: [{ category: "asc" }, { label: "asc" }] },
     },
@@ -119,7 +119,7 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
       at: record.effectiveAt,
       type: record.kind,
       title: `${record.kind.replaceAll("_", " ")} · ${record.owner?.name ?? "Company inventory"}`,
-      detail: record.notes ?? null,
+      detail: [record.notes, record.createdBy ? `Done by ${record.createdBy.name}` : null].filter(Boolean).join(" · ") || null,
     })),
     ...plot.registryRecords.map((record) => ({
       id: `registry-${record.id}`,

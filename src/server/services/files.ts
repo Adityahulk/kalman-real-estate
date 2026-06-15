@@ -23,6 +23,10 @@ export const deleteFileSchema = z.object({
   reason: z.string().optional(),
 });
 
+export const renameFileSchema = z.object({
+  fileName: z.string().trim().min(1).max(255),
+});
+
 export const uploadCompleteSchema = z.object({
   storageProvider: z.nativeEnum(FileStorageProvider),
   storageKey: z.string().min(1),
@@ -235,6 +239,21 @@ export async function deleteFileAsset(context: RequestContext, id: string, input
     },
   });
 
+  return file;
+}
+
+export async function renameFileAsset(context: RequestContext, id: string, input: z.infer<typeof renameFileSchema>) {
+  const before = await prisma.fileAsset.findFirstOrThrow({
+    where: { id, tenantId: context.tenantId, deletedAt: null },
+  });
+  const file = await prisma.fileAsset.update({ where: { id }, data: { fileName: input.fileName } });
+  await writeAuditEvent(context, {
+    action: AuditAction.UPDATE,
+    entityType: "FileAsset",
+    entityId: id,
+    before: { fileName: before.fileName },
+    after: { fileName: file.fileName },
+  });
   return file;
 }
 

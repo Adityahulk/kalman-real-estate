@@ -43,12 +43,17 @@ export async function createProjectFileField(context: RequestContext, input: z.i
 }
 
 export const updateProjectFileFieldSchema = z.object({
-  label: z.string().min(2).max(80),
+  label: z.string().min(2).max(80).optional(),
+  logoFileId: z.string().nullable().optional(),
 });
 
 export async function updateProjectFileField(context: RequestContext, id: string, input: z.infer<typeof updateProjectFileFieldSchema>) {
-  await prisma.projectFileField.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
-  return prisma.projectFileField.update({ where: { id }, data: { label: input.label } });
+  const field = await prisma.projectFileField.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  if (input.logoFileId) {
+    if (field.section !== "PROJECT_MAPS") throw new Error("Logos are only available for project maps");
+    await prisma.fileAsset.findFirstOrThrow({ where: { id: input.logoFileId, tenantId: context.tenantId, deletedAt: null } });
+  }
+  return prisma.projectFileField.update({ where: { id }, data: input });
 }
 
 export async function deleteProjectFileField(context: RequestContext, id: string) {

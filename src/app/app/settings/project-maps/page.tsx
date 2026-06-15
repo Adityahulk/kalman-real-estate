@@ -31,10 +31,10 @@ export default async function ProjectMapsSettingsPage() {
             <div className="px-5 py-4"><div className="font-medium">Project Map</div><div className="mt-1 text-xs text-slate-500">Fixed map used for plots and the complete project layout.</div></div>
             {fields.map((field) => (
               <div className="px-5 py-4" key={field.id}>
-                <ProjectMapFieldEditor id={field.id} label={field.label} />
+                <ProjectMapFieldEditor id={field.id} label={field.label} logoFileId={field.logoFileId} />
                 <div className="ml-4 mt-3 border-l border-slate-200 pl-4">
                   <div className="space-y-2">
-                    {field.children.map((child) => <ProjectMapFieldEditor id={child.id} label={child.label} key={child.id} />)}
+                    {field.children.map((child) => <ProjectMapFieldEditor id={child.id} label={child.label} logoFileId={child.logoFileId} key={child.id} />)}
                     {!field.children.length ? <div className="text-xs text-slate-500">No sub-options. Files will be uploaded directly under this map.</div> : null}
                   </div>
                   <div className="mt-3 max-w-sm"><ProjectFileFieldForm section="PROJECT_MAPS" parentId={field.id} /></div>

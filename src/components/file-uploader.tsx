@@ -32,6 +32,7 @@ export function FileUploader({
   metadata,
   accept,
   onUploaded,
+  compact = false,
 }: {
   label: string;
   visibility?: FileVisibility;
@@ -40,6 +41,7 @@ export function FileUploader({
   metadata?: Record<string, unknown>;
   accept?: string;
   onUploaded?: (file: UploadedFile) => void;
+  compact?: boolean;
 }) {
   const [status, setStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
   const [progress, setProgress] = useState(0);
@@ -97,16 +99,16 @@ export function FileUploader({
   const icon = status === "uploading" ? <Loader2 className="animate-spin" size={17} /> : status === "done" ? <CheckCircle2 size={17} /> : status === "error" ? <XCircle size={17} /> : <UploadCloud size={17} />;
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3">
+    <div className={compact ? "" : "rounded-lg border border-slate-200 bg-white p-3"}>
       <label className="flex cursor-pointer items-center justify-between gap-3">
         <span className="flex items-center gap-2 text-sm font-medium text-slate-700">
           {icon}
-          {label}
+          {compact ? null : label}
         </span>
         <input className="hidden" type="file" accept={accept} onChange={upload} />
-        <span className="btn-outline h-8 px-3 text-xs">Choose file</span>
+        <span className="btn-outline h-8 px-3 text-xs">{compact ? label : "Choose file"}</span>
       </label>
-      {message ? <div className="mt-2 text-xs text-slate-500">{message}</div> : null}
+      {message && !compact ? <div className="mt-2 text-xs text-slate-500">{message}</div> : null}
       {status === "uploading" ? (
         <div className="mt-2 h-1.5 rounded-full bg-slate-100">
           <div className="h-1.5 rounded-full bg-gold-shine" style={{ width: `${progress}%` }} />

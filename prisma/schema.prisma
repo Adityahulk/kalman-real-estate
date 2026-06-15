@@ -215,13 +215,14 @@ model Tenant {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  users             User[]
-  projects          Project[]
-  owners            Owner[]
-  files             FileAsset[]
-  auditEvents       AuditEvent[]
-  memberships       UserFirmMembership[]
-  projectFileFields ProjectFileField[]
+  users                 User[]
+  projects              Project[]
+  owners                Owner[]
+  files                 FileAsset[]
+  auditEvents           AuditEvent[]
+  memberships           UserFirmMembership[]
+  projectFileFields     ProjectFileField[]
+  letterFieldCategories LetterFieldCategory[]
 }
 
 model User {
@@ -237,10 +238,11 @@ model User {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
-  tenant             Tenant?              @relation(fields: [tenantId], references: [id])
-  firmMemberships    UserFirmMembership[]
-  firmCustomFields   FirmCustomField[]
-  createdAuditEvents AuditEvent[]         @relation("AuditActor")
+  tenant                  Tenant?              @relation(fields: [tenantId], references: [id])
+  firmMemberships         UserFirmMembership[]
+  firmCustomFields        FirmCustomField[]
+  createdAuditEvents      AuditEvent[]         @relation("AuditActor")
+  createdOwnershipRecords OwnershipRecord[]    @relation("OwnershipRecordCreator")
 
   @@index([tenantId, role])
 }
@@ -297,27 +299,29 @@ model Project {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  tenant         Tenant          @relation(fields: [tenantId], references: [id])
-  phases         Phase[]
-  blocks         Block[]
-  plots          Plot[]
-  cadFiles       CadFile[]
-  siteAssets     SiteAsset[]
-  boqItems       BOQItem[]
-  marketingTasks MarketingTask[]
+  tenant            Tenant             @relation(fields: [tenantId], references: [id])
+  phases            Phase[]
+  blocks            Block[]
+  plots             Plot[]
+  cadFiles          CadFile[]
+  siteAssets        SiteAsset[]
+  boqItems          BOQItem[]
+  marketingTasks    MarketingTask[]
+  documentTemplates DocumentTemplate[]
 
   @@index([tenantId])
 }
 
 model ProjectFileField {
-  id        String   @id @default(cuid())
-  tenantId  String
-  label     String
-  key       String
-  section   String   @default("PROJECT_FILES")
-  parentId  String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid())
+  tenantId   String
+  label      String
+  key        String
+  section    String   @default("PROJECT_FILES")
+  parentId   String?
+  logoFileId String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   parent   ProjectFileField?  @relation("ProjectMapSubFields", fields: [parentId], references: [id], onDelete: Cascade)
@@ -326,6 +330,36 @@ model ProjectFileField {
   @@unique([tenantId, section, key])
   @@index([tenantId, section])
   @@index([parentId])
+}
+
+model LetterFieldCategory {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  key       String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fields LetterFieldDefinition[]
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
+}
+
+model LetterFieldDefinition {
+  id         String   @id @default(cuid())
+  categoryId String
+  label      String
+  key        String
+  mapping    String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  category LetterFieldCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([categoryId, key])
+  @@index([categoryId])
 }
 
 model Phase {
@@ -382,6 +416,8 @@ model Plot {
   areaSqYards    Decimal?   @db.Decimal(12, 2)
   priceInr       Decimal?   @db.Decimal(14, 2)
   primeLocation  String?
+  allottedBy     String?
+  dimensions     String?
   boundaries     Json?
   status         PlotStatus @default(COMPANY_OWNED)
   facing         String?
@@ -421,8 +457,9 @@ model OwnershipRecord {
   createdById  String?
   createdAt    DateTime      @default(now())
 
-  plot  Plot   @relation(fields: [plotId], references: [id])
-  owner Owner? @relation(fields: [ownerId], references: [id])
+  plot      Plot   @relation(fields: [plotId], references: [id])
+  owner     Owner? @relation(fields: [ownerId], references: [id])
+  createdBy User?  @relation("OwnershipRecordCreator", fields: [createdById], references: [id])
 
   @@index([tenantId, plotId, effectiveAt])
 }
@@ -697,14 +734,21 @@ model FileAsset {
 }
 
 model DocumentTemplate {
-  id        String   @id @default(cuid())
-  tenantId  String
-  name      String
-  type      String
-  body      String
-  variables Json?
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
+  id           String   @id @default(cuid())
+  tenantId     String
+  projectId    String?
+  sourceFileId String?
+  name         String
+  type         String
+  body         String
+  variables    Json?
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, projectId, type, active])
 }
 
 model GeneratedDocument {

@@ -18,7 +18,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates openssl \
+  && apt-get install -y --no-install-recommends ca-certificates openssl libreoffice-writer fonts-liberation \
   && rm -rf /var/lib/apt/lists/*
 
 RUN addgroup --system --gid 1001 nodejs \

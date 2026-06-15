@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Trash2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 export function DeleteFileButton({ fileId, fileName }: { fileId: string; fileName?: string }) {
@@ -27,8 +27,25 @@ export function DeleteFileButton({ fileId, fileName }: { fileId: string; fileNam
     router.refresh();
   }
 
+  async function rename() {
+    const nextName = window.prompt("Rename file", fileName ?? "")?.trim();
+    if (!nextName || nextName === fileName) return;
+    setLoading(true);
+    const response = await fetch(`/api/v1/files/${fileId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ fileName: nextName }),
+    });
+    setLoading(false);
+    if (!response.ok) setMessage((await response.json()).error ?? "Rename failed");
+    else router.refresh();
+  }
+
   return (
     <span className="inline-flex items-center gap-2">
+      <button type="button" className="btn-outline h-8 px-3 text-xs" onClick={() => void rename()} disabled={loading}>
+        <Pencil size={14} /> Rename
+      </button>
       <button type="button" className="btn-outline h-8 px-3 text-xs text-rose-700 hover:bg-rose-50" onClick={remove} disabled={loading}>
         <Trash2 size={14} />
         {loading ? "Deleting" : "Delete"}

@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { Check, Pencil, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { FileUploader } from "@/components/file-uploader";
 
-export function ProjectMapFieldEditor({ id, label }: { id: string; label: string }) {
+export function ProjectMapFieldEditor({ id, label, logoFileId, allowLogo = true }: { id: string; label: string; logoFileId?: string | null; allowLogo?: boolean }) {
   const router = useRouter();
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(label);
@@ -33,6 +34,17 @@ export function ProjectMapFieldEditor({ id, label }: { id: string; label: string
     if (response.ok) router.refresh();
   }
 
+  async function setLogo(fileId: string | null) {
+    setLoading(true);
+    const response = await fetch(`/api/v1/projects/file-fields/${id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ logoFileId: fileId }),
+    });
+    setLoading(false);
+    if (response.ok) router.refresh();
+  }
+
   if (editing) {
     return (
       <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -45,8 +57,10 @@ export function ProjectMapFieldEditor({ id, label }: { id: string; label: string
 
   return (
     <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
-      <span className="truncate font-medium">{label}</span>
+      <span className="flex min-w-0 items-center gap-2 truncate font-medium">{logoFileId ? <img className="size-7 rounded border border-slate-200 object-contain" src={`/api/v1/files/${logoFileId}/download?disposition=inline&proxy=1`} alt="" /> : null}{label}</span>
       <div className="flex shrink-0 gap-1">
+        {allowLogo ? <div className="w-36"><FileUploader label={logoFileId ? "Change logo" : "Add logo"} accept="image/png,image/jpeg,image/webp,image/svg+xml" visibility="TEAM" onUploaded={(file) => void setLogo(file.id)} compact /></div> : null}
+        {allowLogo && logoFileId ? <button className="btn-ghost h-8 px-2 text-xs" type="button" onClick={() => void setLogo(null)}>Remove logo</button> : null}
         <button className="btn-ghost h-8 px-2" type="button" aria-label={`Edit ${label}`} onClick={() => setEditing(true)}><Pencil size={14} /></button>
         <button className="btn-ghost h-8 px-2 text-rose-700" type="button" aria-label={`Delete ${label}`} onClick={() => void remove()} disabled={loading}><Trash2 size={14} /></button>
       </div>

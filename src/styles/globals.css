@@ -161,3 +161,54 @@
     padding-top: 96px;
   }
 }
+.letter-auto-field {
+  border-radius: 3px;
+  background: #fde68a;
+  color: #78350f;
+  padding: 0 2px;
+}
+
+.letter-template-editor-viewport {
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+}
+
+.letter-template-docx-editor {
+  width: min(100%, 860px);
+  min-width: 0;
+  margin: 0 auto;
+  box-sizing: border-box;
+  padding: 64px 72px;
+  overflow-wrap: anywhere;
+  box-shadow: 0 1px 4px rgb(15 23 42 / 12%);
+}
+
+.letter-template-docx-editor img {
+  max-width: 100%;
+  height: auto;
+}
+
+.letter-template-docx-editor table {
+  width: 100% !important;
+  max-width: 100%;
+  table-layout: fixed;
+}
+
+.letter-template-docx-editor th,
+.letter-template-docx-editor td {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 700px) {
+  .letter-template-docx-editor {
+    padding: 32px 24px;
+  }
+}
+
+.pdf-scroll-viewer {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}

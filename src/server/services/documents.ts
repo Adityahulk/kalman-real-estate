@@ -9,6 +9,7 @@ import { createGeneratedFileAsset } from "./files";
 import { buildGeneratedDocumentPdf, buildGeneratedDocumentPdfFromHtml } from "./document-pdf";
 import { createNotification } from "./notifications";
 import { ambeyAllotmentTemplate, registryStatusLetterTemplate, transferLetterTemplate } from "./letter-templates";
+import { templateFields } from "./document-templates";
 
 export const generateDocumentSchema = z.object({
   templateId: z.string().optional(),
@@ -89,9 +90,18 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
   const snapshot = await buildPlotDocumentSnapshot(context, input.recordId);
   snapshot.variables["document.number"] = documentNumber;
   snapshot.variables["document.date"] = new Date().toLocaleDateString("en-IN");
-  const template = input.templateId
+  const selectedTemplate = input.templateId
     ? await prisma.documentTemplate.findFirst({ where: { id: input.templateId, tenantId: context.tenantId, active: true } })
-    : await prisma.documentTemplate.findFirst({ where: { tenantId: context.tenantId, type: input.type, active: true }, orderBy: { createdAt: "desc" } });
+    : null;
+  const template = selectedTemplate
+    ?? await prisma.documentTemplate.findFirst({ where: { tenantId: context.tenantId, projectId: snapshot.projectId, type: input.type, active: true }, orderBy: { createdAt: "desc" } })
+    ?? await prisma.documentTemplate.findFirst({ where: { tenantId: context.tenantId, projectId: null, type: input.type, active: true }, orderBy: { createdAt: "desc" } });
+  const configuredFields = templateFields(template?.variables);
+  for (const field of configuredFields) {
+    snapshot.variables[`field.${field.id}`] = field.mapping
+      ? snapshot.variables[field.mapping] ?? ""
+      : snapshot.variables[`manual.${field.key}`] ?? "";
+  }
   const templateBody = template?.body ?? defaultTemplate(input.type);
   const { html, missingVariables } = renderTemplate(templateBody, snapshot.variables);
 
@@ -144,7 +154,7 @@ export async function renderDocumentDraft(context: RequestContext, id: string) {
   const pdf = await buildGeneratedDocumentPdfFromHtml({
     title: document.type.replaceAll("_", " ").toUpperCase(),
     number: document.number,
-    tenantName: tenant?.name ?? "Kalman Estate OS",
+    tenantName: tenant?.name ?? "WIDESTATE OS",
     html,
   });
   const key = generatedDocumentStorageKey(context.tenantId, document.id);
@@ -263,6 +273,11 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
   const firmNameUpper = firmName.toUpperCase();
   const projectName = plot.project.name;
   const projectAddress = plot.project.address ?? [plot.project.city].filter(Boolean).join(", ");
+  const boundaries = jsonRecord(plot.boundaries);
+  const extraDetails = jsonRecord(ownership?.extraDetails);
+  const pricing = jsonRecord(extraDetails.pricing);
+  const payments = Array.isArray(extraDetails.payments) ? extraDetails.payments.map(jsonRecord) : [];
+  const customLetterFields = jsonRecord(extraDetails.customLetterFields);
   const variables: Record<string, string> = {
     "tenant.name": tenant.name,
     "tenant.address": tenant.region ?? "",
@@ -295,6 +310,12 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "plot.priceInrWords": priceInr ? numberToIndianWords(priceInr) : "",
     "plot.bspRate": bspRate ? formatIndianAmount(bspRate) : "",
     "plot.facing": plot.facing ?? "",
+    "plot.dimensions": plot.dimensions ?? "",
+    "plot.primeLocation": plot.primeLocation ?? "",
+    "plot.northBoundary": stringFromKyc(boundaries, ["north"]),
+    "plot.southBoundary": stringFromKyc(boundaries, ["south"]),
+    "plot.eastBoundary": stringFromKyc(boundaries, ["east"]),
+    "plot.westBoundary": stringFromKyc(boundaries, ["west"]),
     "plot.eastSize": "",
     "plot.eastAdjoining": "",
     "plot.westSize": "",
@@ -322,6 +343,11 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "ownership.effectiveMonth": effectiveAt.toLocaleString("en-IN", { month: "long" }),
     "ownership.effectiveYear": String(effectiveAt.getFullYear()),
     "ownership.sharePct": ownership?.sharePct?.toString() ?? "100",
+    "payment.perUnitPrice": pricing.perUnitPrice ? String(pricing.perUnitPrice) : "",
+    "payment.modes": payments.map((payment) => String(payment.mode ?? "")).filter(Boolean).join(", "),
+    "payment.entries": payments.map((payment) => [payment.mode, payment.amount ? `INR ${payment.amount}` : "", payment.reference].filter(Boolean).join(" - ")).join("; "),
+    "extra.eStampNumber": stringFromKyc(extraDetails, ["eStampNumber"]),
+    "extra.witnessDetails": stringFromKyc(extraDetails, ["witnessDetails"]),
     "registry.status": registry?.status ?? "Not started",
     "registry.number": registry?.registryNo ?? "",
     "registry.date": registry?.registryDate?.toLocaleDateString("en-IN") ?? "",
@@ -335,6 +361,7 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "agreement.place": plot.project.city || "Barnala",
     "witness.place": plot.project.city || "Barnala",
   };
+  for (const [key, value] of Object.entries(customLetterFields)) variables[`manual.${key}`] = typeof value === "string" ? value : String(value ?? "");
 
   return {
     variables,
@@ -348,11 +375,18 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
 
 function renderTemplate(template: string, variables: Record<string, string>) {
   const missingVariables: string[] = [];
-  const html = template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_match, key: string) => {
+  const replaceVariable = (_match: string, key: string) => {
     const value = variables[key] ?? "";
     if (!value) missingVariables.push(key);
-    return escapeHtml(value);
-  });
+    const escaped = escapeHtml(value);
+    return key.startsWith("field.")
+      ? `<mark data-template-field="${escapeHtml(key.slice("field.".length))}" class="letter-auto-field">${escaped}</mark>`
+      : escaped;
+  };
+  const fieldMarkerPattern = /<mark\b[^>]*data-template-field=["']([^"']+)["'][^>]*>\s*\{\{\s*field\.\1\s*\}\}\s*<\/mark>/gi;
+  const html = template
+    .replace(fieldMarkerPattern, (_match, id: string) => replaceVariable(_match, `field.${id}`))
+    .replace(/\{\{\s*([\w.-]+)\s*\}\}/g, replaceVariable);
   return { html, missingVariables: [...new Set(missingVariables)] };
 }
 

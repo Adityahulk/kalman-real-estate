@@ -5,6 +5,7 @@ const prisma = new PrismaClient();
 
 async function main() {
   const passwordHash = await bcrypt.hash("Kalman@12345", 12);
+  const companyAdminPasswordHash = await bcrypt.hash("WideState@2026", 12);
   const saldhaEditKeyHash = await bcrypt.hash("saldhakey", 12);
 
   const tenant = await prisma.tenant.upsert({
@@ -65,6 +66,27 @@ async function main() {
       status: "ACTIVE",
     },
   });
+
+  await prisma.user.upsert({
+    where: { email: "companyadmin@widestate.in" },
+    update: {
+      tenantId: null,
+      passwordHash: companyAdminPasswordHash,
+      name: "Company Admin",
+      role: "BUILDER_ADMIN",
+      status: "ACTIVE",
+    },
+    create: {
+      tenantId: null,
+      email: "companyadmin@widestate.in",
+      passwordHash: companyAdminPasswordHash,
+      name: "Company Admin",
+      role: "BUILDER_ADMIN",
+      status: "ACTIVE",
+    },
+  });
+  const companyAdmin = await prisma.user.findUniqueOrThrow({ where: { email: "companyadmin@widestate.in" } });
+  await prisma.userFirmMembership.deleteMany({ where: { userId: companyAdmin.id } });
 
   await prisma.user.upsert({
     where: { email: "amandeep@example.com" },
@@ -277,7 +299,16 @@ async function main() {
     },
   });
 
-  await prisma.cadScene.deleteMany({ where: { cadFileId: cadFile.id } });
+  const oldScenes = await prisma.cadScene.findMany({ where: { cadFileId: cadFile.id }, select: { id: true } });
+  const oldSceneIds = oldScenes.map((item) => item.id);
+  if (oldSceneIds.length) {
+    const oldEntities = await prisma.cadEntity.findMany({ where: { sceneId: { in: oldSceneIds } }, select: { id: true } });
+    const oldEntityIds = oldEntities.map((item) => item.id);
+    if (oldEntityIds.length) await prisma.spatialLink.deleteMany({ where: { cadEntityId: { in: oldEntityIds } } });
+    await prisma.cadEntity.deleteMany({ where: { sceneId: { in: oldSceneIds } } });
+    await prisma.cadLayer.deleteMany({ where: { sceneId: { in: oldSceneIds } } });
+    await prisma.cadScene.deleteMany({ where: { id: { in: oldSceneIds } } });
+  }
   const scene = await prisma.cadScene.create({
     data: {
       tenantId: tenant.id,
@@ -409,6 +440,7 @@ async function main() {
 
   console.log("Seeded WIDESTATE OS");
   console.log("Login: owner@saldhaland.example / Kalman@12345");
+  console.log("First-firm onboarding: companyadmin@widestate.in / WideState@2026");
 }
 
 main()

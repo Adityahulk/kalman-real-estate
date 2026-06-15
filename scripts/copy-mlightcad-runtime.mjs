@@ -5,6 +5,7 @@ import { build } from "esbuild";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const output = join(root, "public", "cad-runtime");
+const pdfjsOutput = join(root, "public", "pdfjs");
 
 const assets = [
   ["node_modules/@mlightcad/data-model/dist/dxf-parser-worker.js", "dxf-parser-worker.js"],
@@ -14,6 +15,11 @@ const assets = [
 
 await mkdir(output, { recursive: true });
 await mkdir(join(output, "assets"), { recursive: true });
+await mkdir(pdfjsOutput, { recursive: true });
+await copyFile(
+  join(root, "node_modules", "pdfjs-dist", "build", "pdf.worker.min.mjs"),
+  join(pdfjsOutput, "pdf.worker.min.mjs"),
+);
 for (const [source, target] of assets) {
   await copyFile(join(root, source), join(output, target));
   await copyFile(join(root, source), join(output, "assets", target));

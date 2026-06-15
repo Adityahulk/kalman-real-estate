@@ -62,7 +62,7 @@ export function OwnershipPlotRow({
     >
       <td className="px-5 py-4">
         <div className="font-semibold text-navy-900">{plot}</div>
-        {cadSource ? <div className="mt-1 flex items-center gap-1 text-[11px] text-emerald-700"><Map size={12} /> CAD linked · v{cadSource.version}</div> : <div className="mt-1 text-[11px] text-slate-400">Manual record</div>}
+        {cadSource ? <div className="mt-1 flex items-center gap-1 text-[11px] text-emerald-700"><Map size={12} /> Map linked · v{cadSource.version}</div> : <div className="mt-1 text-[11px] text-slate-400">Manual record</div>}
       </td>
       <td className="px-5 py-4">{ownerName}</td>
       <td className="px-5 py-4">{area}</td>

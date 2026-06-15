@@ -26,6 +26,10 @@ export const deleteCadSchema = z.object({
   reason: z.string().optional(),
 });
 
+export const renameCadSchema = z.object({
+  originalName: z.string().trim().min(1).max(255),
+});
+
 type StoredCadUpload = z.infer<typeof cadUploadSchema> & {
   bytes: Buffer;
 };
@@ -1785,6 +1789,19 @@ export async function deleteCadFile(context: RequestContext, id: string, input: 
   });
 
   return { file, cleanupWarnings };
+}
+
+export async function renameCadFile(context: RequestContext, id: string, input: z.infer<typeof renameCadSchema>) {
+  const before = await prisma.cadFile.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  const file = await prisma.cadFile.update({ where: { id }, data: { originalName: input.originalName } });
+  await writeAuditEvent(context, {
+    action: AuditAction.UPDATE,
+    entityType: "CadFile",
+    entityId: id,
+    before: { originalName: before.originalName },
+    after: { originalName: file.originalName },
+  });
+  return file;
 }
 
 function cadStoredKeys(cadFile: {
