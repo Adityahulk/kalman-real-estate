@@ -11,6 +11,14 @@ const templateFieldSchema = z.object({
   sourceText: z.string().min(1).max(500).optional(),
   key: z.string().min(1).max(100),
   mapping: z.string().max(120).nullable(),
+  pageNumber: z.number().int().positive().optional(),
+  rects: z.array(z.object({
+    pageNumber: z.number().int().positive(),
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    width: z.number().min(0).max(1),
+    height: z.number().min(0).max(1),
+  })).optional(),
 });
 
 export const saveProjectLetterTemplateSchema = z.object({
@@ -30,9 +38,10 @@ function defaultLetterBody(type: string): string {
 export async function saveProjectLetterTemplate(context: RequestContext, projectId: string, input: z.infer<typeof saveProjectLetterTemplateSchema>) {
   await prisma.project.findFirstOrThrow({ where: { id: projectId, tenantId: context.tenantId } });
   if (input.sourceFileId) await prisma.fileAsset.findFirstOrThrow({ where: { id: input.sourceFileId, tenantId: context.tenantId, deletedAt: null } });
-  // When a PDF is the source (no custom HTML body provided), use the default letter template.
-  // The PDF is used purely for visual field mapping, not as the body content.
-  const body = input.body ?? defaultLetterBody(input.type);
+  if (input.sourceFileId && input.fields.some((field) => !field.rects?.length)) {
+    throwBadRequest("One or more fields are missing their PDF position. Re-select those fields and save again.");
+  }
+  const body = input.body?.trim() || defaultLetterBody(input.type);
   await prisma.documentTemplate.updateMany({
     where: { tenantId: context.tenantId, projectId, type: input.type, active: true },
     data: { active: false },
@@ -64,4 +73,10 @@ export function templateFields(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
   const result = z.array(templateFieldSchema).safeParse((value as Record<string, unknown>).fields);
   return result.success ? result.data : [];
+}
+
+function throwBadRequest(message: string): never {
+  const error = new Error(message);
+  error.name = "BadRequestError";
+  throw error;
 }

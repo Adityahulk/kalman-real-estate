@@ -6,7 +6,16 @@ import { useRouter } from "next/navigation";
 import { createClientId } from "@/lib/id";
 import { loadBrowserPdfJs } from "@/lib/pdfjs-browser";
 
-type TemplateField = { id: string; label: string; sourceText?: string; key: string; mapping: string | null };
+type TemplateFieldRect = { pageNumber: number; x: number; y: number; width: number; height: number };
+type TemplateField = {
+  id: string;
+  label: string;
+  sourceText?: string;
+  key: string;
+  mapping: string | null;
+  pageNumber?: number;
+  rects?: TemplateFieldRect[];
+};
 type Template = { id: string; name: string; body: string; sourceFileId?: string | null; sourceFileName?: string; fields: TemplateField[]; createdAt: string };
 type FieldCategory = { id: string; name: string; fields: Array<{ id: string; label: string; mapping: string | null }> };
 
@@ -44,26 +53,31 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: { pr
     }
   }
 
-  async function renderPdfInViewer(file: File) {
+  async function renderPdfInViewer(file: Blob, overlayFields: TemplateField[] = []) {
     const pdfjs = await loadBrowserPdfJs();
     const pdfDocument = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
     if (!viewerRef.current) return;
     viewerRef.current.innerHTML = "";
     const SCALE = 1.5;
+    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
     for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
       const page = await pdfDocument.getPage(pageNum);
       const viewport = page.getViewport({ scale: SCALE });
 
       const pageContainer = document.createElement("div");
       pageContainer.className = "pdf-template-page";
+      pageContainer.dataset.pageNumber = String(pageNum);
       pageContainer.style.cssText = `position:relative;width:${viewport.width}px;height:${viewport.height}px;margin:0 auto 16px;box-shadow:0 1px 4px rgba(0,0,0,.2);background:#fff;`;
 
       const canvas = document.createElement("canvas");
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-      canvas.style.cssText = "display:block;";
+      canvas.width = Math.ceil(viewport.width * dpr);
+      canvas.height = Math.ceil(viewport.height * dpr);
+      canvas.style.cssText = `display:block;width:${viewport.width}px;height:${viewport.height}px;`;
       const ctx = canvas.getContext("2d");
-      if (ctx) await page.render({ canvasContext: ctx, viewport }).promise;
+      if (ctx) {
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        await page.render({ canvasContext: ctx, viewport }).promise;
+      }
 
       const textLayerDiv = document.createElement("div");
       textLayerDiv.className = "textLayer";
@@ -78,6 +92,7 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: { pr
       pageContainer.appendChild(textLayerDiv);
       viewerRef.current.appendChild(pageContainer);
     }
+    renderFieldOverlays(overlayFields);
     setPdfLoaded(true);
   }
 
@@ -92,33 +107,39 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: { pr
     const range = selectionRef.current;
     const selected = range?.toString().trim();
     if (!range || !selected) return setMessage("Select text in the document first.");
+    const rects = fieldRectsFromRange(range);
+    if (!rects.length) return setMessage("Could not locate the selected text on the PDF page. Select the text again.");
     const id = createClientId();
-    const field: TemplateField = { id, label: selected.slice(0, 100), sourceText: selected, key: keyFromLabel(selected, fields), mapping: null };
-    range.deleteContents();
-    const marker = document.createElement("mark");
-    marker.dataset.templateField = id;
-    marker.className = "pdf-field-marker";
-    marker.textContent = `{{field.${id}}}`;
-    range.insertNode(marker);
+    const field: TemplateField = {
+      id,
+      label: selected.slice(0, 100),
+      sourceText: selected,
+      key: keyFromLabel(selected, fields),
+      mapping: null,
+      pageNumber: rects[0].pageNumber,
+      rects,
+    };
+    renderFieldOverlay(field);
     setFields((items) => [...items, field]);
     selectionRef.current = null;
+    window.getSelection()?.removeAllRanges();
     setMessage("");
   }
 
   function removeField(id: string) {
-    viewerRef.current?.querySelectorAll(`[data-template-field="${id}"]`).forEach((node) => node.replaceWith((node as HTMLElement).innerText));
+    viewerRef.current?.querySelectorAll(`[data-template-field="${id}"]`).forEach((node) => node.remove());
     setFields((items) => items.filter((field) => field.id !== id));
   }
 
   async function save() {
     if (!pdfLoaded) return setMessage("Upload a PDF and prepare the template first.");
+    if (!sourceFileId) return setMessage("Upload the source PDF before saving the template.");
+    const body = `<div data-exact-pdf-template="${sourceFileId}"></div>`;
     setLoading(true);
-    // Body is intentionally omitted — the server uses the default allotment letter template.
-    // The PDF is purely a visual reference for selecting and mapping field definitions.
     const response = await fetch(`/api/v1/projects/${projectId}/letter-templates`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, type: "allotment_letter", fields, sourceFileId }),
+      body: JSON.stringify({ name, type: "allotment_letter", fields, sourceFileId, body }),
     });
     const result = await response.json();
     setLoading(false);
@@ -132,13 +153,27 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: { pr
     if (response.ok) router.refresh();
   }
 
-  function loadTemplate(template: Template) {
+  async function loadTemplate(template: Template) {
     setName(template.name);
     setFields(template.fields);
     setSourceFileId(template.sourceFileId ?? undefined);
-    // Show the stored body so field markers remain visible for reference
+    if (template.sourceFileId) {
+      setLoading(true);
+      setMessage("");
+      try {
+        const response = await fetch(`/api/v1/files/${template.sourceFileId}/download?disposition=inline&proxy=1`);
+        if (!response.ok) throw new Error("Could not load the saved source PDF.");
+        await renderPdfInViewer(await response.blob(), template.fields);
+        setMessage("Template loaded. Yellow fields show replacement areas.");
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Template could not be loaded.");
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
     if (viewerRef.current) viewerRef.current.innerHTML = template.body;
-    setPdfLoaded(true);
+    setPdfLoaded(Boolean(template.body));
   }
 
   return <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
@@ -162,7 +197,7 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: { pr
     <aside className="space-y-4">
       <section className="rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="font-semibold">Letter fields</h2>
-        <p className="mt-1 text-xs text-slate-500">Select text from your PDF to create a field, then map it to a system variable. The letter itself uses the standard allotment template.</p>
+        <p className="mt-1 text-xs text-slate-500">Select text from your PDF to create fields, map them to system data, then save. Generated letters use this PDF text with your mapped values filled in.</p>
         <div className="mt-4 space-y-3">
           {fields.map((field) => <FieldEditor field={field} categories={categories} key={field.id} onChange={(next) => setFields((items) => items.map((item) => item.id === field.id ? next : item))} onDelete={() => removeField(field.id)} />)}
           {!fields.length ? <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">Select text inside the PDF, then click &quot;Add selected text as field&quot;.</div> : null}
@@ -170,7 +205,7 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: { pr
       </section>
       <section className="rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="font-semibold">Saved templates</h2>
-        <div className="mt-3 space-y-2">{templates.map((template) => <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 p-3" key={template.id}><button className="min-w-0 text-left" type="button" onClick={() => loadTemplate(template)}><span className="block truncate text-sm font-medium">{template.name}</span><span className="text-xs text-slate-500">{template.fields.length} fields · {template.sourceFileName?.split(".").pop()?.toUpperCase() ?? "Template"}</span></button><button className="btn-ghost h-8 px-2 text-rose-700" type="button" onClick={() => void removeTemplate(template.id)}><Trash2 size={14} /></button></div>)}</div>
+        <div className="mt-3 space-y-2">{templates.map((template) => <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 p-3" key={template.id}><button className="min-w-0 text-left" type="button" onClick={() => void loadTemplate(template)}><span className="block truncate text-sm font-medium">{template.name}</span><span className="text-xs text-slate-500">{template.fields.length} fields · {template.sourceFileName?.split(".").pop()?.toUpperCase() ?? "Template"}</span></button><button className="btn-ghost h-8 px-2 text-rose-700" type="button" onClick={() => void removeTemplate(template.id)}><Trash2 size={14} /></button></div>)}</div>
       </section>
     </aside>
   </div>;
@@ -220,4 +255,64 @@ function keyFromLabel(label: string, fields: TemplateField[]) {
   let index = 2;
   while (fields.some((field) => field.key === key)) key = `${base}_${index++}`;
   return key;
+}
+
+function fieldRectsFromRange(range: Range): TemplateFieldRect[] {
+  const rects: TemplateFieldRect[] = [];
+  const seen = new Set<string>();
+  for (const clientRect of Array.from(range.getClientRects())) {
+    if (clientRect.width < 1 || clientRect.height < 1) continue;
+    const page = pageForRect(clientRect);
+    if (!page) continue;
+    const pageRect = page.getBoundingClientRect();
+    const pageNumber = Number(page.dataset.pageNumber || 0);
+    if (!pageNumber || pageRect.width <= 0 || pageRect.height <= 0) continue;
+    const x = clamp((clientRect.left - pageRect.left) / pageRect.width);
+    const y = clamp((clientRect.top - pageRect.top) / pageRect.height);
+    const width = clamp(clientRect.width / pageRect.width, 0, 1 - x);
+    const height = clamp(clientRect.height / pageRect.height, 0, 1 - y);
+    const key = `${pageNumber}:${x.toFixed(4)}:${y.toFixed(4)}:${width.toFixed(4)}:${height.toFixed(4)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    rects.push({ pageNumber, x, y, width, height });
+  }
+  const pages = new Set(rects.map((rect) => rect.pageNumber));
+  return pages.size <= 1 ? rects : [];
+}
+
+function pageForRect(rect: DOMRect) {
+  return Array.from(document.querySelectorAll<HTMLElement>(".pdf-template-page"))
+    .find((page) => {
+      const pageRect = page.getBoundingClientRect();
+      return rect.left >= pageRect.left - 1
+        && rect.right <= pageRect.right + 1
+        && rect.top >= pageRect.top - 1
+        && rect.bottom <= pageRect.bottom + 1;
+    }) ?? null;
+}
+
+function renderFieldOverlays(fields: TemplateField[]) {
+  document.querySelectorAll(".pdf-field-overlay").forEach((node) => node.remove());
+  for (const field of fields) renderFieldOverlay(field);
+}
+
+function renderFieldOverlay(field: TemplateField) {
+  for (const rect of field.rects ?? []) {
+    const page = document.querySelector<HTMLElement>(`.pdf-template-page[data-page-number="${rect.pageNumber}"]`);
+    if (!page) continue;
+    const overlay = document.createElement("div");
+    overlay.className = "pdf-field-overlay";
+    overlay.dataset.templateField = field.id;
+    overlay.title = field.label;
+    overlay.style.left = `${rect.x * 100}%`;
+    overlay.style.top = `${rect.y * 100}%`;
+    overlay.style.width = `${rect.width * 100}%`;
+    overlay.style.height = `${rect.height * 100}%`;
+    overlay.textContent = field.label;
+    page.appendChild(overlay);
+  }
+}
+
+function clamp(value: number, min = 0, max = 1) {
+  return Math.min(max, Math.max(min, value));
 }

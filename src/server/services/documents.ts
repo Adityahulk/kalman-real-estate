@@ -4,12 +4,13 @@ import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
 import { enqueueDocumentGeneration } from "../jobs";
-import { generatedDocumentStorageKey, putGeneratedObject } from "../storage";
+import { generatedDocumentStorageKey, getObjectResilient, putGeneratedObject } from "../storage";
 import { createGeneratedFileAsset } from "./files";
 import { buildGeneratedDocumentPdf, buildGeneratedDocumentPdfFromHtml } from "./document-pdf";
 import { createNotification } from "./notifications";
 import { ambeyAllotmentTemplate, registryStatusLetterTemplate, transferLetterTemplate } from "./letter-templates";
 import { templateFields } from "./document-templates";
+import { buildPdfFromExactTemplate, type PdfTemplateField } from "./pdf-template-render";
 
 export const generateDocumentSchema = z.object({
   templateId: z.string().optional(),
@@ -102,10 +103,19 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
       ? snapshot.variables[field.mapping] ?? ""
       : snapshot.variables[`manual.${field.key}`] ?? "";
   }
+  const templateSourceFileId = sourceFileIdOfTemplate(template);
+  const exactPdfTemplate = templateSourceFileId && configuredFields.some((field) => field.rects?.length)
+    ? {
+        sourceFileId: templateSourceFileId,
+        fields: configuredFields,
+      }
+    : null;
   const templateBody = template?.body ?? defaultTemplate(input.type);
-  const { html, missingVariables } = renderTemplate(templateBody, snapshot.variables);
+  const { html, missingVariables } = exactPdfTemplate
+    ? { html: exactPdfDraftHtml(template?.name ?? input.type), missingVariables: missingFieldVariables(configuredFields, snapshot.variables) }
+    : renderTemplate(templateBody, snapshot.variables);
 
-  const document = await prisma.generatedDocument.create({
+  let document = await prisma.generatedDocument.create({
     data: {
       tenantId: context.tenantId,
       templateId: template?.id,
@@ -115,6 +125,7 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
       data: {
         ...snapshot,
         templateBody,
+        exactPdfTemplate,
         missingVariables,
       } as Prisma.InputJsonValue,
       editableHtml: html,
@@ -123,6 +134,11 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
       createdById: context.userId,
     },
   });
+
+  if (exactPdfTemplate) {
+    const rendered = await renderExactPdfTemplateForDocument(context, document.id, exactPdfTemplate, snapshot.variables, DocumentStatus.DRAFT);
+    document = rendered.document;
+  }
 
   await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "GeneratedDocument", entityId: document.id, after: document as unknown as Prisma.InputJsonValue });
   return { document, missingVariables };
@@ -150,6 +166,17 @@ export async function updateDocumentDraft(context: RequestContext, id: string, i
 export async function renderDocumentDraft(context: RequestContext, id: string) {
   const document = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
   const tenant = await prisma.tenant.findUnique({ where: { id: context.tenantId } });
+  const exactPdfTemplate = exactPdfTemplateFromData(document.data);
+  if (exactPdfTemplate) {
+    const data = jsonRecord(document.data);
+    const variables = jsonRecord(data.variables);
+    return renderExactPdfTemplateForDocument(
+      context,
+      document.id,
+      exactPdfTemplate,
+      Object.fromEntries(Object.entries(variables).map(([key, value]) => [key, String(value ?? "")])),
+    );
+  }
   const html = document.editableHtml ?? "";
   const pdf = await buildGeneratedDocumentPdfFromHtml({
     title: document.type.replaceAll("_", " ").toUpperCase(),
@@ -388,6 +415,95 @@ function renderTemplate(template: string, variables: Record<string, string>) {
     .replace(fieldMarkerPattern, (_match, id: string) => replaceVariable(_match, `field.${id}`))
     .replace(/\{\{\s*([\w.-]+)\s*\}\}/g, replaceVariable);
   return { html, missingVariables: [...new Set(missingVariables)] };
+}
+
+async function renderExactPdfTemplateForDocument(
+  context: RequestContext,
+  documentId: string,
+  template: { sourceFileId: string; fields: PdfTemplateField[] },
+  variables: Record<string, string>,
+  status: DocumentStatus = DocumentStatus.GENERATED,
+) {
+  const source = await prisma.fileAsset.findFirstOrThrow({
+    where: { id: template.sourceFileId, tenantId: context.tenantId, deletedAt: null },
+  });
+  const sourceBytes = await getObjectResilient(source.storageKey);
+  const pdf = await buildPdfFromExactTemplate({
+    bytes: sourceBytes,
+    fields: template.fields,
+    values: variables,
+  });
+  const key = generatedDocumentStorageKey(context.tenantId, documentId);
+  const stored = await putGeneratedObject(key, pdf, "application/pdf");
+  const current = await prisma.generatedDocument.findUniqueOrThrow({ where: { id: documentId } });
+  const file = await createGeneratedFileAsset(context, {
+    storageKey: stored.storageKey,
+    storageProvider: stored.storageProvider,
+    fallbackStorageKey: stored.fallbackStorageKey,
+    fileName: `${current.number ?? documentId}.pdf`,
+    mimeType: "application/pdf",
+    sizeBytes: pdf.length,
+    visibility: FileVisibility.OWNER_VISIBLE,
+    documentType: documentTypeForLetter(current.type),
+    ownerType: current.recordType,
+    ownerId: current.recordId,
+  });
+  const document = await prisma.generatedDocument.update({
+    where: { id: documentId },
+    data: {
+      fileAssetId: file.id,
+      status,
+      finalizedAt: status === DocumentStatus.GENERATED ? new Date() : null,
+    },
+  });
+  return { document, file, storage: stored };
+}
+
+function exactPdfDraftHtml(templateName: string) {
+  return `<div data-exact-pdf-draft="true"><p><strong>${escapeHtml(templateName)}</strong></p><p>This draft uses the uploaded PDF exactly. Field replacements are rendered directly on the original PDF pages.</p></div>`;
+}
+
+function exactPdfTemplateFromData(value: Prisma.JsonValue) {
+  const data = jsonRecord(value);
+  const raw = jsonRecord(data.exactPdfTemplate);
+  const sourceFileId = typeof raw.sourceFileId === "string" ? raw.sourceFileId : "";
+  const fields = Array.isArray(raw.fields) ? raw.fields.flatMap((item): PdfTemplateField[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const field = item as Record<string, unknown>;
+    const id = typeof field.id === "string" ? field.id : "";
+    if (!id) return [];
+    return [{
+      id,
+      label: typeof field.label === "string" ? field.label : id,
+      mapping: typeof field.mapping === "string" ? field.mapping : null,
+      rects: Array.isArray(field.rects)
+        ? field.rects.flatMap((rect): NonNullable<PdfTemplateField["rects"]> => {
+            if (!rect || typeof rect !== "object" || Array.isArray(rect)) return [];
+            const value = rect as Record<string, unknown>;
+            return typeof value.pageNumber === "number"
+              && typeof value.x === "number"
+              && typeof value.y === "number"
+              && typeof value.width === "number"
+              && typeof value.height === "number"
+              ? [{ pageNumber: value.pageNumber, x: value.x, y: value.y, width: value.width, height: value.height }]
+              : [];
+          })
+        : [],
+    }];
+  }) : [];
+  return sourceFileId && fields.length ? { sourceFileId, fields } : null;
+}
+
+function missingFieldVariables(fields: PdfTemplateField[], variables: Record<string, string>) {
+  return fields
+    .map((field) => `field.${field.id}`)
+    .filter((key) => !variables[key]);
+}
+
+function sourceFileIdOfTemplate(template: unknown) {
+  return template && typeof template === "object" && !Array.isArray(template) && typeof (template as { sourceFileId?: unknown }).sourceFileId === "string"
+    ? (template as { sourceFileId: string }).sourceFileId
+    : null;
 }
 
 function defaultTemplate(type: string) {

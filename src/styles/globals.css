@@ -268,3 +268,18 @@
   user-select: text;
   white-space: pre;
 }
+
+.pdf-field-overlay {
+  position: absolute;
+  z-index: 4;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid rgb(245 158 11 / 80%);
+  border-radius: 2px;
+  background: rgb(253 224 71 / 72%);
+  color: #7c2d12;
+  font-size: 9px;
+  line-height: 1.1;
+  pointer-events: none;
+  white-space: nowrap;
+}
