@@ -3,6 +3,7 @@
 import { ChangeEvent, useRef, useState } from "react";
 import { Loader2, Plus, Save, Trash2, UploadCloud } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { loadBrowserPdfJs } from "@/lib/pdfjs-browser";
 
 type TemplateField = { id: string; label: string; sourceText?: string; key: string; mapping: string | null };
 type Template = { id: string; name: string; body: string; sourceFileId?: string | null; sourceFileName?: string; fields: TemplateField[]; createdAt: string };
@@ -10,39 +11,80 @@ type FieldCategory = { id: string; name: string; fields: Array<{ id: string; lab
 
 export function LetterTemplateBuilder({ projectId, templates, categories }: { projectId: string; templates: Template[]; categories: FieldCategory[] }) {
   const router = useRouter();
-  const editorRef = useRef<HTMLDivElement>(null);
+  const viewerRef = useRef<HTMLDivElement>(null);
   const selectionRef = useRef<Range | null>(null);
   const [name, setName] = useState("Allotment letter");
   const [fields, setFields] = useState<TemplateField[]>([]);
   const [sourceFileId, setSourceFileId] = useState<string | undefined>();
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [pdfLoaded, setPdfLoaded] = useState(false);
 
-  async function readDoc(event: ChangeEvent<HTMLInputElement>) {
+  async function readPdf(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
     setLoading(true);
     setMessage("");
     try {
-      if (file.name.toLowerCase().endsWith(".doc")) throw new Error("Older .doc files must be saved as .docx before uploading.");
-      if (!file.name.toLowerCase().endsWith(".docx")) throw new Error("Upload a DOCX file.");
-      const mammoth = await import("mammoth/mammoth.browser");
-      const result = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
-      if (editorRef.current) editorRef.current.innerHTML = result.value;
-      setName(file.name.replace(/\.docx$/i, ""));
+      if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") throw new Error("Upload a PDF file.");
+      const [uploadedId] = await Promise.all([
+        uploadTemplateSource(file),
+        renderPdfInViewer(file),
+      ]);
+      setSourceFileId(uploadedId);
+      setName(file.name.replace(/\.pdf$/i, ""));
       setFields([]);
-      setSourceFileId(await uploadTemplateSource(file));
-      setMessage("Document loaded. Select text and add fields.");
+      setMessage("PDF loaded. Select text and add fields.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Document could not be opened.");
+      setMessage(error instanceof Error ? error.message : "PDF could not be opened.");
     } finally {
       setLoading(false);
+      event.target.value = "";
     }
+  }
+
+  async function renderPdfInViewer(file: File) {
+    const pdfjs = await loadBrowserPdfJs();
+    const pdfDocument = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+    if (!viewerRef.current) return;
+    viewerRef.current.innerHTML = "";
+    const SCALE = 1.5;
+    for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
+      const page = await pdfDocument.getPage(pageNum);
+      const viewport = page.getViewport({ scale: SCALE });
+
+      const pageContainer = document.createElement("div");
+      pageContainer.className = "pdf-template-page";
+      pageContainer.style.cssText = `position:relative;width:${viewport.width}px;height:${viewport.height}px;margin:0 auto 16px;box-shadow:0 1px 4px rgba(0,0,0,.2);background:#fff;`;
+
+      const canvas = document.createElement("canvas");
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      canvas.style.cssText = "display:block;";
+      const ctx = canvas.getContext("2d");
+      if (ctx) await page.render({ canvasContext: ctx, viewport }).promise;
+
+      const textLayerDiv = document.createElement("div");
+      textLayerDiv.className = "textLayer";
+      textLayerDiv.style.cssText = `width:${viewport.width}px;height:${viewport.height}px;`;
+
+      const textContent = await page.getTextContent();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const tl = new (pdfjs as any).TextLayer({ textContentSource: textContent, container: textLayerDiv, viewport });
+      await tl.render();
+
+      pageContainer.appendChild(canvas);
+      pageContainer.appendChild(textLayerDiv);
+      viewerRef.current.appendChild(pageContainer);
+    }
+    setPdfLoaded(true);
   }
 
   function rememberSelection() {
     const selection = window.getSelection();
-    if (selection?.rangeCount && editorRef.current?.contains(selection.anchorNode)) selectionRef.current = selection.getRangeAt(0).cloneRange();
+    if (selection?.rangeCount && viewerRef.current?.contains(selection.anchorNode)) {
+      selectionRef.current = selection.getRangeAt(0).cloneRange();
+    }
   }
 
   function addField() {
@@ -54,7 +96,7 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: { pr
     range.deleteContents();
     const marker = document.createElement("mark");
     marker.dataset.templateField = id;
-    marker.className = "rounded bg-amber-200 px-1 text-amber-950";
+    marker.className = "pdf-field-marker";
     marker.textContent = `{{field.${id}}}`;
     range.insertNode(marker);
     setFields((items) => [...items, field]);
@@ -63,13 +105,29 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: { pr
   }
 
   function removeField(id: string) {
-    editorRef.current?.querySelectorAll(`[data-template-field="${id}"]`).forEach((node) => node.replaceWith((node as HTMLElement).innerText));
+    viewerRef.current?.querySelectorAll(`[data-template-field="${id}"]`).forEach((node) => node.replaceWith((node as HTMLElement).innerText));
     setFields((items) => items.filter((field) => field.id !== id));
   }
 
+  function buildBodyHtml(): string {
+    if (!viewerRef.current) return "";
+    const pages = Array.from(viewerRef.current.querySelectorAll<HTMLElement>(".pdf-template-page"));
+    return pages.map((page) => {
+      const canvas = page.querySelector("canvas");
+      const textLayer = page.querySelector<HTMLElement>(".textLayer");
+      if (!canvas) return "";
+      const imgSrc = canvas.toDataURL("image/jpeg", 0.75);
+      const w = canvas.width;
+      const h = canvas.height;
+      const textHtml = textLayer ? textLayer.innerHTML : "";
+      return `<div class="pdf-template-page" style="position:relative;width:${w}px;height:${h}px;max-width:100%;margin:0 auto 16px;"><img src="${imgSrc}" style="width:100%;height:100%;display:block;" /><div class="textLayer" style="position:absolute;inset:0;width:${w}px;height:${h}px;">${textHtml}</div></div>`;
+    }).join("\n");
+  }
+
   async function save() {
-    const body = editorRef.current?.innerHTML ?? "";
-    if (!body.trim()) return setMessage("Upload a DOCX and prepare the letter first.");
+    if (!pdfLoaded) return setMessage("Upload a PDF and prepare the template first.");
+    const body = buildBodyHtml();
+    if (!body.trim()) return setMessage("Upload a PDF and prepare the template first.");
     setLoading(true);
     const response = await fetch(`/api/v1/projects/${projectId}/letter-templates`, {
       method: "POST",
@@ -88,17 +146,30 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: { pr
     if (response.ok) router.refresh();
   }
 
+  function loadTemplate(template: Template) {
+    setName(template.name);
+    setFields(template.fields);
+    setSourceFileId(template.sourceFileId ?? undefined);
+    if (viewerRef.current) viewerRef.current.innerHTML = template.body;
+    setPdfLoaded(true);
+  }
+
   return <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
     <section className="min-w-0 rounded-lg border border-slate-200 bg-white">
       <div className="flex flex-wrap items-end justify-between gap-3 border-b border-slate-200 p-4">
         <label className="min-w-64 flex-1"><span className="label">Letter name</span><input className="input" value={name} onChange={(event) => setName(event.target.value)} /></label>
-        <label className="btn-outline cursor-pointer"><UploadCloud size={16} />Upload DOCX<input className="hidden" type="file" accept=".doc,.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={readDoc} /></label>
+        <label className="btn-outline cursor-pointer"><UploadCloud size={16} />Upload PDF<input className="hidden" type="file" accept=".pdf,application/pdf" onChange={readPdf} /></label>
         <button className="btn-outline" type="button" onClick={addField}><Plus size={16} />Add selected text as field</button>
         <button className="btn-primary" type="button" onClick={() => void save()} disabled={loading}>{loading ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}Save template</button>
       </div>
       {message ? <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-600">{message}</div> : null}
       <div className="letter-template-editor-viewport max-h-[calc(100vh-18rem)] bg-slate-100 p-2 sm:p-5">
-        <div ref={editorRef} className="letter-paper-editor letter-template-docx-editor min-h-[760px] bg-white" contentEditable suppressContentEditableWarning onMouseUp={rememberSelection} onKeyUp={rememberSelection} />
+        <div
+          ref={viewerRef}
+          className="letter-paper-editor min-h-[760px]"
+          onMouseUp={rememberSelection}
+          onKeyUp={rememberSelection}
+        />
       </div>
     </section>
     <aside className="space-y-4">
@@ -112,7 +183,7 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: { pr
       </section>
       <section className="rounded-lg border border-slate-200 bg-white p-4">
         <h2 className="font-semibold">Saved templates</h2>
-        <div className="mt-3 space-y-2">{templates.map((template) => <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 p-3" key={template.id}><button className="min-w-0 text-left" type="button" onClick={() => { setName(template.name); setFields(template.fields); setSourceFileId(template.sourceFileId ?? undefined); if (editorRef.current) editorRef.current.innerHTML = template.body; }}><span className="block truncate text-sm font-medium">{template.name}</span><span className="text-xs text-slate-500">{template.fields.length} fields · {template.sourceFileName?.split(".").pop()?.toUpperCase() ?? "Template"}</span></button><button className="btn-ghost h-8 px-2 text-rose-700" type="button" onClick={() => void removeTemplate(template.id)}><Trash2 size={14} /></button></div>)}</div>
+        <div className="mt-3 space-y-2">{templates.map((template) => <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 p-3" key={template.id}><button className="min-w-0 text-left" type="button" onClick={() => loadTemplate(template)}><span className="block truncate text-sm font-medium">{template.name}</span><span className="text-xs text-slate-500">{template.fields.length} fields · {template.sourceFileName?.split(".").pop()?.toUpperCase() ?? "Template"}</span></button><button className="btn-ghost h-8 px-2 text-rose-700" type="button" onClick={() => void removeTemplate(template.id)}><Trash2 size={14} /></button></div>)}</div>
       </section>
     </aside>
   </div>;
@@ -122,7 +193,7 @@ async function uploadTemplateSource(file: File) {
   const metaResponse = await fetch("/api/v1/files/upload", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ fileName: file.name, mimeType: file.type || "application/vnd.openxmlformats-officedocument.wordprocessingml.document", sizeBytes: file.size, visibility: "TEAM", ownerType: "LetterTemplateSource" }),
+    body: JSON.stringify({ fileName: file.name, mimeType: file.type || "application/pdf", sizeBytes: file.size, visibility: "TEAM", ownerType: "LetterTemplateSource" }),
   });
   const meta = await metaResponse.json();
   if (!metaResponse.ok) throw new Error(meta.error ?? "Source document upload could not start.");

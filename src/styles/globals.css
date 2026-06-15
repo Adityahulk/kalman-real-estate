@@ -212,3 +212,59 @@
   scrollbar-gutter: stable;
   -webkit-overflow-scrolling: touch;
 }
+
+/* PDF template builder – page wrapper */
+.pdf-template-page {
+  display: block;
+  user-select: none;
+}
+
+/* pdf.js text layer – transparent selectable text over canvas */
+.textLayer {
+  position: absolute;
+  text-align: initial;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 0;
+  pointer-events: none;
+}
+.textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+  pointer-events: auto;
+  user-select: text;
+}
+.textLayer > :not(.markedContent),
+.textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+}
+.textLayer span.markedContent {
+  top: 0;
+  height: 0;
+}
+.textLayer ::selection {
+  background: rgba(37, 99, 235, 0.25);
+  color: transparent;
+}
+
+/* Field marker inserted into the pdf text layer */
+.pdf-field-marker {
+  border-radius: 3px;
+  background: rgba(252, 211, 77, 0.75);
+  color: #92400e;
+  padding: 0 2px;
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
+  user-select: text;
+  white-space: pre;
+}
