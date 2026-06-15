@@ -30,6 +30,7 @@ export default async function LetterStudioPage({ params }: { params: { projectId
           editableHtml: document.editableHtml,
           fileAssetId: document.fileAssetId,
           exactPdfTemplate: hasExactPdfTemplate(document.data),
+          exactPdfFields: exactPdfFields(document.data),
         }}
         missingVariables={missingVariables}
         backHref={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=documents`}
@@ -49,4 +50,34 @@ function hasExactPdfTemplate(data: unknown) {
   if (!data || typeof data !== "object" || Array.isArray(data)) return false;
   const value = (data as Record<string, unknown>).exactPdfTemplate;
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function exactPdfFields(data: unknown) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return [];
+  const record = data as Record<string, unknown>;
+  const template = record.exactPdfTemplate;
+  const variables = record.variables && typeof record.variables === "object" && !Array.isArray(record.variables)
+    ? record.variables as Record<string, unknown>
+    : {};
+  const overrides = record.exactPdfValues && typeof record.exactPdfValues === "object" && !Array.isArray(record.exactPdfValues)
+    ? record.exactPdfValues as Record<string, unknown>
+    : {};
+  const fields = template && typeof template === "object" && !Array.isArray(template) && Array.isArray((template as Record<string, unknown>).fields)
+    ? (template as { fields: unknown[] }).fields
+    : [];
+  return fields.flatMap((field) => {
+    if (!field || typeof field !== "object" || Array.isArray(field)) return [];
+    const item = field as Record<string, unknown>;
+    const id = typeof item.id === "string" ? item.id : "";
+    if (!id) return [];
+    const key = `field.${id}`;
+    return [{
+      id,
+      key,
+      label: typeof item.label === "string" ? item.label : id,
+      sourceText: typeof item.sourceText === "string" ? item.sourceText : "",
+      mapping: typeof item.mapping === "string" ? item.mapping : null,
+      value: String(overrides[key] ?? variables[key] ?? item.sourceText ?? ""),
+    }];
+  });
 }

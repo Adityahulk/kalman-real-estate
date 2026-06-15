@@ -403,6 +403,14 @@ export function LetterStudioEditor({
     editableHtml: string | null;
     fileAssetId: string | null;
     exactPdfTemplate?: boolean;
+    exactPdfFields?: Array<{
+      id: string;
+      key: string;
+      label: string;
+      sourceText: string;
+      mapping: string | null;
+      value: string;
+    }>;
   };
   missingVariables: string[];
   backHref?: string;
@@ -417,11 +425,14 @@ export function LetterStudioEditor({
   const [approvalLoading, setApprovalLoading] = useState<"APPROVED" | "ISSUED" | "REJECTED" | "">("");
   const [dirty, setDirty] = useState(false);
   const isExactPdfTemplate = Boolean(letter.exactPdfTemplate);
-  const [view, setView] = useState<"edit" | "preview">(letter.fileAssetId ? "preview" : "edit");
+  const [view, setView] = useState<"edit" | "preview">(isExactPdfTemplate ? "edit" : letter.fileAssetId ? "preview" : "edit");
   const [draftHtml, setDraftHtml] = useState(letter.editableHtml ?? "");
   const [fileAssetId, setFileAssetId] = useState(letter.fileAssetId);
   const [status, setStatus] = useState(letter.status);
   const [missingOpen, setMissingOpen] = useState(false);
+  const [exactPdfValues, setExactPdfValues] = useState<Record<string, string>>(
+    Object.fromEntries((letter.exactPdfFields ?? []).map((field) => [field.key, field.value])),
+  );
 
   useEffect(() => {
     setMounted(true);
@@ -450,7 +461,7 @@ export function LetterStudioEditor({
     const response = await fetch(`/api/v1/documents/${letter.id}/draft`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ editableHtml }),
+      body: JSON.stringify({ editableHtml, exactPdfValues: isExactPdfTemplate ? exactPdfValues : undefined }),
     });
     const body = await response.json();
     setLoading("");
@@ -469,7 +480,7 @@ export function LetterStudioEditor({
     const saveResponse = await fetch(`/api/v1/documents/${letter.id}/draft`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ editableHtml }),
+      body: JSON.stringify({ editableHtml, exactPdfValues: isExactPdfTemplate ? exactPdfValues : undefined }),
     });
     const saveBody = await saveResponse.json();
     if (!saveResponse.ok) {
@@ -562,7 +573,7 @@ export function LetterStudioEditor({
               <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("underline")} disabled={view !== "edit" || isExactPdfTemplate}>
                 <Underline size={14} />
               </button>
-              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={saveDraft} disabled={Boolean(loading) || isExactPdfTemplate}>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={saveDraft} disabled={Boolean(loading)}>
                 {loading === "save" ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
                 Save
               </button>
@@ -637,7 +648,19 @@ export function LetterStudioEditor({
           <section className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-card">
             Opening letter studio...
           </section>
-        ) : view === "edit" && !isExactPdfTemplate ? (
+        ) : view === "edit" && isExactPdfTemplate ? (
+          <ExactPdfDraftEditor
+            fields={letter.exactPdfFields ?? []}
+            values={exactPdfValues}
+            fileAssetId={fileAssetId}
+            loading={loading}
+            onChange={(key, value) => {
+              setExactPdfValues((current) => ({ ...current, [key]: value }));
+              setDirty(true);
+            }}
+            onGenerate={renderPdf}
+          />
+        ) : view === "edit" ? (
           <LetterDraftCanvas
             key={`letter-edit-${letter.id}`}
             editorRef={editorRef}
@@ -684,6 +707,51 @@ function LetterDraftCanvas({
         onInput={onInput}
       />
     </section>
+  );
+}
+
+function ExactPdfDraftEditor({
+  fields,
+  values,
+  fileAssetId,
+  loading,
+  onChange,
+  onGenerate,
+}: {
+  fields: Array<{ id: string; key: string; label: string; sourceText: string; mapping: string | null; value: string }>;
+  values: Record<string, string>;
+  fileAssetId: string | null;
+  loading: "save" | "render" | "";
+  onChange: (key: string, value: string) => void;
+  onGenerate: () => void;
+}) {
+  return (
+    <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+      <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+        <h2 className="font-semibold text-navy-900">Editable PDF fields</h2>
+        <p className="mt-1 text-xs leading-5 text-slate-500">Change these values, then generate the PDF. Unchanged fields keep the original uploaded PDF text.</p>
+        <div className="mt-4 space-y-3">
+          {fields.map((field) => (
+            <label key={field.id} className="block rounded-lg border border-slate-200 p-3">
+              <span className="text-xs font-semibold text-slate-500">{field.label}</span>
+              {field.mapping ? <span className="mt-1 block text-[11px] text-slate-400">Mapped from {field.mapping}</span> : null}
+              <textarea
+                className="input mt-2 min-h-20 py-2 text-sm"
+                value={values[field.key] ?? field.value ?? ""}
+                placeholder={field.sourceText}
+                onChange={(event) => onChange(field.key, event.target.value)}
+              />
+            </label>
+          ))}
+          {!fields.length ? <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">No PDF fields were saved on this template.</div> : null}
+        </div>
+        <button type="button" className="btn-primary mt-4 w-full justify-center" onClick={onGenerate} disabled={Boolean(loading)}>
+          {loading === "render" ? <Loader2 className="animate-spin" size={17} /> : <Eye size={17} />}
+          Generate PDF
+        </button>
+      </aside>
+      <LetterPdfPreview fileAssetId={fileAssetId} loading={loading} onGenerate={onGenerate} />
+    </div>
   );
 }
 

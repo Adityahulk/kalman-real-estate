@@ -3,6 +3,7 @@ import { PDFDocument, PDFFont, StandardFonts, rgb } from "pdf-lib";
 export type PdfTemplateField = {
   id: string;
   label: string;
+  sourceText?: string;
   mapping: string | null;
   rects?: Array<{
     pageNumber: number;
@@ -24,6 +25,9 @@ export async function buildPdfFromExactTemplate(input: {
 
   for (const field of input.fields) {
     const value = input.values[`field.${field.id}`] ?? "";
+    if (!value.trim() || (!field.mapping && field.sourceText && normalizedText(value) === normalizedText(field.sourceText))) {
+      continue;
+    }
     const rects = field.rects ?? [];
     const pageRects = rects.flatMap((rect) => {
       const page = pages[rect.pageNumber - 1];
@@ -47,7 +51,7 @@ export async function buildPdfFromExactTemplate(input: {
         color: rgb(1, 1, 1),
       });
     }
-    if (!value.trim() || !pageRects.length) continue;
+    if (!pageRects.length) continue;
 
     const ordered = [...pageRects].sort((first, second) => second.y - first.y || first.x - second.x);
     const fontSize = fittedFontSize(value, ordered, font);
@@ -70,6 +74,10 @@ export async function buildPdfFromExactTemplate(input: {
   }
 
   return Buffer.from(await pdf.save());
+}
+
+function normalizedText(value: string) {
+  return value.replace(/\s+/g, " ").trim();
 }
 
 type DrawRect = {

@@ -275,14 +275,23 @@ function fieldRectsFromRange(range: Range): TemplateFieldRect[] {
 }
 
 function selectedTextSpans(range: Range) {
+  const selectionRects = Array.from(range.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
   const spans = Array.from(document.querySelectorAll<HTMLElement>(".pdf-template-page .textLayer span"));
   return spans.filter((span) => {
     if (!span.textContent?.trim()) return false;
     try {
-      return range.intersectsNode(span);
+      if (range.intersectsNode(span)) return true;
     } catch {
-      return false;
+      // Fall through to rectangle overlap checks.
     }
+    const spanRects = Array.from(span.getClientRects());
+    return selectionRects.some((selectionRect) => {
+      const selectionPage = pageForRect(selectionRect);
+      if (!selectionPage || selectionPage !== span.closest(".pdf-template-page")) return false;
+      return spanRects.some((spanRect) => sameLine(selectionRect, spanRect)
+        && selectionRect.right + 20 >= spanRect.left
+        && selectionRect.left - 20 <= spanRect.right);
+    });
   });
 }
 
@@ -339,6 +348,11 @@ function unionClientRects(rects: DOMRect[]) {
     width: right - left,
     height: bottom - top,
   } as DOMRect;
+}
+
+function sameLine(first: Pick<DOMRect, "top" | "bottom" | "height">, second: Pick<DOMRect, "top" | "bottom" | "height">) {
+  const overlap = Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top);
+  return overlap >= Math.min(first.height, second.height) * 0.35;
 }
 
 function renderFieldOverlays(fields: TemplateField[]) {

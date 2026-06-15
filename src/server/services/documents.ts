@@ -29,6 +29,7 @@ export const createDocumentDraftSchema = z.object({
 
 export const updateDocumentDraftSchema = z.object({
   editableHtml: z.string().min(20),
+  exactPdfValues: z.record(z.string()).optional(),
 });
 
 export async function generateDocument(context: RequestContext, input: z.infer<typeof generateDocumentSchema>) {
@@ -99,9 +100,10 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
     ?? await prisma.documentTemplate.findFirst({ where: { tenantId: context.tenantId, projectId: null, type: input.type, active: true }, orderBy: { createdAt: "desc" } });
   const configuredFields = templateFields(template?.variables);
   for (const field of configuredFields) {
+    const fallback = field.sourceText ?? field.label ?? "";
     snapshot.variables[`field.${field.id}`] = field.mapping
-      ? snapshot.variables[field.mapping] ?? ""
-      : snapshot.variables[`manual.${field.key}`] ?? "";
+      ? snapshot.variables[field.mapping] || fallback
+      : snapshot.variables[`manual.${field.key}`] || fallback;
   }
   const templateSourceFileId = sourceFileIdOfTemplate(template);
   const exactPdfTemplate = templateSourceFileId && configuredFields.some((field) => field.rects?.length)
@@ -146,10 +148,17 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
 
 export async function updateDocumentDraft(context: RequestContext, id: string, input: z.infer<typeof updateDocumentDraftSchema>) {
   const before = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  const beforeData = jsonRecord(before.data);
   const document = await prisma.generatedDocument.update({
     where: { id },
     data: {
       editableHtml: input.editableHtml,
+      data: input.exactPdfValues
+        ? {
+            ...beforeData,
+            exactPdfValues: input.exactPdfValues,
+          } as Prisma.InputJsonValue
+        : undefined,
       status: before.status === DocumentStatus.REJECTED ? DocumentStatus.DRAFT : before.status,
     },
   });
@@ -170,11 +179,16 @@ export async function renderDocumentDraft(context: RequestContext, id: string) {
   if (exactPdfTemplate) {
     const data = jsonRecord(document.data);
     const variables = jsonRecord(data.variables);
+    const exactPdfValues = jsonRecord(data.exactPdfValues);
+    const mergedVariables = {
+      ...Object.fromEntries(Object.entries(variables).map(([key, value]) => [key, String(value ?? "")])),
+      ...Object.fromEntries(Object.entries(exactPdfValues).map(([key, value]) => [key, String(value ?? "")])),
+    };
     return renderExactPdfTemplateForDocument(
       context,
       document.id,
       exactPdfTemplate,
-      Object.fromEntries(Object.entries(variables).map(([key, value]) => [key, String(value ?? "")])),
+      mergedVariables,
     );
   }
   const html = document.editableHtml ?? "";
@@ -475,6 +489,7 @@ function exactPdfTemplateFromData(value: Prisma.JsonValue) {
     return [{
       id,
       label: typeof field.label === "string" ? field.label : id,
+      sourceText: typeof field.sourceText === "string" ? field.sourceText : undefined,
       mapping: typeof field.mapping === "string" ? field.mapping : null,
       rects: Array.isArray(field.rects)
         ? field.rects.flatMap((rect): NonNullable<PdfTemplateField["rects"]> => {
