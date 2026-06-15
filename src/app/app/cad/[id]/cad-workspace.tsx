@@ -438,10 +438,6 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
     setSelectedId(id);
     setDraftGeometry(null);
   }, []);
-  const selectSourceHandle = useCallback((sourceHandle: string) => {
-    const entity = entities.find((value) => value.sourceHandle === sourceHandle);
-    if (entity) selectEntity(entity.id);
-  }, [entities, selectEntity]);
   const geometryChanged = useCallback((id: string, geometry: Record<string, unknown>) => {
     if (id === selectedId) setDraftGeometry(geometry);
   }, [selectedId]);
@@ -501,6 +497,16 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
     const ids = entities.filter((entity) => entity.status === "SUGGESTED").map((entity) => entity.id);
     if (!ids.length) return;
     if (!window.confirm(`Confirm all ${ids.length} pending candidates as reviewed? You can still correct or reject them before publishing.`)) return;
+    await batchIds(ids, "CONFIRMED");
+  }
+
+  async function confirmAllValidPlots() {
+    const blockingIds = new Set(issues.filter((issue) => issue.blocking && issue.entityId).map((issue) => issue.entityId));
+    const ids = entities
+      .filter((entity) => entity.type === "PLOT" && entity.status === "SUGGESTED" && !blockingIds.has(entity.id))
+      .map((entity) => entity.id);
+    if (!ids.length) return;
+    if (!window.confirm(`Approve all ${ids.length} valid plots? Only closed, uniquely labelled plots without blocking issues will be confirmed.`)) return;
     await batchIds(ids, "CONFIRMED");
   }
 
@@ -619,6 +625,11 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
       : inspectorOpen
         ? "xl:grid-cols-[minmax(0,1fr)_340px]"
         : "xl:grid-cols-1";
+  const validPendingPlotCount = entities.filter((entity) => (
+    entity.type === "PLOT"
+    && entity.status === "SUGGESTED"
+    && !issues.some((issue) => issue.entityId === entity.id && issue.blocking)
+  )).length;
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-white">
@@ -633,6 +644,12 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {cadFile.status !== "PUBLISHED" && validPendingPlotCount > 0 ? (
+              <button className="btn-primary h-9" onClick={confirmAllValidPlots} disabled={loading}>
+                <Check size={16} />
+                <span className="hidden sm:inline">Approve {validPendingPlotCount} valid plots</span>
+              </button>
+            ) : null}
             <button className={`btn-ghost h-9 w-9 px-0 ${leftOpen ? "bg-slate-100" : ""}`} onClick={() => setLeftOpen((value) => !value)} title="Toggle review panel"><FileSearch size={16} /></button>
             <button className={`btn-ghost h-9 w-9 px-0 ${inspectorOpen ? "bg-slate-100" : ""}`} onClick={() => setInspectorOpen((value) => !value)} title="Toggle candidate inspector"><Settings2 size={16} /></button>
             {cadFile.status === "PUBLISHED" ? (
@@ -749,37 +766,26 @@ function CandidateReview({ cadFile, analysis, scene, issues, versions }: { cadFi
           )}
         </aside> : null}
 
-        <section className="relative min-h-0 overflow-hidden bg-slate-950">
-          {(cadFile.format === "DXF" || cadFile.format === "DWG") && !editBoundary ? (
-            <MlightCadMap
-              cadFileId={cadFile.id}
-              fileName={cadFile.originalName}
-              autoExtract={false}
-              hiddenLayerNames={new Set((scene?.layers ?? []).filter((layer) => hiddenLayers.has(layer.id)).map((layer) => layer.name))}
-              selectedSourceHandle={selected?.sourceHandle}
-              onSelectSourceHandle={selectSourceHandle}
-            />
-          ) : (
-            <CadMap
-              cadFileId={cadFile.id}
-              entities={entities}
-              bounds={bounds}
-              imageRect={imageRect}
-              showPreview={Boolean(analysis.previewArtifactKey)}
-              hiddenLayerIds={hiddenLayers}
-              selectedId={selectedId}
-              onSelect={selectEntity}
-              editable={cadFile.status !== "PUBLISHED" && Boolean(selected)}
-              onGeometryChange={geometryChanged}
-            />
-          )}
-          {(cadFile.format === "DXF" || cadFile.format === "DWG") && cadFile.status !== "PUBLISHED" ? (
+        <section className="relative min-h-0 overflow-hidden bg-slate-100">
+          <CadMap
+            cadFileId={cadFile.id}
+            entities={entities}
+            bounds={bounds}
+            imageRect={imageRect}
+            showPreview={Boolean(analysis.previewArtifactKey)}
+            hiddenLayerIds={hiddenLayers}
+            selectedId={selectedId}
+            onSelect={selectEntity}
+            editable={cadFile.status !== "PUBLISHED" && Boolean(selected) && editBoundary}
+            onGeometryChange={geometryChanged}
+          />
+          {cadFile.status !== "PUBLISHED" && selected ? (
             <button
               type="button"
               className="btn-outline absolute bottom-3 right-3 z-20 bg-white shadow"
               onClick={() => setEditBoundary((value) => !value)}
             >
-              {editBoundary ? "Return to CAD drawing" : "Adjust selected boundary"}
+              {editBoundary ? "Finish boundary adjustment" : "Adjust selected boundary"}
             </button>
           ) : null}
         </section>

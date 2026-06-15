@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, MessageSquareText, Save, X } from "lucide-react";
+import { Loader2, MessageSquareText, RefreshCcw, Save, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import { CadModeHeader } from "../cad-mode-header";
@@ -16,6 +16,8 @@ type StudioEvent = {
   state?: StudioState;
   message?: string;
   handles?: string[];
+  layoutName?: string;
+  empty?: boolean;
 };
 
 type StudioOverlay = {
@@ -59,6 +61,7 @@ export function CadStudio({
   const [overlays, setOverlays] = useState(initialOverlays);
   const [overlaysOpen, setOverlaysOpen] = useState(false);
   const [overlaySaving, setOverlaySaving] = useState(false);
+  const [extracting, setExtracting] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -94,12 +97,21 @@ export function CadStudio({
         window.sessionStorage.setItem(sessionKey(cadFile.id), JSON.stringify(event.data.state));
       }
       if (event.data.type === "kalman:studio-selection") setSelectedHandles(event.data.handles ?? []);
+      if (event.data.type === "kalman:studio-layout") {
+        setNotice(event.data.empty
+          ? `${event.data.layoutName ?? "This layout"} contains no directly renderable paper-space entities. Use Model to view the project drawing.`
+          : `${event.data.layoutName ?? "Layout"} ready`);
+      }
       if (event.data.type === "kalman:studio-extraction-progress") setNotice(event.data.message ?? "Preparing review records");
       if (event.data.type === "kalman:studio-extraction-complete") {
+        setExtracting(false);
         setNotice("Review records are ready");
         router.refresh();
       }
-      if (event.data.type === "kalman:studio-extraction-error") setError(event.data.message ?? "Drawing extraction failed.");
+      if (event.data.type === "kalman:studio-extraction-error") {
+        setExtracting(false);
+        setError(event.data.message ?? "Drawing extraction failed.");
+      }
     }
     window.addEventListener("message", onMessage);
     void loadSource();
@@ -154,6 +166,14 @@ export function CadStudio({
     setNotice("Workspace saved");
   }
 
+  function rebuildExtraction() {
+    if (!window.confirm("Rebuild the plot and site-asset extraction from this original drawing? Existing draft review candidates will be replaced; published business records are not changed.")) return;
+    setExtracting(true);
+    setError("");
+    setNotice("Reconstructing individual plot boundaries");
+    sendCommand("extract");
+  }
+
   async function saveOverlay(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -200,6 +220,12 @@ export function CadStudio({
               {saving ? <Loader2 className="animate-spin" size={15} /> : <Save size={15} />}
               Save workspace
             </button>
+            {cadFile.status !== "PUBLISHED" ? (
+              <button className="btn-primary h-9 px-3" onClick={rebuildExtraction} disabled={!ready || extracting}>
+                {extracting ? <Loader2 className="animate-spin" size={15} /> : <RefreshCcw size={15} />}
+                Rebuild plots
+              </button>
+            ) : null}
             {headerActions}
           </div>
         )}

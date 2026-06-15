@@ -6,6 +6,7 @@ import {
   AcApSettingManager,
   AcEdOpenMode,
 } from "@mlightcad/cad-simple-viewer";
+import { acdbHostApplicationServices } from "@mlightcad/data-model";
 import {
   extractMlightCadDatabase,
   type BrowserCadExtraction,
@@ -45,6 +46,7 @@ let selectionAddedListener: ((event: { ids: string[] }) => void) | null = null;
 let selectionRemovedListener: ((event: { ids: string[] }) => void) | null = null;
 let viewChangedListener: (() => void) | null = null;
 let documentActivatedListener: (() => void) | null = null;
+let layoutSwitchedListener: ((event: { layout: { layoutName?: string; blockTableRecordId: string } }) => void) | null = null;
 let stateTimer: number | null = null;
 let managerTimer: number | null = null;
 let drawingReady = false;
@@ -124,24 +126,23 @@ async function onDrawingReady() {
   manager.curView.selectionSet.events.selectionAdded.addEventListener(selectionAddedListener);
   manager.curView.selectionSet.events.selectionRemoved.addEventListener(selectionRemovedListener);
   manager.curView.events?.viewChanged?.addEventListener?.(viewChangedListener);
+  layoutSwitchedListener = ({ layout }) => {
+    window.setTimeout(() => {
+      const record = manager.curDocument.database.tables.blockTable.getIdAt?.(layout.blockTableRecordId);
+      const entityCount = record?.newIterator ? Array.from(record.newIterator()).length : 0;
+      post("kalman:studio-layout", {
+        layoutName: layout.layoutName ?? "Layout",
+        blockTableRecordId: layout.blockTableRecordId,
+        entityCount,
+        empty: entityCount === 0,
+      });
+      schedulePostState();
+    }, 80);
+  };
+  acdbHostApplicationServices().layoutManager.events.layoutSwitched.addEventListener(layoutSwitchedListener);
   post("kalman:studio-ready", { state: readState() });
   if (openOptions?.autoExtract) {
-    try {
-      post("kalman:studio-extraction-progress", { message: "Detecting plots, labels, layers, and site assets" });
-      const extraction = extractMlightCadDatabase(
-        manager.curDocument.database as unknown as Parameters<typeof extractMlightCadDatabase>[0],
-      );
-      await uploadExtraction(
-        openOptions.cadFileId,
-        openOptions.sourceSha256,
-        extraction,
-      );
-      post("kalman:studio-extraction-complete");
-    } catch (reason) {
-      post("kalman:studio-extraction-error", {
-        message: reason instanceof Error ? reason.message : "Browser extraction failed.",
-      });
-    }
+    await runExtraction();
   }
 }
 
@@ -158,8 +159,31 @@ function executeCommand(command: string, payload: unknown) {
     restoreState(payload as Partial<StudioState>);
   } else if (command === "get-state") {
     postState();
+  } else if (command === "extract") {
+    void runExtraction();
   } else {
     manager.sendStringToExecute(command);
+  }
+}
+
+async function runExtraction() {
+  const manager = currentManager();
+  if (!manager || !openOptions) return;
+  try {
+    post("kalman:studio-extraction-progress", { message: "Reconstructing individual plots from CAD topology" });
+    const extraction = extractMlightCadDatabase(
+      manager.curDocument.database as unknown as Parameters<typeof extractMlightCadDatabase>[0],
+    );
+    await uploadExtraction(
+      openOptions.cadFileId,
+      openOptions.sourceSha256,
+      extraction,
+    );
+    post("kalman:studio-extraction-complete");
+  } catch (reason) {
+    post("kalman:studio-extraction-error", {
+      message: reason instanceof Error ? reason.message : "Browser extraction failed.",
+    });
   }
 }
 
@@ -181,6 +205,12 @@ function readState(): StudioState {
 
 function restoreState(state: Partial<StudioState>) {
   const manager = AcApDocManager.instance;
+  if (state.activeLayout && state.activeLayout !== String(manager.curDocument.database.currentSpaceId)) {
+    acdbHostApplicationServices().layoutManager.setCurrentLayoutBtrId(
+      state.activeLayout,
+      manager.curDocument.database,
+    );
+  }
   if (Array.isArray(state.selectedHandles)) {
     selectedHandles.clear();
     manager.curView.selectionSet.clear();
@@ -231,6 +261,10 @@ function teardownViewer() {
   if (documentActivatedListener) {
     manager?.events?.documentActivated?.removeEventListener(documentActivatedListener);
     documentActivatedListener = null;
+  }
+  if (layoutSwitchedListener) {
+    acdbHostApplicationServices().layoutManager.events.layoutSwitched.removeEventListener(layoutSwitchedListener);
+    layoutSwitchedListener = null;
   }
   if (stateTimer !== null) {
     window.clearTimeout(stateTimer);

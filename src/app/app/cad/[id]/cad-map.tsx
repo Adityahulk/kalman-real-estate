@@ -173,7 +173,19 @@ export function CadMap({
 
   useEffect(() => {
     const source = vectorSourceRef.current;
-    if (source) source.changed();
+    const map = mapRef.current;
+    if (!source || !map) return;
+    source.changed();
+    if (!selectedId) return;
+    const feature = source.getFeatures().find((item) => item.get("id") === selectedId);
+    const extent = feature?.getGeometry()?.getExtent();
+    if (extent) {
+      map.getView().fit(extent, {
+        padding: [90, 90, 90, 90],
+        duration: 220,
+        maxZoom: 17,
+      });
+    }
   }, [selectedId]);
 
   useEffect(() => {

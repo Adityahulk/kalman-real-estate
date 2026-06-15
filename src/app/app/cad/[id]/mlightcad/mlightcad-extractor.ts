@@ -1,3 +1,10 @@
+import GeoJSONReader from "jsts/org/locationtech/jts/io/GeoJSONReader.js";
+import GeoJSONWriter from "jsts/org/locationtech/jts/io/GeoJSONWriter.js";
+import GeometryFactory from "jsts/org/locationtech/jts/geom/GeometryFactory.js";
+import Polygonizer from "jsts/org/locationtech/jts/operation/polygonize/Polygonizer.js";
+import UnaryUnionOp from "jsts/org/locationtech/jts/operation/union/UnaryUnionOp.js";
+import RBush from "rbush";
+
 export type BrowserCadLayer = {
   name: string;
   color?: string;
@@ -7,6 +14,7 @@ export type BrowserCadLayer = {
 
 export type BrowserCadEntity = {
   sourceHandle: string;
+  sourceHandles?: string[];
   nativeType: string;
   layer: string;
   blockPath: string[];
@@ -14,6 +22,7 @@ export type BrowserCadEntity = {
   geometry: Record<string, unknown>;
   measurements?: Record<string, unknown>;
   attributes?: Record<string, unknown>;
+  suggestedType?: string;
   confidence?: number;
   validation?: Record<string, unknown>;
 };
@@ -32,6 +41,8 @@ type EntityLike = Record<string, unknown> & {
   type?: string;
   layer?: string;
   geometricExtents?: unknown;
+  blockTableRecord?: { name?: string; newIterator(): Iterable<Record<string, unknown>> };
+  blockTransform?: { elements?: number[] };
 };
 type DatabaseLike = {
   insunits: number;
@@ -43,6 +54,23 @@ type DatabaseLike = {
   };
 };
 type Point = [number, number];
+type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
+type Matrix = [number, number, number, number, number, number];
+type Segment = { sourceHandle: string; layer: string; blockPath: string[]; points: [Point, Point] };
+type TextRecord = { sourceHandle: string; layer: string; blockPath: string[]; text: string; point: Point };
+type RingRecord = { sourceHandle: string; sourceHandles: string[]; layer: string; blockPath: string[]; points: Point[] };
+type IndexedSegment = Segment & { minX: number; minY: number; maxX: number; maxY: number };
+type LabelAssignment = {
+  text: TextRecord;
+  ring: Point[];
+  distance: number;
+  match: "inside" | "nearest";
+  confidence: number;
+};
+
+const IDENTITY: Matrix = [1, 0, 0, 1, 0, 0];
+const MAX_FLATTENED_ENTITIES = 250_000;
+const MAX_TOPOLOGY_SEGMENTS = 120_000;
 
 export function extractMlightCadDatabase(database: DatabaseLike): BrowserCadExtraction {
   const bounds = databaseBounds(database);
@@ -52,134 +80,469 @@ export function extractMlightCadDatabase(database: DatabaseLike): BrowserCadExtr
     visible: !layer.isOff && !layer.isFrozen,
     purpose: inferLayerPurpose(layer.name),
   }));
-  const rawEntities = Array.from(database.tables.blockTable.modelSpace.newIterator()) as EntityLike[];
-  const textEntities = rawEntities.flatMap(textRecord);
-  const entities: BrowserCadEntity[] = [];
-  const lineSegments: Array<{ sourceHandle: string; layer: string; points: [Point, Point] }> = [];
+  const segments: Segment[] = [];
+  const texts: TextRecord[] = [];
+  const closedRings: RingRecord[] = [];
+  const assets: BrowserCadEntity[] = [];
+  const stats = { visited: 0, expandedBlocks: 0 };
 
-  for (const entity of rawEntities) {
-    const nativeType = String(entity.dxfTypeName || entity.type || entity.constructor.name).toUpperCase();
-    if (nativeType === "TEXT" || nativeType === "MTEXT") continue;
-    const sourceHandle = String(entity.objectId);
-    const layer = String(entity.layer || "0");
-
-    if (nativeType === "LWPOLYLINE" || nativeType === "POLYLINE") {
-      const points = polylinePoints(entity);
-      if (points.length < 2) continue;
-      const closed = Boolean(entity.closed);
-      if (closed && points.length >= 3) {
-        entities.push(candidateFromPoints(entity, points, true, textEntities));
-      } else if (isBusinessLayer(layer)) {
-        entities.push(candidateFromPoints(entity, points, false, textEntities));
-      }
-      continue;
-    }
-
-    if (nativeType === "LINE") {
-      const points = linePoints(entity);
-      if (!points) continue;
-      lineSegments.push({ sourceHandle, layer, points });
-      if (isLinearAssetLayer(layer)) {
-        entities.push(candidateFromPoints(entity, points, false, textEntities));
-      }
-      continue;
-    }
-
-    if (nativeType === "INSERT") {
-      const point = readPoint(entity.position);
-      if (!point) continue;
-      const blockName = String(entity.blockName || "Block");
-      const attributes = readBlockAttributes(entity);
-      entities.push({
-        sourceHandle,
-        nativeType,
-        layer,
-        blockPath: [blockName],
-        label: firstAttribute(attributes) || blockName,
-        geometry: { type: "point", point },
-        attributes,
-        confidence: isBusinessLayer(`${layer} ${blockName}`) ? 0.88 : 0.58,
-      });
-      continue;
-    }
-
-    if (nativeType === "POINT") {
-      const point = readPoint(entity.position);
-      if (point && isBusinessLayer(layer)) {
-        entities.push({
-          sourceHandle,
-          nativeType,
-          layer,
-          blockPath: [],
-          label: nearestText(point, textEntities)?.text ?? null,
-          geometry: { type: "point", point },
-          confidence: 0.58,
-        });
-      }
-      continue;
-    }
-
-    if (nativeType === "CIRCLE" || nativeType === "ARC" || nativeType === "ELLIPSE") {
-      const extent = entityBounds(entity);
-      if (!extent || !isBusinessLayer(layer)) continue;
-      const center: Point = [(extent.minX + extent.maxX) / 2, (extent.minY + extent.maxY) / 2];
-      entities.push({
-        sourceHandle,
-        nativeType,
-        layer,
-        blockPath: [],
-        label: nearestText(center, textEntities)?.text ?? null,
-        geometry: { type: nativeType.toLowerCase(), center, bounds: extent },
-        confidence: 0.55,
-      });
-    }
+  for (const entity of database.tables.blockTable.modelSpace.newIterator()) {
+    flattenEntity(entity as EntityLike, IDENTITY, [], segments, texts, closedRings, assets, stats, new Set());
+    if (stats.visited >= MAX_FLATTENED_ENTITIES) break;
   }
 
-  entities.push(...stitchClosedLinework(lineSegments, textEntities, bounds));
+  const topology = extractTopologyCandidates(segments, closedRings, texts, bounds);
+  const entities = deduplicateEntities([...topology.entities, ...assets]);
   return {
     bounds,
     drawingUnits: unitName(database.insunits),
     layers,
-    entities: deduplicateEntities(entities),
+    entities,
     metadata: {
-      modelSpaceEntityCount: rawEntities.length,
+      modelSpaceEntityCount: stats.visited,
+      expandedBlockCount: stats.expandedBlocks,
+      segmentCount: segments.length,
+      polygonizedCellCount: topology.polygonCount,
+      validPlotLabelCount: texts.filter((text) => isValidPlotLabel(text.text)).length,
+      plotCandidateCount: entities.filter((entity) => entity.suggestedType === "PLOT").length,
       candidateCount: entities.length,
-      textEntityCount: textEntities.length,
+      textEntityCount: texts.length,
       parser: "MLightCAD",
+      extractionMethod: "topology-v2",
     },
   };
 }
 
-function candidateFromPoints(
+function flattenEntity(
   entity: EntityLike,
-  inputPoints: Point[],
+  transform: Matrix,
+  blockPath: string[],
+  segments: Segment[],
+  texts: TextRecord[],
+  closedRings: RingRecord[],
+  assets: BrowserCadEntity[],
+  stats: { visited: number; expandedBlocks: number },
+  blockStack: Set<string>,
+) {
+  if (stats.visited >= MAX_FLATTENED_ENTITIES) return;
+  stats.visited += 1;
+  const nativeType = entityType(entity);
+  const sourceHandle = String(entity.objectId);
+  const layer = String(entity.layer || "0");
+
+  if (nativeType === "INSERT") {
+    const blockName = String(entity.blockName || entity.blockTableRecord?.name || "Block");
+    const attributes = readBlockAttributes(entity);
+    const point = transformPoint(readPoint(entity.position) ?? [0, 0], transform);
+    const assetType = explicitPointAssetType(`${layer} ${blockName} ${Object.values(attributes).join(" ")}`);
+    if (assetType) {
+      assets.push({
+        sourceHandle,
+        sourceHandles: [sourceHandle],
+        nativeType,
+        layer,
+        blockPath: [...blockPath, blockName],
+        label: firstAttribute(attributes) || blockName,
+        geometry: { type: "point", point },
+        attributes,
+        suggestedType: assetType,
+        confidence: 0.9,
+        validation: { extractionMethod: "block-symbol" },
+      });
+    }
+    const record = entity.blockTableRecord;
+    if (!record?.newIterator || blockPath.length >= 12 || blockStack.has(blockName)) return;
+    const nextTransform = multiplyMatrix(transform, matrixFromBlock(entity.blockTransform));
+    const nextStack = new Set(blockStack).add(blockName);
+    stats.expandedBlocks += 1;
+    for (const child of record.newIterator()) {
+      flattenEntity(
+        child as EntityLike,
+        nextTransform,
+        [...blockPath, blockName],
+        segments,
+        texts,
+        closedRings,
+        assets,
+        stats,
+        nextStack,
+      );
+      if (stats.visited >= MAX_FLATTENED_ENTITIES) break;
+    }
+    return;
+  }
+
+  if (nativeType === "TEXT" || nativeType === "MTEXT" || nativeType === "ATTRIB" || nativeType === "ATTDEF") {
+    const text = cleanCadText(String(entity.textString || entity.contents || entity.value || ""));
+    const rawPoint = readPoint(entity.position || entity.location || entity.alignmentPoint);
+    if (text && rawPoint) {
+      texts.push({ sourceHandle, layer, blockPath, text, point: transformPoint(rawPoint, transform) });
+    }
+    return;
+  }
+
+  if (nativeType === "LWPOLYLINE" || nativeType === "POLYLINE" || nativeType === "2DPOLYLINE" || nativeType === "3DPOLYLINE") {
+    const points = polylinePoints(entity).map((point) => transformPoint(point, transform));
+    if (points.length < 2) return;
+    const closed = Boolean(entity.closed) || near(points[0], points[points.length - 1], drawingTolerance(points));
+    addPathSegments(points, closed, sourceHandle, layer, blockPath, segments);
+    if (closed && points.length >= 3) {
+      closedRings.push({
+        sourceHandle,
+        sourceHandles: [sourceHandle],
+        layer,
+        blockPath,
+        points: closeRing(points),
+      });
+    } else if (isLinearAssetLayer(layer)) {
+      assets.push({
+        sourceHandle,
+        sourceHandles: [sourceHandle],
+        nativeType,
+        layer,
+        blockPath,
+        label: null,
+        geometry: { type: "polyline", points, closed: false },
+        suggestedType: linearAssetType(layer),
+        confidence: 0.72,
+        validation: { extractionMethod: "native-linear-asset" },
+      });
+    }
+    return;
+  }
+
+  if (nativeType === "LINE") {
+    const points = linePoints(entity);
+    if (!points) return;
+    const transformed: [Point, Point] = [
+      transformPoint(points[0], transform),
+      transformPoint(points[1], transform),
+    ];
+    segments.push({ sourceHandle, layer, blockPath, points: transformed });
+    return;
+  }
+
+  if (nativeType === "POINT") {
+    const rawPoint = readPoint(entity.position);
+    const assetType = explicitPointAssetType(layer);
+    if (rawPoint && assetType) {
+      assets.push({
+        sourceHandle,
+        sourceHandles: [sourceHandle],
+        nativeType,
+        layer,
+        blockPath,
+        label: null,
+        geometry: { type: "point", point: transformPoint(rawPoint, transform) },
+        suggestedType: assetType,
+        confidence: 0.68,
+      });
+    }
+  }
+}
+
+function extractTopologyCandidates(
+  segments: Segment[],
+  closedRings: RingRecord[],
+  texts: TextRecord[],
+  bounds: Bounds,
+) {
+  const tolerance = topologyTolerance(bounds, segments);
+  const topologySegments = segments
+    .slice(0, MAX_TOPOLOGY_SEGMENTS)
+    .map((segment) => ({
+      ...segment,
+      points: [
+        snapPoint(segment.points[0], tolerance),
+        snapPoint(segment.points[1], tolerance),
+      ] as [Point, Point],
+    }))
+    .filter((segment) => distance(segment.points[0], segment.points[1]) > tolerance * 0.25);
+  const polygonized = polygonize(topologySegments);
+  const segmentIndex = new RBush<IndexedSegment>();
+  segmentIndex.load(topologySegments.map(indexedSegment));
+  const layerByHandle = new Map(topologySegments.map((segment) => [segment.sourceHandle, segment.layer]));
+  const rings = deduplicateRings([
+    ...polygonized,
+    ...closedRings.map((ring) => ring.points),
+  ], tolerance);
+  const validTexts = texts.filter((text) => isValidPlotLabel(text.text));
+  const assignments = assignLabelsToRings(validTexts, rings, topologySegments, bounds);
+  const assignedRingKeys = new Set(assignments.map((assignment) => ringKey(assignment.ring, tolerance)));
+  const labelledAreas = assignments.map((assignment) => polygonArea(assignment.ring)).filter((area) => area > 0);
+  const medianArea = median(labelledAreas);
+
+  const entities: BrowserCadEntity[] = assignments.map((assignment, index) => {
+    const provenance = sourceHandlesForRing(assignment.ring, segmentIndex, tolerance);
+    const area = polygonArea(assignment.ring);
+    const perimeter = polygonPerimeter(assignment.ring);
+    const sourceHandle = topologyHandle(assignment.text.text, assignment.ring, index, tolerance);
+    return {
+      sourceHandle,
+      sourceHandles: provenance,
+      nativeType: "TOPOLOGY_POLYGON",
+      layer: dominantLayer(provenance, layerByHandle) || assignment.text.layer || "0",
+      blockPath: assignment.text.blockPath,
+      label: normalizePlotLabel(assignment.text.text),
+      geometry: { type: "polygon", points: assignment.ring, closed: true },
+      measurements: { areaCadUnits: area, perimeterCadUnits: perimeter },
+      suggestedType: "PLOT",
+      confidence: assignment.confidence,
+      validation: {
+        extractionMethod: "topology-polygonization",
+        sourceHandles: provenance,
+        labelSourceHandle: assignment.text.sourceHandle,
+        labelMatch: assignment.match,
+        topologyConfidence: assignment.confidence,
+      },
+    };
+  });
+
+  if (medianArea > 0) {
+    const unlabelled = rings
+      .filter((ring) => !assignedRingKeys.has(ringKey(ring, tolerance)))
+      .filter((ring) => {
+        const area = polygonArea(ring);
+        const ratio = area / medianArea;
+        return ratio >= 0.45 && ratio <= 2.2 && nearbyAssignedCount(ring, assignments, medianArea) >= 2;
+      })
+      .slice(0, 2_000);
+    for (const [index, ring] of unlabelled.entries()) {
+      const provenance = sourceHandlesForRing(ring, segmentIndex, tolerance);
+      entities.push({
+        sourceHandle: topologyHandle("unlabelled", ring, index, tolerance),
+        sourceHandles: provenance,
+        nativeType: "TOPOLOGY_POLYGON",
+        layer: dominantLayer(provenance, layerByHandle) || "0",
+        blockPath: [],
+        label: null,
+        geometry: { type: "polygon", points: ring, closed: true },
+        measurements: {
+          areaCadUnits: polygonArea(ring),
+          perimeterCadUnits: polygonPerimeter(ring),
+        },
+        suggestedType: "PLOT",
+        confidence: 0.58,
+        validation: {
+          extractionMethod: "topology-polygonization",
+          sourceHandles: provenance,
+          blockingCodes: ["MISSING_PLOT_LABEL"],
+        },
+      });
+    }
+  }
+
+  return { entities, polygonCount: rings.length };
+}
+
+function polygonize(segments: Segment[]): Point[][] {
+  if (!segments.length) return [];
+  try {
+    const reader = new GeoJSONReader(new GeometryFactory());
+    const writer = new GeoJSONWriter();
+    const geometry = reader.read({
+      type: "MultiLineString",
+      coordinates: segments.map((segment) => segment.points),
+    });
+    const noded = UnaryUnionOp.union(geometry);
+    const polygonizer = new Polygonizer();
+    polygonizer.add(noded);
+    const polygons = polygonizer.getPolygons();
+    const output: Point[][] = [];
+    for (let iterator = polygons.iterator(); iterator.hasNext();) {
+      const geojson = writer.write(iterator.next()) as { type?: string; coordinates?: unknown };
+      if (geojson.type !== "Polygon" || !Array.isArray(geojson.coordinates)) continue;
+      const shell = geojson.coordinates[0];
+      if (!Array.isArray(shell)) continue;
+      const points = shell.map(readCoordinate).filter((point): point is Point => Boolean(point));
+      if (points.length >= 4) output.push(closeRing(points));
+    }
+    return output;
+  } catch {
+    return [];
+  }
+}
+
+function assignLabelsToRings(
+  texts: TextRecord[],
+  rings: Point[][],
+  segments: Segment[],
+  bounds: Bounds,
+): LabelAssignment[] {
+  const diagonal = Math.hypot(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
+  const maxNearestDistance = Math.max(diagonal * 0.0025, topologyTolerance(bounds, segments) * 8);
+  const proposals: LabelAssignment[] = texts.flatMap((text): LabelAssignment[] => {
+    const containing = rings
+      .filter((ring) => pointInPolygon(text.point, ring))
+      .sort((first, second) => polygonArea(first) - polygonArea(second));
+    if (containing[0]) {
+      return [{ text, ring: containing[0], distance: 0, match: "inside" as const, confidence: 0.96 }];
+    }
+    let best: Point[] | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const ring of rings) {
+      const candidateDistance = distance(text.point, polygonCentroid(ring));
+      if (candidateDistance < bestDistance) {
+        best = ring;
+        bestDistance = candidateDistance;
+      }
+    }
+    return best && bestDistance <= maxNearestDistance
+      ? [{ text, ring: best, distance: bestDistance, match: "nearest" as const, confidence: 0.76 }]
+      : [];
+  }).sort((first, second) => {
+    if (first.distance !== second.distance) return first.distance - second.distance;
+    return polygonArea(first.ring) - polygonArea(second.ring);
+  });
+
+  const usedRings = new Set<string>();
+  const usedTextHandles = new Set<string>();
+  const assignments: LabelAssignment[] = [];
+  const tolerance = topologyTolerance(bounds, segments);
+  for (const proposal of proposals) {
+    const key = ringKey(proposal.ring, tolerance);
+    if (usedRings.has(key) || usedTextHandles.has(proposal.text.sourceHandle)) continue;
+    usedRings.add(key);
+    usedTextHandles.add(proposal.text.sourceHandle);
+    assignments.push(proposal);
+  }
+  return assignments;
+}
+
+function addPathSegments(
+  points: Point[],
   closed: boolean,
-  texts: Array<{ text: string; point: Point }>,
-): BrowserCadEntity {
-  const points = closed ? closeRing(inputPoints) : inputPoints;
-  const center = centroid(points);
+  sourceHandle: string,
+  layer: string,
+  blockPath: string[],
+  segments: Segment[],
+) {
+  const path = closed ? closeRing(points) : points;
+  for (let index = 1; index < path.length; index += 1) {
+    if (samePoint(path[index - 1], path[index])) continue;
+    segments.push({ sourceHandle, layer, blockPath, points: [path[index - 1], path[index]] });
+  }
+}
+
+function sourceHandlesForRing(ring: Point[], index: RBush<IndexedSegment>, tolerance: number) {
+  const handles = new Set<string>();
+  for (let pointIndex = 1; pointIndex < ring.length; pointIndex += 1) {
+    const midpoint: Point = [
+      (ring[pointIndex - 1][0] + ring[pointIndex][0]) / 2,
+      (ring[pointIndex - 1][1] + ring[pointIndex][1]) / 2,
+    ];
+    const candidates = index.search({
+      minX: midpoint[0] - tolerance * 2,
+      minY: midpoint[1] - tolerance * 2,
+      maxX: midpoint[0] + tolerance * 2,
+      maxY: midpoint[1] + tolerance * 2,
+    });
+    for (const segment of candidates) {
+      if (pointToSegmentDistance(midpoint, segment.points[0], segment.points[1]) <= tolerance * 2) {
+        handles.add(segment.sourceHandle);
+        if (handles.size >= 64) return [...handles];
+      }
+    }
+  }
+  return [...handles];
+}
+
+function dominantLayer(handles: string[], layerByHandle: Map<string, string>) {
+  const counts = new Map<string, number>();
+  for (const handle of handles) {
+    const layer = layerByHandle.get(handle);
+    if (!layer) continue;
+    counts.set(layer, (counts.get(layer) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((first, second) => second[1] - first[1])[0]?.[0];
+}
+
+function indexedSegment(segment: Segment): IndexedSegment {
   return {
-    sourceHandle: String(entity.objectId),
-    nativeType: String(entity.dxfTypeName || entity.type || "POLYLINE"),
-    layer: String(entity.layer || "0"),
-    blockPath: [],
-    label: nearestTextInside(points, texts)?.text ?? nearestText(center, texts)?.text ?? null,
-    geometry: { type: closed ? "polygon" : "polyline", points, closed },
-    confidence: closed ? 0.78 : 0.55,
+    ...segment,
+    minX: Math.min(segment.points[0][0], segment.points[1][0]),
+    minY: Math.min(segment.points[0][1], segment.points[1][1]),
+    maxX: Math.max(segment.points[0][0], segment.points[1][0]),
+    maxY: Math.max(segment.points[0][1], segment.points[1][1]),
   };
 }
 
-function textRecord(entity: EntityLike) {
-  const nativeType = String(entity.dxfTypeName || entity.type || "").toUpperCase();
-  if (nativeType !== "TEXT" && nativeType !== "MTEXT") return [];
-  const text = cleanCadText(String(entity.textString || entity.contents || ""));
-  const point = readPoint(entity.position || entity.location);
-  return text && point ? [{ text, point }] : [];
+function nearbyAssignedCount(
+  ring: Point[],
+  assignments: Array<{ ring: Point[] }>,
+  medianArea: number,
+) {
+  const center = polygonCentroid(ring);
+  const radius = Math.sqrt(medianArea) * 3.5;
+  return assignments.filter((assignment) => distance(center, polygonCentroid(assignment.ring)) <= radius).length;
+}
+
+function topologyTolerance(bounds: Bounds, segments: Segment[]) {
+  const diagonal = Math.hypot(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
+  const lengths = segments.slice(0, 5_000)
+    .map((segment) => distance(segment.points[0], segment.points[1]))
+    .filter((value) => value > 0)
+    .sort((a, b) => a - b);
+  const typical = lengths[Math.floor(lengths.length * 0.25)] ?? diagonal * 0.001;
+  return Math.max(diagonal * 1e-7, typical * 0.001, 1e-8);
+}
+
+function topologyHandle(label: string, ring: Point[], index: number, tolerance: number) {
+  const center = polygonCentroid(ring);
+  const scale = Math.max(tolerance, 1e-8);
+  return `topology:${normalizePlotLabel(label) || "cell"}:${Math.round(center[0] / scale)}:${Math.round(center[1] / scale)}:${index}`;
+}
+
+function ringKey(ring: Point[], tolerance: number) {
+  const center = polygonCentroid(ring);
+  const scale = Math.max(tolerance, 1e-8);
+  return `${Math.round(center[0] / scale)}:${Math.round(center[1] / scale)}:${Math.round(polygonArea(ring) / (scale * scale))}`;
+}
+
+function deduplicateRings(rings: Point[][], tolerance: number) {
+  const seen = new Set<string>();
+  return rings.filter((ring) => {
+    if (ring.length < 4 || polygonArea(ring) <= tolerance * tolerance) return false;
+    const key = ringKey(ring, tolerance);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function matrixFromBlock(value: unknown): Matrix {
+  const elements = value && typeof value === "object" && Array.isArray((value as { elements?: unknown }).elements)
+    ? (value as { elements: number[] }).elements
+    : null;
+  if (!elements || elements.length < 16) return IDENTITY;
+  return [elements[0], elements[1], elements[4], elements[5], elements[12], elements[13]];
+}
+
+function multiplyMatrix(parent: Matrix, child: Matrix): Matrix {
+  return [
+    parent[0] * child[0] + parent[2] * child[1],
+    parent[1] * child[0] + parent[3] * child[1],
+    parent[0] * child[2] + parent[2] * child[3],
+    parent[1] * child[2] + parent[3] * child[3],
+    parent[0] * child[4] + parent[2] * child[5] + parent[4],
+    parent[1] * child[4] + parent[3] * child[5] + parent[5],
+  ];
+}
+
+function transformPoint(point: Point, matrix: Matrix): Point {
+  return [
+    matrix[0] * point[0] + matrix[2] * point[1] + matrix[4],
+    matrix[1] * point[0] + matrix[3] * point[1] + matrix[5],
+  ];
+}
+
+function entityType(entity: EntityLike) {
+  return String(entity.dxfTypeName || entity.type || entity.constructor.name).toUpperCase();
 }
 
 function polylinePoints(entity: EntityLike): Point[] {
   const count = Number(entity.numberOfVertices || 0);
-  const getPoint = entity.getPoint2dAt;
+  const getPoint = entity.getPoint2dAt || entity.getPoint3dAt;
   if (!Number.isInteger(count) || count <= 0 || typeof getPoint !== "function") return [];
   const points: Point[] = [];
   for (let index = 0; index < Math.min(count, 100_000); index += 1) {
@@ -204,6 +567,16 @@ function readPoint(value: unknown): Point | null {
     : null;
 }
 
+function readCoordinate(value: unknown): Point | null {
+  return Array.isArray(value)
+    && typeof value[0] === "number"
+    && typeof value[1] === "number"
+    && Number.isFinite(value[0])
+    && Number.isFinite(value[1])
+    ? [value[0], value[1]]
+    : null;
+}
+
 function databaseBounds(database: DatabaseLike) {
   const min = readPoint(database.extmin);
   const max = readPoint(database.extmax);
@@ -224,59 +597,13 @@ function databaseBounds(database: DatabaseLike) {
 
 function entityBounds(entity: EntityLike) {
   try {
-    const box = entity.geometricExtents as unknown as Record<string, unknown> | undefined;
+    const box = entity.geometricExtents as Record<string, unknown> | undefined;
     const min = readPoint(box?.minPoint);
     const max = readPoint(box?.maxPoint);
     return min && max ? { minX: min[0], minY: min[1], maxX: max[0], maxY: max[1] } : null;
   } catch {
     return null;
   }
-}
-
-function stitchClosedLinework(
-  segments: Array<{ sourceHandle: string; layer: string; points: [Point, Point] }>,
-  texts: Array<{ text: string; point: Point }>,
-  bounds: { minX: number; minY: number; maxX: number; maxY: number },
-) {
-  if (segments.length > 25_000) return [];
-  const tolerance = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY) * 0.00001;
-  const candidates: BrowserCadEntity[] = [];
-  const byLayer = new Map<string, typeof segments>();
-  for (const segment of segments) {
-    byLayer.set(segment.layer, [...(byLayer.get(segment.layer) ?? []), segment]);
-  }
-  for (const [layer, layerSegments] of byLayer) {
-    if (!isParcelLayer(layer) || layerSegments.length > 10_000) continue;
-    const unused = new Set(layerSegments);
-    for (const first of layerSegments) {
-      if (!unused.delete(first)) continue;
-      const points: Point[] = [first.points[0], first.points[1]];
-      while (points.length < 500) {
-        const end = points[points.length - 1];
-        const next = [...unused].find((segment) => near(segment.points[0], end, tolerance) || near(segment.points[1], end, tolerance));
-        if (!next) break;
-        unused.delete(next);
-        points.push(near(next.points[0], end, tolerance) ? next.points[1] : next.points[0]);
-        if (near(points[points.length - 1], points[0], tolerance)) {
-          const ring = closeRing(points);
-          if (ring.length >= 4 && polygonArea(ring) > tolerance * tolerance) {
-            candidates.push({
-              sourceHandle: `joined:${first.sourceHandle}`,
-              nativeType: "JOINED_LINEWORK",
-              layer,
-              blockPath: [],
-              label: nearestTextInside(ring, texts)?.text ?? null,
-              geometry: { type: "polygon", points: ring, closed: true },
-              confidence: 0.68,
-              validation: { reconstructedFromLinework: true },
-            });
-          }
-          break;
-        }
-      }
-    }
-  }
-  return candidates;
 }
 
 function readBlockAttributes(entity: EntityLike) {
@@ -300,31 +627,30 @@ function firstAttribute(attributes: Record<string, unknown>) {
 }
 
 function cleanCadText(value: string) {
-  return value.replace(/\\[A-Za-z][^;]*;/g, "").replace(/[{}]/g, "").replace(/\\P/g, " ").trim().slice(0, 500);
+  return value
+    .replace(/\\[A-Za-z][^;]*;/g, "")
+    .replace(/[{}]/g, "")
+    .replace(/\\P/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 500);
 }
 
-function nearestTextInside(points: Point[], texts: Array<{ text: string; point: Point }>) {
-  return texts.find((text) => pointInPolygon(text.point, points));
+function normalizePlotLabel(value: string) {
+  return cleanCadText(value).toUpperCase().replace(/\s+/g, "");
 }
 
-function nearestText(point: Point, texts: Array<{ text: string; point: Point }>) {
-  let best: { text: string; point: Point } | undefined;
-  let bestDistance = Number.POSITIVE_INFINITY;
-  for (const text of texts) {
-    const distance = Math.hypot(text.point[0] - point[0], text.point[1] - point[1]);
-    if (distance < bestDistance) {
-      best = text;
-      bestDistance = distance;
-    }
-  }
-  return best;
+function isValidPlotLabel(value: string) {
+  const label = normalizePlotLabel(value);
+  if (!label || ["PLOT", "PLOTS", "PLOTTING", "PLOTNO.", "PLOTNO"].includes(label)) return false;
+  return /^(?:EWS[-/]?\d+|COM[-/]?\d+|COMM[-/]?\d+|(?:[A-Z]{0,3}[-/]?)?\d{1,5}[A-Z]?)$/.test(label);
 }
 
 function pointInPolygon(point: Point, polygon: Point[]) {
   let inside = false;
-  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const [xi, yi] = polygon[i];
-    const [xj, yj] = polygon[j];
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index++) {
+    const [xi, yi] = polygon[index];
+    const [xj, yj] = polygon[previous];
     const intersect = yi > point[1] !== yj > point[1]
       && point[0] < ((xj - xi) * (point[1] - yi)) / ((yj - yi) || Number.EPSILON) + xi;
     if (intersect) inside = !inside;
@@ -332,17 +658,46 @@ function pointInPolygon(point: Point, polygon: Point[]) {
   return inside;
 }
 
-function centroid(points: Point[]): Point {
-  const total = points.reduce((value, point) => [value[0] + point[0], value[1] + point[1]] as Point, [0, 0]);
-  return [total[0] / points.length, total[1] / points.length];
+function polygonCentroid(points: Point[]): Point {
+  let twiceArea = 0;
+  let x = 0;
+  let y = 0;
+  for (let index = 0; index < points.length - 1; index += 1) {
+    const cross = points[index][0] * points[index + 1][1] - points[index + 1][0] * points[index][1];
+    twiceArea += cross;
+    x += (points[index][0] + points[index + 1][0]) * cross;
+    y += (points[index][1] + points[index + 1][1]) * cross;
+  }
+  if (Math.abs(twiceArea) < 1e-12) {
+    const total = points.reduce((value, point) => [value[0] + point[0], value[1] + point[1]] as Point, [0, 0]);
+    return [total[0] / points.length, total[1] / points.length];
+  }
+  return [x / (3 * twiceArea), y / (3 * twiceArea)];
 }
 
 function closeRing(points: Point[]) {
-  return near(points[0], points[points.length - 1], 1e-9) ? points : [...points, [...points[0]] as Point];
+  return samePoint(points[0], points[points.length - 1]) ? points : [...points, [...points[0]] as Point];
+}
+
+function samePoint(first: Point, second: Point) {
+  return Math.abs(first[0] - second[0]) <= 1e-9 && Math.abs(first[1] - second[1]) <= 1e-9;
 }
 
 function near(first: Point, second: Point, tolerance: number) {
   return Math.abs(first[0] - second[0]) <= tolerance && Math.abs(first[1] - second[1]) <= tolerance;
+}
+
+function drawingTolerance(points: Point[]) {
+  const xs = points.map((point) => point[0]);
+  const ys = points.map((point) => point[1]);
+  return Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys), 1) * 1e-8;
+}
+
+function snapPoint(point: Point, tolerance: number): Point {
+  return [
+    Math.round(point[0] / tolerance) * tolerance,
+    Math.round(point[1] / tolerance) * tolerance,
+  ];
 }
 
 function polygonArea(points: Point[]) {
@@ -352,20 +707,49 @@ function polygonArea(points: Point[]) {
   )) / 2;
 }
 
-function isParcelLayer(value: string) {
-  return /PLOT|PARCEL|LOT\b|SITE|BOUNDARY|PROPERTY/i.test(value);
+function polygonPerimeter(points: Point[]) {
+  return points.slice(1).reduce((sum, point, index) => sum + distance(points[index], point), 0);
+}
+
+function distance(first: Point, second: Point) {
+  return Math.hypot(first[0] - second[0], first[1] - second[1]);
+}
+
+function pointToSegmentDistance(point: Point, start: Point, end: Point) {
+  const dx = end[0] - start[0];
+  const dy = end[1] - start[1];
+  if (dx === 0 && dy === 0) return distance(point, start);
+  const t = Math.max(0, Math.min(1, ((point[0] - start[0]) * dx + (point[1] - start[1]) * dy) / (dx * dx + dy * dy)));
+  return distance(point, [start[0] + t * dx, start[1] + t * dy]);
+}
+
+function median(values: number[]) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function explicitPointAssetType(value: string) {
+  if (/ELECT|TRANSFORMER|RMU|MPB|POLE|LIGHT|PANEL|DB\b/i.test(value)) return "ELECTRICAL_POINT";
+  if (/GATE|ENTRY|ENTRANCE/i.test(value)) return "GATE";
+  if (/UTILITY|WATER|VALVE|HYDRANT/i.test(value)) return "UTILITY";
+  return null;
+}
+
+function linearAssetType(value: string) {
+  if (/ROAD|STREET|ROW\b/i.test(value)) return "ROAD";
+  if (/DRAIN|SEWER/i.test(value)) return "DRAINAGE";
+  if (/BOUNDARY|PERIMETER/i.test(value)) return "BOUNDARY";
+  return "UTILITY";
 }
 
 function isLinearAssetLayer(value: string) {
   return /ROAD|STREET|DRAIN|SEWER|PIPE|CABLE|HT\b|LT\b|WATER|BOUNDARY/i.test(value);
 }
 
-function isBusinessLayer(value: string) {
-  return /PLOT|PARCEL|LOT\b|SITE|ROAD|STREET|PARK|GREEN|BOUNDARY|GATE|CLUB|COMMUNITY|DRAIN|SEWER|PIPE|CABLE|ELECT|TRANSFORMER|RMU|MPB|POLE|ROOM|BATH|TOILET|KITCHEN|STAIR|GARDEN|DOOR|WINDOW|WALL|STRUCT/i.test(value);
-}
-
 function inferLayerPurpose(value: string) {
-  if (isParcelLayer(value)) return "Plot boundaries";
+  if (/PLOT|PARCEL|LOT\b|SITE|PROPERTY/i.test(value)) return "Plot boundaries";
   if (/ROAD|STREET/i.test(value)) return "Roads";
   if (/ELECT|TRANSFORMER|RMU|MPB|HT\b|LT\b|POLE|CABLE/i.test(value)) return "Electrical";
   if (/DRAIN|SEWER|WATER|PIPE/i.test(value)) return "Utilities";

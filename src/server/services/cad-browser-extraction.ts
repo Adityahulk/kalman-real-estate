@@ -46,6 +46,7 @@ export const createBrowserExtractionSchema = z.object({
 
 const normalizedEntitySchema = z.object({
   sourceHandle: z.string().trim().min(1).max(256),
+  sourceHandles: z.array(z.string().trim().min(1).max(256)).max(128).optional(),
   nativeType: z.string().trim().min(1).max(100),
   layer: z.string().trim().max(500).default("0"),
   blockPath: z.array(z.string().max(300)).max(32).default([]),
@@ -470,6 +471,7 @@ function normalizeBusinessCandidate(entity: BrowserEntity, scope: CadScope) {
       parserEngine: "mlightcad-browser",
       nativeType: entity.nativeType,
       blockPath: entity.blockPath,
+      sourceHandles: entity.sourceHandles ?? [entity.sourceHandle],
     },
     sourceHandle: entity.sourceHandle,
     layer: entity.layer || "0",
@@ -495,6 +497,13 @@ function classifyCandidate(entity: BrowserEntity, geometry: Record<string, unkno
     if (/PARKING|CAR/.test(text)) return CadEntityType.PARKING;
     if (/ROOM|BED|LOUNGE|DINING|HALL/.test(text) && closed) return CadEntityType.ROOM;
   } else {
+    // A topology-derived, closed cell with a valid plot identifier is stronger
+    // evidence than a consultant's layer name. Shared plot boundaries are often
+    // drawn on ROAD, SITE, or numeric layers in real project files.
+    if (closed && isValidPlotLabel(entity.label)
+      && (entity.suggestedType === CadEntityType.PLOT || entity.nativeType === "TOPOLOGY_POLYGON")) {
+      return CadEntityType.PLOT;
+    }
     if (/ROAD|STREET|ROW\b/.test(text)) return CadEntityType.ROAD;
     if (/PARK|GREEN|GARDEN|LANDSCAPE/.test(text)) return CadEntityType.PARK;
     if (/BOUNDARY|PERIMETER/.test(text)) return CadEntityType.BOUNDARY;
@@ -508,7 +517,7 @@ function classifyCandidate(entity: BrowserEntity, geometry: Record<string, unkno
     }
   }
 
-  if (entity.suggestedType && entity.suggestedType !== CadEntityType.PLOT) {
+  if (entity.suggestedType) {
     return entity.suggestedType;
   }
   return CadEntityType.UNKNOWN;
