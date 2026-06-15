@@ -109,19 +109,32 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: { pr
     setFields((items) => items.filter((field) => field.id !== id));
   }
 
+  /**
+   * Builds the template body as structured letter HTML that is fully compatible with
+   * the downstream letter generation pipeline (isLetterStudioHtml → buildLetterStudioPdfFromHtml).
+   *
+   * When the viewer shows live PDF pages (canvas + textLayer), we extract the text
+   * content from each page's textLayer — preserving any <mark data-template-field>
+   * field tokens the user inserted — and wrap it in <section data-letter-page> sections.
+   *
+   * When the viewer shows an already-saved body (loaded from a saved template), we
+   * return that HTML directly since it already has the right structure.
+   */
   function buildBodyHtml(): string {
     if (!viewerRef.current) return "";
-    const pages = Array.from(viewerRef.current.querySelectorAll<HTMLElement>(".pdf-template-page"));
-    return pages.map((page) => {
-      const canvas = page.querySelector("canvas");
+
+    const pdfPages = viewerRef.current.querySelectorAll<HTMLElement>(".pdf-template-page");
+
+    // No canvas-based pages → viewer is showing a previously-saved letter body
+    if (!pdfPages.length) return viewerRef.current.innerHTML;
+
+    const sections = Array.from(pdfPages).map((page, index) => {
       const textLayer = page.querySelector<HTMLElement>(".textLayer");
-      if (!canvas) return "";
-      const imgSrc = canvas.toDataURL("image/jpeg", 0.75);
-      const w = canvas.width;
-      const h = canvas.height;
-      const textHtml = textLayer ? textLayer.innerHTML : "";
-      return `<div class="pdf-template-page" style="position:relative;width:${w}px;height:${h}px;max-width:100%;margin:0 auto 16px;"><img src="${imgSrc}" style="width:100%;height:100%;display:block;" /><div class="textLayer" style="position:absolute;inset:0;width:${w}px;height:${h}px;">${textHtml}</div></div>`;
-    }).join("\n");
+      const pageHtml = textLayer ? extractLetterPageHtml(textLayer) : "";
+      return `<section data-letter-page="${index + 1}" data-top="790">${pageHtml}</section>`;
+    }).join("\n\n");
+
+    return `<div data-letter-template="pdf-source">\n${sections}\n</div>`;
   }
 
   async function save() {
@@ -187,6 +200,88 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: { pr
       </section>
     </aside>
   </div>;
+}
+
+/**
+ * Extracts readable paragraph-structured HTML from a pdf.js textLayer.
+ *
+ * Approach:
+ * 1. Collect all text spans (and any top-level <mark> field tokens inserted by the user).
+ * 2. Sort by their rendered screen position (top → bottom, left → right).
+ * 3. Cluster into lines (spans within 2 px vertically).
+ * 4. Cluster lines into paragraphs (gap > 1.6× the median inter-line gap).
+ * 5. Output <p> elements with <br> for intra-paragraph line breaks,
+ *    preserving any <mark data-template-field> tokens intact.
+ *
+ * The resulting HTML is compatible with renderSection() in ambey-allotment-pdf.ts
+ * and renders correctly in both LetterStudioEditor and buildLetterStudioPdfFromHtml().
+ */
+function extractLetterPageHtml(textLayer: HTMLElement): string {
+  type Chunk = { top: number; left: number; html: string };
+  const chunks: Chunk[] = [];
+
+  function spanHtml(el: HTMLElement): string {
+    let out = "";
+    for (const child of Array.from(el.childNodes)) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        const t = (child.textContent ?? "").replace(/\s+/g, " ");
+        if (t.trim()) out += t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      } else {
+        const c = child as HTMLElement;
+        if (c.tagName === "MARK" && c.dataset.templateField) out += c.outerHTML;
+      }
+    }
+    return out;
+  }
+
+  for (const child of Array.from(textLayer.children) as HTMLElement[]) {
+    const rect = child.getBoundingClientRect();
+    if (child.tagName === "MARK" && child.dataset.templateField) {
+      // Field token inserted at a span boundary (direct child of textLayer)
+      chunks.push({ top: rect.top, left: rect.left, html: child.outerHTML });
+    } else if (child.tagName === "SPAN") {
+      const html = spanHtml(child);
+      if (html) chunks.push({ top: rect.top, left: rect.left, html });
+    }
+    // br and markedContent structural divs are skipped intentionally
+  }
+
+  if (!chunks.length) return "";
+
+  // Sort top-to-bottom, left-to-right
+  chunks.sort((a, b) => a.top !== b.top ? a.top - b.top : a.left - b.left);
+
+  // Cluster into lines (within 2 px of each other vertically)
+  const lines: Array<{ avgTop: number; parts: string[] }> = [];
+  for (const chunk of chunks) {
+    const last = lines[lines.length - 1];
+    if (last && Math.abs(chunk.top - last.avgTop) <= 2) {
+      last.parts.push(chunk.html);
+    } else {
+      lines.push({ avgTop: chunk.top, parts: [chunk.html] });
+    }
+  }
+
+  // Compute median inter-line gap to detect paragraph breaks
+  const gaps = lines.slice(1).map((l, i) => l.avgTop - lines[i].avgTop).filter((g) => g > 0.5);
+  const sorted = [...gaps].sort((a, b) => a - b);
+  const medianGap = sorted[Math.floor(sorted.length / 2)] ?? 14;
+
+  // Cluster lines into paragraphs
+  const paragraphs: string[] = [];
+  let current: string[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    current.push(lines[i].parts.join(" "));
+    const gap = i + 1 < lines.length ? lines[i + 1].avgTop - lines[i].avgTop : 9999;
+    if (gap > medianGap * 1.6) {
+      paragraphs.push(`<p>${current.join("<br>")}</p>`);
+      current = [];
+    }
+  }
+  if (current.length) paragraphs.push(`<p>${current.join("<br>")}</p>`);
+
+  return paragraphs.join("\n");
 }
 
 async function uploadTemplateSource(file: File) {
