@@ -258,19 +258,54 @@ function keyFromLabel(label: string, fields: TemplateField[]) {
 }
 
 function fieldRectsFromRange(range: Range): TemplateFieldRect[] {
+  const spans = selectedTextSpans(range);
+  if (!spans.length) return rectsFromClientRects(Array.from(range.getClientRects()));
+  const pageNumbers = new Set(spans.map((span) => Number(span.closest<HTMLElement>(".pdf-template-page")?.dataset.pageNumber || 0)));
+  if (pageNumbers.size !== 1) return [];
+  const lineRects: DOMRect[][] = [];
+  for (const span of spans) {
+    for (const rect of Array.from(span.getClientRects())) {
+      if (rect.width < 1 || rect.height < 1) continue;
+      const line = lineRects.find((items) => Math.abs(items[0].top - rect.top) <= Math.max(4, rect.height * 0.35));
+      if (line) line.push(rect);
+      else lineRects.push([rect]);
+    }
+  }
+  return rectsFromClientRects(lineRects.map(unionClientRects));
+}
+
+function selectedTextSpans(range: Range) {
+  const spans = Array.from(document.querySelectorAll<HTMLElement>(".pdf-template-page .textLayer span"));
+  return spans.filter((span) => {
+    if (!span.textContent?.trim()) return false;
+    try {
+      return range.intersectsNode(span);
+    } catch {
+      return false;
+    }
+  });
+}
+
+function rectsFromClientRects(clientRects: DOMRect[]) {
   const rects: TemplateFieldRect[] = [];
   const seen = new Set<string>();
-  for (const clientRect of Array.from(range.getClientRects())) {
+  for (const clientRect of clientRects) {
     if (clientRect.width < 1 || clientRect.height < 1) continue;
     const page = pageForRect(clientRect);
     if (!page) continue;
     const pageRect = page.getBoundingClientRect();
     const pageNumber = Number(page.dataset.pageNumber || 0);
     if (!pageNumber || pageRect.width <= 0 || pageRect.height <= 0) continue;
-    const x = clamp((clientRect.left - pageRect.left) / pageRect.width);
-    const y = clamp((clientRect.top - pageRect.top) / pageRect.height);
-    const width = clamp(clientRect.width / pageRect.width, 0, 1 - x);
-    const height = clamp(clientRect.height / pageRect.height, 0, 1 - y);
+    const padX = Math.min(8, Math.max(2, clientRect.height * 0.18));
+    const padY = Math.min(3, Math.max(1, clientRect.height * 0.08));
+    const left = clientRect.left - padX;
+    const top = clientRect.top - padY;
+    const right = clientRect.right + padX;
+    const bottom = clientRect.bottom + padY;
+    const x = clamp((left - pageRect.left) / pageRect.width);
+    const y = clamp((top - pageRect.top) / pageRect.height);
+    const width = clamp((right - left) / pageRect.width, 0, 1 - x);
+    const height = clamp((bottom - top) / pageRect.height, 0, 1 - y);
     const key = `${pageNumber}:${x.toFixed(4)}:${y.toFixed(4)}:${width.toFixed(4)}:${height.toFixed(4)}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -280,7 +315,7 @@ function fieldRectsFromRange(range: Range): TemplateFieldRect[] {
   return pages.size <= 1 ? rects : [];
 }
 
-function pageForRect(rect: DOMRect) {
+function pageForRect(rect: Pick<DOMRect, "left" | "right" | "top" | "bottom">) {
   return Array.from(document.querySelectorAll<HTMLElement>(".pdf-template-page"))
     .find((page) => {
       const pageRect = page.getBoundingClientRect();
@@ -289,6 +324,21 @@ function pageForRect(rect: DOMRect) {
         && rect.top >= pageRect.top - 1
         && rect.bottom <= pageRect.bottom + 1;
     }) ?? null;
+}
+
+function unionClientRects(rects: DOMRect[]) {
+  const left = Math.min(...rects.map((rect) => rect.left));
+  const right = Math.max(...rects.map((rect) => rect.right));
+  const top = Math.min(...rects.map((rect) => rect.top));
+  const bottom = Math.max(...rects.map((rect) => rect.bottom));
+  return {
+    left,
+    right,
+    top,
+    bottom,
+    width: right - left,
+    height: bottom - top,
+  } as DOMRect;
 }
 
 function renderFieldOverlays(fields: TemplateField[]) {

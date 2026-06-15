@@ -243,6 +243,10 @@
   pointer-events: auto;
   user-select: text;
 }
+.textLayer span {
+  padding-right: 0.12em;
+  margin-right: -0.12em;
+}
 .textLayer > :not(.markedContent),
 .textLayer .markedContent span:not(.markedContent) {
   z-index: 1;

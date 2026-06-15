@@ -111,8 +111,12 @@ function onViewerCreated() {
 
 async function onDrawingReady() {
   if (drawingReady) return;
+  const manager = await waitForDrawingDatabase();
+  if (!manager) {
+    post("kalman:studio-extraction-error", { message: "The CAD drawing opened, but its layer table was not available. Reopen the studio or export the drawing as a flattened DXF." });
+    return;
+  }
   drawingReady = true;
-  const manager = AcApDocManager.instance;
   selectionAddedListener = ({ ids }) => {
     for (const id of ids) selectedHandles.add(String(id));
     post("kalman:studio-selection", { handles: [...selectedHandles] });
@@ -141,11 +145,23 @@ async function onDrawingReady() {
     }, 80);
   };
   acdbHostApplicationServices().layoutManager.events.layoutSwitched.addEventListener(layoutSwitchedListener);
-  post("kalman:studio-layers", { layers: readLayers() });
+  const layers = readLayers();
+  post("kalman:studio-layers", { layers });
   post("kalman:studio-ready", { state: readState() });
   if (openOptions?.autoExtract) {
     await runExtraction();
   }
+}
+
+async function waitForDrawingDatabase(attempt = 0): Promise<ReturnType<typeof currentManager>> {
+  const manager = currentManager();
+  const database = manager?.curDocument?.database;
+  const hasLayers = Boolean(database?.tables?.layerTable?.newIterator && Array.from(database.tables.layerTable.newIterator()).length);
+  const hasModelSpace = Boolean(database?.tables?.blockTable?.modelSpace?.newIterator);
+  if (manager && database && hasLayers && hasModelSpace) return manager;
+  if (attempt >= 600) return null;
+  await new Promise((resolve) => window.setTimeout(resolve, 100));
+  return waitForDrawingDatabase(attempt + 1);
 }
 
 function executeCommand(command: string, payload: unknown) {

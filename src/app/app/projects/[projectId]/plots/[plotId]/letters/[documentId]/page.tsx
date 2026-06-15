@@ -29,6 +29,7 @@ export default async function LetterStudioPage({ params }: { params: { projectId
           status: document.status,
           editableHtml: document.editableHtml,
           fileAssetId: document.fileAssetId,
+          exactPdfTemplate: hasExactPdfTemplate(document.data),
         }}
         missingVariables={missingVariables}
         backHref={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=documents`}
@@ -42,4 +43,10 @@ function extractMissingVariables(data: unknown) {
   if (!data || typeof data !== "object" || Array.isArray(data)) return [];
   const value = (data as Record<string, unknown>).missingVariables;
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function hasExactPdfTemplate(data: unknown) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+  const value = (data as Record<string, unknown>).exactPdfTemplate;
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

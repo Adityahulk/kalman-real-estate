@@ -402,6 +402,7 @@ export function LetterStudioEditor({
     status: string;
     editableHtml: string | null;
     fileAssetId: string | null;
+    exactPdfTemplate?: boolean;
   };
   missingVariables: string[];
   backHref?: string;
@@ -415,6 +416,7 @@ export function LetterStudioEditor({
   const [loading, setLoading] = useState<"save" | "render" | "">("");
   const [approvalLoading, setApprovalLoading] = useState<"APPROVED" | "ISSUED" | "REJECTED" | "">("");
   const [dirty, setDirty] = useState(false);
+  const isExactPdfTemplate = Boolean(letter.exactPdfTemplate);
   const [view, setView] = useState<"edit" | "preview">(letter.fileAssetId ? "preview" : "edit");
   const [draftHtml, setDraftHtml] = useState(letter.editableHtml ?? "");
   const [fileAssetId, setFileAssetId] = useState(letter.fileAssetId);
@@ -426,6 +428,7 @@ export function LetterStudioEditor({
   }, []);
 
   function currentHtml() {
+    if (isExactPdfTemplate) return draftHtml;
     return editorRef.current?.innerHTML ?? draftHtml;
   }
 
@@ -544,22 +547,22 @@ export function LetterStudioEditor({
             <div className="flex flex-wrap items-center gap-2">
               <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 bg-white text-sm">
                 <button type="button" className={`px-3 py-2 font-medium ${view === "edit" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => changeView("edit")}>
-                  Edit Draft
+                  {isExactPdfTemplate ? "Draft PDF" : "Edit Draft"}
                 </button>
                 <button type="button" className={`px-3 py-2 font-medium ${view === "preview" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => changeView("preview")}>
                   PDF Preview
                 </button>
               </div>
-              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("bold")} disabled={view !== "edit"}>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("bold")} disabled={view !== "edit" || isExactPdfTemplate}>
                 <Bold size={14} />
               </button>
-              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("italic")} disabled={view !== "edit"}>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("italic")} disabled={view !== "edit" || isExactPdfTemplate}>
                 <Italic size={14} />
               </button>
-              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("underline")} disabled={view !== "edit"}>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("underline")} disabled={view !== "edit" || isExactPdfTemplate}>
                 <Underline size={14} />
               </button>
-              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={saveDraft} disabled={Boolean(loading)}>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={saveDraft} disabled={Boolean(loading) || isExactPdfTemplate}>
                 {loading === "save" ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
                 Save
               </button>
@@ -634,7 +637,7 @@ export function LetterStudioEditor({
           <section className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-card">
             Opening letter studio...
           </section>
-        ) : view === "edit" ? (
+        ) : view === "edit" && !isExactPdfTemplate ? (
           <LetterDraftCanvas
             key={`letter-edit-${letter.id}`}
             editorRef={editorRef}
