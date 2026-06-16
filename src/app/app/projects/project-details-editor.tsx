@@ -7,10 +7,11 @@ import { useRouter } from "next/navigation";
 type ProjectDetails = {
   id: string; name: string; city: string; state: string | null; address: string | null;
   developmentLicenses: unknown; reraNumber: string | null; landAreaAcres: string | null;
-  siteContactPhone: string | null; totalPlots: number | null;
+  siteContactPhone: string | null; totalPlots: number | null; customFields: Record<string, string>;
 };
+type CustomField = { id: string; key: string; label: string };
 
-export function ProjectDetailsEditor({ project }: { project: ProjectDetails }) {
+export function ProjectDetailsEditor({ project, customFields = [] }: { project: ProjectDetails; customFields?: CustomField[] }) {
   const router = useRouter();
   const initialLicenses = Array.isArray(project.developmentLicenses) ? project.developmentLicenses.filter((item): item is string => typeof item === "string") : [];
   const [details, setDetails] = useState({
@@ -19,6 +20,7 @@ export function ProjectDetailsEditor({ project }: { project: ProjectDetails }) {
     siteContactPhone: project.siteContactPhone ?? "", totalPlots: String(project.totalPlots ?? ""),
   });
   const [licenses, setLicenses] = useState(initialLicenses.length ? initialLicenses : [""]);
+  const [customValues, setCustomValues] = useState<Record<string, string>>(project.customFields);
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -29,6 +31,7 @@ export function ProjectDetailsEditor({ project }: { project: ProjectDetails }) {
       ...details, address: details.address || undefined, reraNumber: details.reraNumber || undefined,
       landAreaAcres: details.landAreaAcres ? Number(details.landAreaAcres) : undefined,
       totalPlots: Number(details.totalPlots), developmentLicenses: licenses.filter((value) => value.trim()),
+      customFields: Object.fromEntries(customFields.map((field) => [field.key, customValues[field.key] ?? ""])),
     }) });
     const body = await response.json(); setLoading(false);
     setMessage(response.ok ? "Project details saved." : body.error ?? "Could not save project");
@@ -43,6 +46,12 @@ export function ProjectDetailsEditor({ project }: { project: ProjectDetails }) {
           <label key={key}><span className="label">{label}</span><input className="input disabled:bg-slate-50" disabled={!editing} value={details[key as keyof typeof details]} onChange={(event) => setDetails((current) => ({ ...current, [key]: event.target.value }))} /></label>
         ))}
         <label className="md:col-span-2"><span className="label">Site address</span><textarea className="input min-h-20 disabled:bg-slate-50" disabled={!editing} value={details.address} onChange={(event) => setDetails((current) => ({ ...current, address: event.target.value }))} /></label>
+        {customFields.map((field) => (
+          <label key={field.id}>
+            <span className="label">{field.label}</span>
+            <input className="input disabled:bg-slate-50" disabled={!editing} value={customValues[field.key] ?? ""} onChange={(event) => setCustomValues((current) => ({ ...current, [field.key]: event.target.value }))} />
+          </label>
+        ))}
       </div>
       <div><span className="label">License to develop</span><div className="mt-1 space-y-2">{licenses.map((license, index) => <div className="flex gap-2" key={index}><input className="input disabled:bg-slate-50" disabled={!editing} value={license} onChange={(event) => setLicenses((current) => current.map((item, i) => i === index ? event.target.value : item))} />{editing && licenses.length > 1 ? <button className="btn-outline px-3" type="button" onClick={() => setLicenses((current) => current.filter((_, i) => i !== index))}><Trash2 size={15} /></button> : null}</div>)}</div>{editing ? <button className="btn-ghost mt-2 px-0 text-xs" type="button" onClick={() => setLicenses((current) => [...current, ""])}><Plus size={14} /> Add license line</button> : null}</div>
       {message ? <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm">{message}</div> : null}

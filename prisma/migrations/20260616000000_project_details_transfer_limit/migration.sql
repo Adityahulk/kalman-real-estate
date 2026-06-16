@@ -1,0 +1,2 @@
+ALTER TABLE "Tenant" ADD COLUMN "maxTransfersPerPlot" INTEGER NOT NULL DEFAULT 3;
+ALTER TABLE "Project" ADD COLUMN "customFields" JSONB;

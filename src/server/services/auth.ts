@@ -4,17 +4,17 @@ import { createSessionToken } from "../session";
 
 export async function login(email: string, password: string) {
   const user = await prisma.user.findUnique({
-    where: { email },
+    where: { email: email.toLowerCase().trim() },
     include: { tenant: true },
   });
 
   if (!user || user.status !== "ACTIVE") {
-    throw new Error("Invalid login");
+    throwInvalidLogin();
   }
 
   const valid = await bcrypt.compare(password, user.passwordHash);
   if (!valid) {
-    throw new Error("Invalid login");
+    throwInvalidLogin();
   }
 
   const token = await createSessionToken({
@@ -40,4 +40,10 @@ export async function login(email: string, password: string) {
       role: user.role,
     },
   };
+}
+
+function throwInvalidLogin(): never {
+  const error = new Error("Invalid email or password");
+  error.name = "UnauthorizedError";
+  throw error;
 }

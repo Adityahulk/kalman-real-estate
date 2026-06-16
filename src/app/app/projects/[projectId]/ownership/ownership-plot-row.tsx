@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Eye, FileText, Loader2, Map, X } from "lucide-react";
+import { Check, Eye, FileText, Loader2, Map, Pencil, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -100,6 +100,9 @@ export function OwnershipPlotRow({
         <div className="flex flex-wrap gap-2" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
           <button className="btn-primary h-8 px-3 text-xs" type="button" onClick={() => router.push(href)}>
             Open plot
+          </button>
+          <button className="btn-outline h-8 px-3 text-xs" type="button" onClick={() => router.push(`${href}/edit`)}>
+            <Pencil size={14} /> Edit
           </button>
           <button className="btn-outline h-8 px-3 text-xs" type="button" onClick={() => router.push(`${href}?tab=plot-map`)}>
             <Map size={14} /> Plot CAD

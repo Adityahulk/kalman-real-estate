@@ -15,9 +15,11 @@ export const defaultProjectMapFields = [
   { label: "Water sewage", key: "water_sewage" },
 ] as const;
 
+const projectFileSections = ["PROJECT_FILES", "PROJECT_MAPS", "PROJECT_DETAILS"] as const;
+
 export const projectFileFieldSchema = z.object({
   label: z.string().min(2).max(80),
-  section: z.enum(["PROJECT_FILES", "PROJECT_MAPS"]).default("PROJECT_FILES"),
+  section: z.enum(projectFileSections).default("PROJECT_FILES"),
   parentId: z.string().optional(),
 });
 
@@ -26,7 +28,7 @@ export async function createProjectFileField(context: RequestContext, input: z.i
     const parent = await prisma.projectFileField.findFirstOrThrow({
       where: { id: input.parentId, tenantId: context.tenantId, section: input.section, parentId: null },
     });
-    if (parent.section !== "PROJECT_MAPS") throw new Error("Sub-options are only available for project maps");
+    if (parent.section !== "PROJECT_MAPS" && parent.section !== "PROJECT_FILES") throw new Error("Sub-options are only available for project maps and project files");
   }
   const keyBase = input.label.toLowerCase().trim().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "field";
   let key = keyBase;

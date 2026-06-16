@@ -8,6 +8,7 @@ import {
   History,
   Landmark,
   Map,
+  Pencil,
   Upload,
   Wrench,
 } from "lucide-react";
@@ -18,7 +19,6 @@ import { prisma } from "@/server/db";
 import { fullInr } from "@/lib/format";
 import { DeleteFileButton } from "@/components/delete-file-button";
 import { DeleteCadButton } from "@/components/delete-cad-button";
-import { CadUploadForm } from "../../../../cad/cad-upload-form";
 import { DocumentApprovalButtons } from "../../../../documents/document-actions";
 import { ManualPlotZoneForm } from "../../../manual-entry-actions";
 import {
@@ -29,7 +29,7 @@ import { BackButton } from "@/components/back-button";
 export const dynamic = "force-dynamic";
 
 const primaryTabs = ["overview", "status", "ownership", "plot-map", "documents", "history"] as const;
-const advancedTabs = ["registry", "transfers", "development", "child-cad"] as const;
+const advancedTabs = ["registry", "transfers", "development"] as const;
 const tabs = [...primaryTabs, ...advancedTabs] as const;
 
 export default async function ProjectPlotWorkspacePage({
@@ -43,7 +43,7 @@ export default async function ProjectPlotWorkspacePage({
   if (!session) return null;
   const [workspace, firm] = await Promise.all([
     getPlotWorkspace({ tenantId: session.tenantId, userId: session.id, role: session.role }, params.plotId),
-    prisma.tenant.findUniqueOrThrow({ where: { id: session.tenantId }, select: { name: true } }),
+    prisma.tenant.findUniqueOrThrow({ where: { id: session.tenantId }, select: { name: true, maxTransfersPerPlot: true } }),
   ]);
   if (workspace.plot.projectId !== params.projectId) notFound();
   const plot = workspace.plot;
@@ -58,6 +58,8 @@ export default async function ProjectPlotWorkspacePage({
     : 0;
   const developmentStatus = developmentPct === 0 ? "Not started" : developmentPct >= 100 ? "Finished" : "In progress";
   const allotmentStatus = plot.currentOwnerId ? "Allotted" : "Not allotted";
+  const acceptedTransferCount = await acceptedTransferCountForPlot(session.tenantId, plot.id);
+  const transferLimitReached = acceptedTransferCount >= firm.maxTransfersPerPlot;
 
   return (
     <main className="min-h-[calc(100vh-4rem)] px-4 py-6 lg:px-8">
@@ -79,9 +81,9 @@ export default async function ProjectPlotWorkspacePage({
             <Map size={17} />
             Plot map
           </Link>
-          <Link className="btn-outline" href={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=child-cad`}>
-            <Upload size={17} />
-            Upload child CAD
+          <Link className="btn-outline" href={`/app/projects/${plot.projectId}/plots/${plot.id}/edit`}>
+            <Pencil size={17} />
+            Edit plot
           </Link>
           <Link className="btn-outline" href={`/app/projects/${plot.projectId}/ownership`}>
             Back to ledger
@@ -100,9 +102,13 @@ export default async function ProjectPlotWorkspacePage({
                 <Info label="Who allotted" value={plot.allottedBy ?? "-"} />
                 <Info label="Dimensions" value={plot.dimensions ?? "-"} />
                 <Info label="North boundary" value={boundaryValue(plot.boundaries, "north")} />
+                <Info label="North plot dimensions" value={boundaryValue(plot.boundaries, "northDimension")} />
                 <Info label="South boundary" value={boundaryValue(plot.boundaries, "south")} />
+                <Info label="South plot dimensions" value={boundaryValue(plot.boundaries, "southDimension")} />
                 <Info label="East boundary" value={boundaryValue(plot.boundaries, "east")} />
+                <Info label="East plot dimensions" value={boundaryValue(plot.boundaries, "eastDimension")} />
                 <Info label="West boundary" value={boundaryValue(plot.boundaries, "west")} />
+                <Info label="West plot dimensions" value={boundaryValue(plot.boundaries, "westDimension")} />
               </div>
             </AccordionRow>
 
@@ -145,15 +151,16 @@ export default async function ProjectPlotWorkspacePage({
 
             <AccordionRow label="Actions" value={plot.currentOwnerId ? "Transfer or registry" : "New allotment"}>
               <div className="flex flex-wrap gap-2">
-                <Link className="btn-primary justify-center" href={plot.currentOwnerId ? `/app/projects/${plot.projectId}/plots/${plot.id}/transfer` : `/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}`}>
+                {!plot.currentOwnerId || !transferLimitReached ? <Link className="btn-primary justify-center" href={plot.currentOwnerId ? `/app/projects/${plot.projectId}/plots/${plot.id}/transfer` : `/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}`}>
                   <GitBranch size={17} />
                   + {plot.currentOwnerId ? "New transfer" : "New allotment"}
-                </Link>
+                </Link> : null}
+                {plot.currentOwnerId && transferLimitReached ? <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">Transfer limit reached. Registry is the only next ownership action.</div> : null}
                 {plot.currentOwnerId ? <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/registry/update`}><Upload size={17} />{registryDocuments.length ? "+ New registry" : "Upload registry"}</Link> : null}
                 {registryDocuments.length ? <Link className="btn-outline justify-center" href={`?tab=registry`}><Landmark size={17} />View registry</Link> : null}
                 <Link className="btn-outline justify-center" href={`?tab=documents`}><FileText size={17} />Documents</Link>
                 <Link className="btn-outline justify-center" href={`?tab=history`}><History size={17} />History</Link>
-                <Link className="btn-outline justify-center" href={`?tab=child-cad`}><Map size={17} />Upload child CAD</Link>
+                <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/edit`}><Pencil size={17} />Edit plot details</Link>
               </div>
             </AccordionRow>
           </div>
@@ -190,10 +197,10 @@ export default async function ProjectPlotWorkspacePage({
           </div>
           <aside className="space-y-6">
             <ActionCard title="Ownership actions">
-              <Link className="btn-primary justify-center" href={plot.currentOwnerId ? `/app/projects/${plot.projectId}/plots/${plot.id}/transfer` : `/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}`}>
+              {!transferLimitReached || !plot.currentOwnerId ? <Link className="btn-primary justify-center" href={plot.currentOwnerId ? `/app/projects/${plot.projectId}/plots/${plot.id}/transfer` : `/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}`}>
                 <GitBranch size={17} />
                 {plot.currentOwnerId ? "New transfer" : "New allotment"}
-              </Link>
+              </Link> : <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">Transfer limit reached. Continue with registry only.</div>}
               <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/documents/upload`}>
                 <Upload size={17} />
                 Upload owner documents
@@ -213,7 +220,6 @@ export default async function ProjectPlotWorkspacePage({
             <PlotGeometryPreview geometry={plot.geometry} label={plot.code} />
           </div>
           <aside className="space-y-4">
-            <CadUploadForm projects={[{ id: plot.projectId, name: plot.project.name }]} fixedProjectId={plot.projectId} fixedParentType="PLOT" fixedParentId={plot.id} title="Upload plot map" description="Upload a DXF or PDF plot map for preview and processing." simple redirectToReview />
             <div className="card p-4"><h3 className="font-semibold">Map versions</h3><div className="mt-3 space-y-2">{workspace.childCadFiles.map((file) => <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2" key={file.id}><Link className="min-w-0 flex-1 truncate text-sm hover:text-navy-700" href={`/app/cad/${file.id}`}>{file.originalName} · v{file.version}</Link><DeleteCadButton cadFileId={file.id} fileName={file.originalName} published={file.status === "PUBLISHED"} /></div>)}{!workspace.childCadFiles.length ? <div className="text-sm text-slate-500">No plot map uploaded yet.</div> : null}</div></div>
           </aside>
         </section>
@@ -311,10 +317,10 @@ export default async function ProjectPlotWorkspacePage({
           </div>
           <aside className="space-y-6">
             <ActionCard title="Transfer actions">
-              <Link className="btn-primary justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/transfer`}>
+              {!transferLimitReached ? <Link className="btn-primary justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/transfer`}>
                 <GitBranch size={17} />
                 New transfer
-              </Link>
+              </Link> : <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">Transfer limit reached. Registry is still available.</div>}
               <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/letters/new?type=transfer_letter`}>
                 <FileText size={17} />
                 Generate transfer letter
@@ -375,45 +381,6 @@ export default async function ProjectPlotWorkspacePage({
       {activeTab === "history" ? (
         <section className="mt-4">
           <Timeline title="Plot history" items={workspace.timeline} />
-        </section>
-      ) : null}
-
-      {activeTab === "child-cad" ? (
-        <section className="mt-4 grid gap-6 xl:grid-cols-[380px_1fr]">
-          <div className="space-y-6">
-            <CadUploadForm
-              projects={[{ id: plot.projectId, name: plot.project.name }]}
-              fixedProjectId={plot.projectId}
-              fixedParentType="PLOT"
-              fixedParentId={plot.id}
-              title="Upload plot-level Map"
-              description="Upload this plot's internal Map to extract rooms, bathroom, kitchen, electrical, plumbing, garden, and finishing zones."
-              simple
-              redirectToReview
-            />
-            <ManualPlotZoneForm plotId={plot.id} />
-          </div>
-          <div className="card overflow-hidden">
-            <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-4">
-              <GitBranch size={18} />
-              <h2 className="font-semibold">Child Map versions</h2>
-            </div>
-            <div className="divide-y divide-slate-100">
-              {workspace.childCadFiles.map((file) => (
-                <div key={file.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-4 text-sm">
-                  <div>
-                    <div className="font-medium">{file.originalName}</div>
-                    <div className="mt-1 text-xs text-slate-500">v{file.version} · {file.status.replaceAll("_", " ")} · {file.scenes[0]?.id ? "scene ready" : "processing"}</div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Link className="btn-outline h-8 px-3 text-xs" href={`/app/cad/${file.id}`}>Open</Link>
-                    <DeleteCadButton cadFileId={file.id} fileName={file.originalName} published={file.status === "PUBLISHED"} />
-                  </div>
-                </div>
-              ))}
-              {!workspace.childCadFiles.length ? <div className="p-8 text-center text-sm text-slate-500">No child Map uploaded for this plot yet.</div> : null}
-            </div>
-          </div>
         </section>
       ) : null}
     </main>
@@ -701,10 +668,22 @@ function extractPoints(geometry: unknown): [number, number][] {
   return rawPoints.filter((point): point is [number, number] => Array.isArray(point) && typeof point[0] === "number" && typeof point[1] === "number");
 }
 
-function boundaryValue(boundaries: unknown, direction: "north" | "south" | "east" | "west") {
+function boundaryValue(boundaries: unknown, direction: string) {
   if (!boundaries || typeof boundaries !== "object" || Array.isArray(boundaries)) return "-";
   const value = (boundaries as Record<string, unknown>)[direction];
   return typeof value === "string" && value.trim() ? value : "-";
+}
+
+async function acceptedTransferCountForPlot(tenantId: string, plotId: string) {
+  const records = await prisma.ownershipRecord.findMany({
+    where: { tenantId, plotId, kind: "TRANSFER" },
+    select: { documentId: true },
+  });
+  const documentIds = records.map((record) => record.documentId).filter(Boolean) as string[];
+  if (!documentIds.length) return 0;
+  return prisma.generatedDocument.count({
+    where: { tenantId, id: { in: documentIds }, status: { in: ["APPROVED", "ISSUED"] } },
+  });
 }
 
 function Empty({ label }: { label: string }) {

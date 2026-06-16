@@ -1,4 +1,4 @@
-import { AuditAction, DocumentStatus, FileVisibility, GeneratedDocument, Prisma, RealEstateDocumentType } from "@prisma/client";
+import { AuditAction, DocumentStatus, FileVisibility, GeneratedDocument, OwnershipKind, PlotStatus, Prisma, RealEstateDocumentType } from "@prisma/client";
 import { z } from "zod";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
@@ -140,6 +140,7 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
       },
     });
     await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "GeneratedDocument", entityId: document.id, after: document as unknown as Prisma.InputJsonValue });
+    await linkDocumentToLatestOwnershipRecord(context, document);
     return { document, missingVariables };
   }
 
@@ -180,6 +181,7 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
     document = rendered.document;
   }
 
+  await linkDocumentToLatestOwnershipRecord(context, document);
   await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "GeneratedDocument", entityId: document.id, after: document as unknown as Prisma.InputJsonValue });
   return { document, missingVariables };
 }
@@ -327,6 +329,7 @@ export async function approveDocument(context: RequestContext, id: string, input
       approvedAt: input.status === "APPROVED" || input.status === "ISSUED" ? new Date() : undefined,
     },
   });
+  await reconcilePlotOwnershipForDocument(context, document);
   await writeAuditEvent(context, { action: input.status === "APPROVED" ? AuditAction.APPROVE : AuditAction.REJECT, entityType: "GeneratedDocument", entityId: id, after: { ...document, notes: input.notes } });
   await createNotification(context, {
     title: `Document ${input.status.toLowerCase()}`,
@@ -334,6 +337,71 @@ export async function approveDocument(context: RequestContext, id: string, input
     data: { documentId: id, status: input.status },
   });
   return document;
+}
+
+async function linkDocumentToLatestOwnershipRecord(context: RequestContext, document: GeneratedDocument) {
+  if (document.recordType !== "Plot") return;
+  const lower = document.type.toLowerCase();
+  const kind = lower.includes("transfer")
+    ? OwnershipKind.TRANSFER
+    : lower.includes("allotment")
+      ? OwnershipKind.ALLOTMENT
+      : null;
+  if (!kind) return;
+  const record = await prisma.ownershipRecord.findFirst({
+    where: { tenantId: context.tenantId, plotId: document.recordId, kind, documentId: null },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!record) return;
+  await prisma.ownershipRecord.update({ where: { id: record.id }, data: { documentId: document.id } });
+}
+
+async function reconcilePlotOwnershipForDocument(context: RequestContext, document: GeneratedDocument) {
+  if (document.recordType !== "Plot" || !document.type.toLowerCase().match(/allotment|transfer/)) return;
+  const linked = await prisma.ownershipRecord.findFirst({
+    where: { tenantId: context.tenantId, plotId: document.recordId, documentId: document.id },
+  });
+  if (!linked || (linked.kind !== OwnershipKind.ALLOTMENT && linked.kind !== OwnershipKind.TRANSFER)) return;
+
+  if (document.status === DocumentStatus.APPROVED || document.status === DocumentStatus.ISSUED) {
+    await prisma.plot.update({
+      where: { id: document.recordId },
+      data: {
+        currentOwnerId: linked.ownerId,
+        status: linked.kind === OwnershipKind.TRANSFER ? PlotStatus.TRANSFERRED : PlotStatus.ALLOTTED,
+      },
+    });
+    return;
+  }
+
+  if (document.status !== DocumentStatus.REJECTED) return;
+  const fallback = await previousAcceptedOwnership(context.tenantId, document.recordId, linked.id);
+  await prisma.plot.update({
+    where: { id: document.recordId },
+    data: fallback
+      ? {
+          currentOwnerId: fallback.ownerId,
+          status: fallback.kind === OwnershipKind.TRANSFER ? PlotStatus.TRANSFERRED : fallback.kind === OwnershipKind.ALLOTMENT ? PlotStatus.ALLOTTED : PlotStatus.COMPANY_OWNED,
+        }
+      : { currentOwnerId: null, status: PlotStatus.COMPANY_OWNED },
+  });
+}
+
+async function previousAcceptedOwnership(tenantId: string, plotId: string, excludedRecordId: string) {
+  const records = await prisma.ownershipRecord.findMany({
+    where: { tenantId, plotId, id: { not: excludedRecordId }, kind: { in: [OwnershipKind.COMPANY_INVENTORY, OwnershipKind.ALLOTMENT, OwnershipKind.TRANSFER] } },
+    orderBy: { effectiveAt: "desc" },
+  });
+  for (const record of records) {
+    if (record.kind === OwnershipKind.COMPANY_INVENTORY) return record;
+    if (!record.documentId) return record;
+    const document = await prisma.generatedDocument.findFirst({
+      where: { id: record.documentId, tenantId, status: { in: [DocumentStatus.APPROVED, DocumentStatus.ISSUED] } },
+      select: { id: true },
+    });
+    if (document) return record;
+  }
+  return null;
 }
 
 export async function getDocumentDownload(context: RequestContext, id: string) {

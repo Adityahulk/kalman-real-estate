@@ -196,24 +196,25 @@ enum AuditAction {
 }
 
 model Tenant {
-  id                String   @id @default(cuid())
-  name              String
-  slug              String   @unique
-  region            String?
-  gstin             String?
-  pan               String?
-  contactEmail      String?
-  contactPhone      String?
-  logoFileId        String?
-  logoDataUrl       String?
-  address           String?
-  authorizedPersons Json?
-  editKeyHash       String?
-  customFields      Json?
-  letterhead        Json?
-  crmUrl            String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  name                String
+  slug                String   @unique
+  region              String?
+  gstin               String?
+  pan                 String?
+  contactEmail        String?
+  contactPhone        String?
+  logoFileId          String?
+  logoDataUrl         String?
+  address             String?
+  authorizedPersons   Json?
+  editKeyHash         String?
+  customFields        Json?
+  letterhead          Json?
+  maxTransfersPerPlot Int      @default(3)
+  crmUrl              String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   users                 User[]
   projects              Project[]
@@ -289,6 +290,7 @@ model Project {
   landAreaSqft        Decimal?  @db.Decimal(14, 2)
   siteContactPhone    String?
   totalPlots          Int?
+  customFields        Json?
   whatsappShareText   String?
   status              String    @default("ACTIVE")
   budgetInr           Decimal?  @db.Decimal(14, 2)
@@ -746,7 +748,7 @@ model DocumentTemplate {
   analysisStatus String   @default("READY")
   layoutData     Json?
   analysisError  String?
-  layoutVersion Int      @default(1)
+  layoutVersion  Int      @default(1)
   active         Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -757,25 +759,25 @@ model DocumentTemplate {
 }
 
 model GeneratedDocument {
-  id           String                      @id @default(cuid())
-  tenantId     String
-  templateId   String?
-  type         String
-  status       DocumentStatus              @default(DRAFT)
-  recordType   String
-  recordId     String
-  fileAssetId  String?
-  number       String?
-  editableHtml String?
+  id             String                      @id @default(cuid())
+  tenantId       String
+  templateId     String?
+  type           String
+  status         DocumentStatus              @default(DRAFT)
+  recordType     String
+  recordId       String
+  fileAssetId    String?
+  number         String?
+  editableHtml   String?
   editableLayout Json?
-  data         Json
-  createdById  String?
-  approvedById String?
-  approvedAt   DateTime?
-  finalizedAt  DateTime?
-  createdAt    DateTime                    @default(now())
-  updatedAt    DateTime                    @updatedAt
-  revisions    GeneratedDocumentRevision[]
+  data           Json
+  createdById    String?
+  approvedById   String?
+  approvedAt     DateTime?
+  finalizedAt    DateTime?
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+  revisions      GeneratedDocumentRevision[]
 
   @@index([tenantId, recordType, recordId])
 }
