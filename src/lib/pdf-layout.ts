@@ -30,9 +30,11 @@ export const pdfLayoutFieldSchema = z.object({
   start: z.number().int().min(0).default(0),
   end: z.number().int().min(0).default(0),
   sourceText: z.string(),
+  resolvedValue: z.string().optional(),
   mapping: z.string().nullable(),
   pageNumber: z.number().int().positive().optional(),
   rect: pdfLayoutRectSchema.optional(),
+  rects: z.array(pdfLayoutRectSchema).optional(),
   style: pdfTextStyleSchema.optional(),
 });
 

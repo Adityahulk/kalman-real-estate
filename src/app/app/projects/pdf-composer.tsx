@@ -439,7 +439,13 @@ async function uploadToTarget(upload: UploadPlan, file: File): Promise<UploadTar
 }
 
 async function putFile(target: UploadTarget, file: File) {
-  const response = await fetch(target.url, { method: "PUT", headers: { "content-type": file.type || "application/octet-stream" }, body: file });
+  const isLocal = target.provider === "LOCAL" || target.url.startsWith("/");
+  const response = await fetch(target.url, {
+    method: "PUT",
+    credentials: isLocal ? "include" : "omit",
+    headers: { "content-type": file.type || "application/octet-stream" },
+    body: file,
+  });
   if (!response.ok) throw new Error(`${target.provider} upload failed`);
 }
 

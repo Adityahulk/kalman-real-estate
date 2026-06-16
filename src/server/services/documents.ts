@@ -32,7 +32,7 @@ export const updateDocumentDraftSchema = z.object({
   editableHtml: z.string().min(20).optional(),
   editableLayout: pdfLayoutDocumentSchema.optional(),
   exactPdfValues: z.record(z.string()).optional(),
-}).refine((input) => input.editableHtml || input.editableLayout, "An editable document draft is required.");
+}).refine((input) => input.editableHtml || input.editableLayout || input.exactPdfValues, "An editable document draft is required.");
 
 export async function generateDocument(context: RequestContext, input: z.infer<typeof generateDocumentSchema>) {
   const count = await prisma.generatedDocument.count({ where: { tenantId: context.tenantId, type: input.type } });

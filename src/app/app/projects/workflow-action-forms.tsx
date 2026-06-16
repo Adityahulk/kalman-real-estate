@@ -462,6 +462,7 @@ export function LetterStudioEditor({
   const [view, setView] = useState<"edit" | "preview">(isExactPdfTemplate ? "edit" : letter.fileAssetId ? "preview" : "edit");
   const [draftHtml, setDraftHtml] = useState(letter.editableHtml ?? "");
   const [fileAssetId, setFileAssetId] = useState(letter.fileAssetId);
+  const [renderVersion, setRenderVersion] = useState(0);
   const [status, setStatus] = useState(letter.status);
   const [missingOpen, setMissingOpen] = useState(false);
   const [exactPdfValues, setExactPdfValues] = useState<Record<string, string>>(
@@ -489,24 +490,32 @@ export function LetterStudioEditor({
     setDirty(true);
   }
 
+  function draftPayload() {
+    if (isPdfLayout) {
+      return { editableLayout, editableHtml: undefined, exactPdfValues: undefined };
+    }
+    const editableHtml = currentHtml();
+    return {
+      editableHtml,
+      editableLayout: undefined,
+      exactPdfValues: isExactPdfTemplate ? exactPdfValues : undefined,
+    };
+  }
+
   async function saveDraft() {
     setLoading("save");
     setMessage(null);
-    const editableHtml = currentHtml();
+    const payload = draftPayload();
     const response = await fetch(`/api/v1/documents/${letter.id}/draft`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        editableHtml: isPdfLayout ? undefined : editableHtml,
-        editableLayout: isPdfLayout ? editableLayout : undefined,
-        exactPdfValues: isExactPdfTemplate ? exactPdfValues : undefined,
-      }),
+      body: JSON.stringify(payload),
     });
     const body = await response.json();
     setLoading("");
     setMessage(response.ok ? { kind: "success", text: "Draft saved." } : { kind: "error", text: body.error ?? "Draft save failed" });
     if (response.ok) {
-      setDraftHtml(editableHtml);
+      setDraftHtml(payload.editableHtml ?? draftHtml);
       setDirty(false);
       router.refresh();
     }
@@ -515,15 +524,11 @@ export function LetterStudioEditor({
   async function renderPdf() {
     setLoading("render");
     setMessage(null);
-    const editableHtml = currentHtml();
+    const payload = draftPayload();
     const saveResponse = await fetch(`/api/v1/documents/${letter.id}/draft`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        editableHtml: isPdfLayout ? undefined : editableHtml,
-        editableLayout: isPdfLayout ? editableLayout : undefined,
-        exactPdfValues: isExactPdfTemplate ? exactPdfValues : undefined,
-      }),
+      body: JSON.stringify(payload),
     });
     const saveBody = await saveResponse.json();
     if (!saveResponse.ok) {
@@ -536,11 +541,12 @@ export function LetterStudioEditor({
     setLoading("");
     setMessage(response.ok ? { kind: "success", text: "PDF generated. Preview is ready." } : { kind: "error", text: body.error ?? "PDF generation failed" });
     if (response.ok) {
-      setDraftHtml(editableHtml);
+      setDraftHtml(payload.editableHtml ?? draftHtml);
       setDirty(false);
       setFileAssetId(body.data?.file?.id ?? body.data?.document?.fileAssetId ?? fileAssetId);
+      setRenderVersion((v) => v + 1);
       setStatus(body.data?.document?.status ?? "GENERATED");
-      changeView("preview");
+      if (!isPdfLayout) changeView("preview");
       router.refresh();
     }
   }
@@ -698,6 +704,10 @@ export function LetterStudioEditor({
               setEditableLayout(next);
               setDirty(true);
             }}
+            onGenerate={renderPdf}
+            fileAssetId={fileAssetId}
+            renderVersion={renderVersion}
+            loading={loading}
           />
         ) : view === "edit" && isExactPdfTemplate ? (
           <ExactPdfDraftEditor
@@ -720,8 +730,9 @@ export function LetterStudioEditor({
           />
         ) : (
           <LetterPdfPreview
-            key={`letter-preview-${fileAssetId ?? "empty"}`}
+            key={`letter-preview-${fileAssetId ?? "empty"}-${renderVersion}`}
             fileAssetId={fileAssetId}
+            version={renderVersion}
             loading={loading}
             onGenerate={renderPdf}
           />
@@ -761,32 +772,29 @@ function LetterDraftCanvas({
   );
 }
 
-function PdfLayoutDraftEditor({ layout, onChange }: {
+function PdfLayoutDraftEditor({ layout, onChange, onGenerate, fileAssetId, renderVersion = 0, loading = "" }: {
   layout: PdfLayoutDocument;
   onChange: (layout: PdfLayoutDocument) => void;
+  onGenerate?: () => void;
+  fileAssetId?: string | null;
+  renderVersion?: number;
+  loading?: "save" | "render" | "";
 }) {
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
+  const [previewMode, setPreviewMode] = useState<"live" | "generated">(fileAssetId ? "generated" : "live");
   const fields = layout.fields.filter((f) => f.rect && f.pageNumber);
+  const previewValues = Object.fromEntries(
+    layout.fields.map((f) => [f.id, f.resolvedValue ?? f.sourceText]),
+  );
+
+  useEffect(() => {
+    if (fileAssetId && renderVersion > 0) setPreviewMode("generated");
+  }, [fileAssetId, renderVersion]);
 
   function updateFieldValue(fieldId: string, value: string) {
     onChange({
       ...layout,
-      fields: layout.fields.map((f) => f.id === fieldId ? { ...f, sourceText: value } : f),
-      pages: layout.pages.map((page) => ({
-        ...page,
-        blocks: page.blocks.map((block) => {
-          const blockFields = layout.fields.filter((f) => f.blockId === block.id);
-          if (!blockFields.length) return block;
-          let text = block.originalText;
-          for (const field of blockFields.sort((a, b) => b.start - a.start)) {
-            const val = field.id === fieldId ? value : (field as unknown as { resolvedValue?: string }).resolvedValue ?? field.sourceText;
-            if (field.start >= 0 && field.end > 0) {
-              text = `${text.slice(0, field.start)}${val}${text.slice(field.end)}`;
-            }
-          }
-          return { ...block, text, changed: text !== block.originalText };
-        }),
-      })),
+      fields: layout.fields.map((f) => f.id === fieldId ? { ...f, resolvedValue: value } : f),
     });
   }
 
@@ -795,7 +803,7 @@ function PdfLayoutDraftEditor({ layout, onChange }: {
       <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
         <h2 className="font-semibold text-navy-900">Letter fields</h2>
         <p className="mt-1 text-xs leading-5 text-slate-500">
-          Edit field values below. The PDF preview shows the original template — changes will appear in the generated PDF.
+          Edit field values below, then click Generate. The generated PDF preserves the original document formatting.
         </p>
         <div className="mt-4 space-y-3">
           {fields.map((field) => (
@@ -804,7 +812,7 @@ function PdfLayoutDraftEditor({ layout, onChange }: {
               {field.mapping ? <span className="mt-1 block text-[11px] text-slate-400">Auto-filled from {field.mapping}</span> : null}
               <textarea
                 className="input mt-2 min-h-16 py-2 text-sm"
-                value={(field as unknown as { resolvedValue?: string }).resolvedValue ?? field.sourceText}
+                value={field.resolvedValue ?? field.sourceText}
                 placeholder={field.sourceText}
                 onChange={(e) => updateFieldValue(field.id, e.target.value)}
                 onFocus={() => setSelectedFieldId(field.id)}
@@ -817,19 +825,59 @@ function PdfLayoutDraftEditor({ layout, onChange }: {
             </div>
           ) : null}
         </div>
+        {onGenerate ? (
+          <button
+            type="button"
+            className="btn-primary mt-4 w-full justify-center"
+            onClick={onGenerate}
+            disabled={Boolean(loading)}
+          >
+            {loading === "render" ? <Loader2 className="animate-spin" size={17} /> : <Eye size={17} />}
+            Generate PDF
+          </button>
+        ) : null}
       </aside>
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-200/70 shadow-inner">
-        <div className="border-b border-slate-200 bg-white px-4 py-2 text-sm text-slate-500">
-          PDF template preview — field values will be replaced in the generated PDF.
+        <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-2">
+          <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 text-xs">
+            <button
+              type="button"
+              className={`px-3 py-1.5 font-medium ${previewMode === "live" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+              onClick={() => setPreviewMode("live")}
+            >
+              Live Preview
+            </button>
+            <button
+              type="button"
+              className={`px-3 py-1.5 font-medium ${previewMode === "generated" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+              onClick={() => setPreviewMode("generated")}
+              disabled={!fileAssetId}
+            >
+              Generated PDF
+            </button>
+          </div>
+          {previewMode === "live" ? (
+            <span className="text-xs text-slate-400">Shows your edits in place — fonts match after Generate</span>
+          ) : null}
         </div>
         <div className="max-h-[calc(100dvh-13rem)] overflow-auto p-3 md:p-6">
-          <PdfTextLayerCanvas
-            sourceUrl={`/api/v1/files/${layout.sourceFileId}/download?disposition=inline&proxy=1`}
-            layout={layout}
-            selectedFieldId={selectedFieldId}
-            onTextSelect={() => {}}
-            onFieldClick={setSelectedFieldId}
-          />
+          {previewMode === "generated" && fileAssetId ? (
+            <iframe
+              key={`gen-preview-${renderVersion}`}
+              title="Generated PDF"
+              className="h-[calc(100dvh-16rem)] min-h-[640px] w-full rounded-lg border-0 bg-white shadow-lg"
+              src={`/api/v1/files/${fileAssetId}/download?disposition=inline&proxy=1&v=${renderVersion}`}
+            />
+          ) : (
+            <PdfTextLayerCanvas
+              sourceUrl={`/api/v1/files/${layout.sourceFileId}/download?disposition=inline&proxy=1`}
+              layout={layout}
+              selectedFieldId={selectedFieldId}
+              onTextSelect={() => {}}
+              onFieldClick={setSelectedFieldId}
+              previewValues={previewValues}
+            />
+          )}
         </div>
       </section>
     </div>
@@ -896,10 +944,12 @@ function normalizeEditableTemplateFields(editor: HTMLDivElement) {
 
 function LetterPdfPreview({
   fileAssetId,
+  version = 0,
   loading,
   onGenerate,
 }: {
   fileAssetId: string | null;
+  version?: number;
   loading: "save" | "render" | "";
   onGenerate: () => void;
 }) {
@@ -910,7 +960,7 @@ function LetterPdfPreview({
           <iframe
             title="Generated PDF preview"
             className="h-full min-h-[640px] w-full border-0 bg-white"
-            src={`/api/v1/files/${fileAssetId}/download?disposition=inline&proxy=1`}
+            src={`/api/v1/files/${fileAssetId}/download?disposition=inline&proxy=1&v=${version}`}
             scrolling="yes"
           />
         </div>

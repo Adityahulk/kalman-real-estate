@@ -213,9 +213,11 @@ function hexToFloats(value: string): [number, number, number] {
   return [parseInt(match[1], 16) / 255, parseInt(match[2], 16) / 255, parseInt(match[3], 16) / 255];
 }
 
+type Rect = { x: number; y: number; width: number; height: number };
 type FieldReplacement = {
   pageNumber: number;
-  rect: { x: number; y: number; width: number; height: number };
+  rect: Rect;
+  rects?: Rect[];
   sourceText: string;
   text: string;
   fontSize: number;
@@ -324,14 +326,15 @@ export async function buildPdfFromLayoutV2(input: {
       Boolean(f.rect && f.pageNumber && f.style),
     )
     .filter((f) => {
-      const resolved = (f as unknown as { resolvedValue?: string }).resolvedValue;
-      return resolved != null && resolved !== f.sourceText;
+      const value = f.resolvedValue ?? f.sourceText;
+      return value !== f.sourceText;
     })
     .map((f) => ({
       pageNumber: f.pageNumber,
       rect: f.rect,
+      rects: f.rects,
       sourceText: f.sourceText,
-      text: (f as unknown as { resolvedValue?: string }).resolvedValue ?? f.sourceText,
+      text: f.resolvedValue ?? f.sourceText,
       fontSize: f.style.fontSize,
       fontName: f.style.fontName,
       fontWeight: f.style.fontWeight,

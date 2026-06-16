@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, MouseEvent as ReactMouseEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   CheckCircle2, ChevronLeft, ChevronRight, Highlighter,
   Loader2, Save, Trash2, Undo2, Redo2, UploadCloud,
@@ -24,9 +24,11 @@ type Template = {
   createdAt: string;
 };
 type FieldCategory = { id: string; name: string; fields: Array<{ id: string; label: string; mapping: string | null }> };
+type Rect = { x: number; y: number; width: number; height: number };
 type PendingSelection = {
   pageNumber: number;
-  rect: { x: number; y: number; width: number; height: number };
+  rect: Rect;
+  rects: Rect[];
   text: string;
   style: Partial<PdfTextStyle>;
 };
@@ -69,7 +71,7 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
       const uploadedId = await uploadTemplateSource(file);
       const analyzed = await analyzePdf(file, uploadedId, (status) => setMessage(status));
       resetEditor({ templateId: null, sourceFileId: uploadedId, sourceUrl: URL.createObjectURL(file), name: file.name.replace(/\.pdf$/i, ""), type, layout: analyzed });
-      setMessage(analyzed.warnings.length ? analyzed.warnings.join(" ") : "PDF ready. Select text and click 'Make dynamic field' to mark template placeholders.");
+      setMessage(analyzed.warnings.length ? analyzed.warnings.join(" ") : "PDF ready. Drag a box around any text and click 'Make dynamic field' to mark a placeholder.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "PDF could not be prepared.");
     } finally {
@@ -121,8 +123,8 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
   function redo() { const next = redoRef.current.pop(); if (next && layout) { undoRef.current.push(layout); setLayout(next); } }
 
   function makeField() {
-    if (!layout || !pendingSelection) return setMessage("Select text in the PDF first.");
-    const { pageNumber, rect, text, style } = pendingSelection;
+    if (!layout || !pendingSelection) return setMessage("Drag a box around text in the PDF first.");
+    const { pageNumber, rect, rects, text, style } = pendingSelection;
     const overlapping = layout.fields.some((f) =>
       f.pageNumber === pageNumber && f.rect && rectsOverlap(f.rect, rect),
     );
@@ -138,6 +140,7 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
       mapping: null,
       pageNumber,
       rect,
+      rects,
       style: {
         fontName: style.fontName ?? "Helvetica",
         fontFamily: style.fontFamily ?? "Arial",
@@ -259,7 +262,7 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
                 <UploadCloud className="mx-auto text-slate-400" size={42} />
                 <h2 className="mt-3 font-semibold text-navy-900">Upload the builder&apos;s PDF letter</h2>
                 <p className="mt-2 max-w-md text-sm text-slate-500">
-                  The PDF will display exactly as-is. Select any text and mark it as a dynamic field — it will be auto-filled when generating letters.
+                  The PDF displays exactly as-is. Drag a box around any text to mark it as a dynamic field — it will be auto-filled when generating letters.
                 </p>
               </div>
             </div>
@@ -270,7 +273,7 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
       <aside className="space-y-4 xl:max-h-[calc(100dvh-7rem)] xl:overflow-auto">
         <section className="rounded-lg border border-slate-200 bg-white p-4">
           <h2 className="font-semibold text-navy-900">Dynamic fields</h2>
-          <p className="mt-1 text-xs leading-5 text-slate-500">Select text in the PDF, then click &quot;Make dynamic field&quot;. Map each field to auto-fill from plot/owner data.</p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">Drag a box around text in the PDF, then click &quot;Make dynamic field&quot;. Map each field to auto-fill from plot/owner data.</p>
           {pendingSelection ? (
             <div className="mt-3 rounded-lg border-2 border-dashed border-blue-300 bg-blue-50/50 p-3">
               <div className="text-xs font-semibold text-blue-600">Text selected</div>
@@ -293,7 +296,7 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
               />
             ))}
             {!layout?.fields.length && !pendingSelection ? (
-              <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">No dynamic fields yet. Select text in the PDF to get started.</div>
+              <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">No dynamic fields yet. Drag a box around text in the PDF to get started.</div>
             ) : null}
           </div>
         </section>
@@ -320,7 +323,7 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
 }
 
 // ---------------------------------------------------------------------------
-// PDF canvas with native text layer
+// PDF canvas with marquee (drag-a-box) selection snapped to word boxes
 // ---------------------------------------------------------------------------
 
 const TEXT_LAYER_CSS = `
@@ -328,40 +331,88 @@ const TEXT_LAYER_CSS = `
   position: absolute;
   inset: 0;
   overflow: clip;
-  opacity: 1;
   line-height: 1;
   z-index: 2;
-  user-select: text;
-  -webkit-user-select: text;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: crosshair;
 }
 .pdf-text-layer span {
   color: transparent;
   position: absolute;
   white-space: pre;
-  cursor: text;
+  cursor: crosshair;
   transform-origin: 0% 0%;
-}
-.pdf-text-layer span::selection {
-  background: rgba(59, 130, 246, 0.35);
-}
-.pdf-text-layer span::-moz-selection {
-  background: rgba(59, 130, 246, 0.35);
+  pointer-events: none;
 }
 `;
 
-export function PdfTextLayerCanvas({ sourceUrl, layout, selectedFieldId, onTextSelect, onFieldClick }: {
+type WordBox = { text: string; left: number; top: number; right: number; bottom: number };
+
+function collectSpanBoxes(textLayerDiv: HTMLDivElement, containerRect: DOMRect): WordBox[] {
+  const boxes: WordBox[] = [];
+  const spans = textLayerDiv.querySelectorAll("span");
+  for (const span of spans) {
+    const textNode = span.firstChild;
+    if (!textNode || textNode.nodeType !== Node.TEXT_NODE) continue;
+    const fullText = textNode.textContent ?? "";
+    if (!fullText.trim()) continue;
+    const spanRect = span.getBoundingClientRect();
+    if (spanRect.width < 0.4 || spanRect.height < 0.4) continue;
+
+    // Split the span text into words and compute each word's box.
+    // The Range API ignores CSS scaleX, so we compute a correction factor
+    // from the span's element box (which includes scaleX) vs Range over full text.
+    const fullRange = document.createRange();
+    fullRange.selectNodeContents(textNode);
+    const fullRangeRect = fullRange.getBoundingClientRect();
+    const scaleCorrection = fullRangeRect.width > 0 ? spanRect.width / fullRangeRect.width : 1;
+
+    const wordPattern = /\S+/g;
+    let match: RegExpExecArray | null;
+    while ((match = wordPattern.exec(fullText)) !== null) {
+      const start = match.index;
+      const end = start + match[0].length;
+      const range = document.createRange();
+      range.setStart(textNode, start);
+      range.setEnd(textNode, end);
+      const rr = range.getBoundingClientRect();
+      if (rr.width < 0.1 || rr.height < 0.1) continue;
+      // Scale the Range rect's horizontal positions by the correction factor,
+      // anchored to the span's left edge.
+      const rawLeft = rr.left - spanRect.left;
+      const rawRight = rr.right - spanRect.left;
+      const corrLeft = spanRect.left + rawLeft * scaleCorrection;
+      const corrRight = spanRect.left + rawRight * scaleCorrection;
+      boxes.push({
+        text: match[0],
+        left: corrLeft - containerRect.left,
+        top: spanRect.top - containerRect.top,
+        right: corrRight - containerRect.left,
+        bottom: spanRect.bottom - containerRect.top,
+      });
+    }
+  }
+  return boxes;
+}
+
+export function PdfTextLayerCanvas({ sourceUrl, layout, selectedFieldId, onTextSelect, onFieldClick, previewValues }: {
   sourceUrl: string;
   layout: PdfLayoutDocument;
   selectedFieldId: string | null;
   onTextSelect: (selection: PendingSelection | null) => void;
   onFieldClick: (fieldId: string) => void;
+  previewValues?: Record<string, string>;
 }) {
+  const isPreview = Boolean(previewValues);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRefs = useRef(new Map<number, HTMLCanvasElement>());
   const textLayerRefs = useRef(new Map<number, HTMLDivElement>());
   const pageContainerRefs = useRef(new Map<number, HTMLDivElement>());
   const textContentsRef = useRef(new Map<number, TextContent>());
   const [availableWidth, setAvailableWidth] = useState(860);
+  const [marquee, setMarquee] = useState<{ pageNumber: number; x0: number; y0: number; x1: number; y1: number } | null>(null);
+  const dragRef = useRef<{ pageNumber: number; startX: number; startY: number } | null>(null);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -389,7 +440,6 @@ export function PdfTextLayerCanvas({ sourceUrl, layout, selectedFieldId, onTextS
         const scale = displayWidth / pageData.width;
         const viewport = page.getViewport({ scale });
 
-        // Render canvas
         const dpr = Math.min(2, window.devicePixelRatio || 1);
         canvas.width = Math.ceil(viewport.width * dpr);
         canvas.height = Math.ceil(viewport.height * dpr);
@@ -399,10 +449,10 @@ export function PdfTextLayerCanvas({ sourceUrl, layout, selectedFieldId, onTextS
         if (!ctx) continue;
         await page.render({ canvasContext: ctx, viewport, transform: dpr === 1 ? undefined : [dpr, 0, 0, dpr, 0, 0] }).promise;
 
-        // Render text layer
         textLayerDiv.innerHTML = "";
         textLayerDiv.style.width = `${viewport.width}px`;
         textLayerDiv.style.height = `${viewport.height}px`;
+        textLayerDiv.style.setProperty("--scale-factor", `${scale}`);
         const textContent = await page.getTextContent();
         textContentsRef.current.set(pageData.pageNumber, textContent);
 
@@ -418,51 +468,122 @@ export function PdfTextLayerCanvas({ sourceUrl, layout, selectedFieldId, onTextS
     return () => { cancelled = true; };
   }, [sourceUrl, layout.pageCount, availableWidth]);
 
-  const handleMouseUp = useCallback((pageNumber: number) => {
-    const sel = window.getSelection();
-    if (!sel || sel.isCollapsed || !sel.rangeCount) {
-      onTextSelect(null);
-      return;
-    }
-
-    const pageContainer = pageContainerRefs.current.get(pageNumber);
+  const finishMarquee = useCallback((pageNumber: number, box: { x0: number; y0: number; x1: number; y1: number }) => {
     const textLayerDiv = textLayerRefs.current.get(pageNumber);
-    if (!pageContainer || !textLayerDiv) return;
-    if (!textLayerDiv.contains(sel.anchorNode) && !textLayerDiv.contains(sel.focusNode)) return;
+    const pageContainer = pageContainerRefs.current.get(pageNumber);
+    if (!textLayerDiv || !pageContainer) { onTextSelect(null); return; }
 
-    const text = sel.toString().trim();
-    if (!text) { onTextSelect(null); return; }
-
-    const range = sel.getRangeAt(0);
-    const rects = Array.from(range.getClientRects());
-    if (!rects.length) { onTextSelect(null); return; }
+    const mx0 = Math.min(box.x0, box.x1);
+    const my0 = Math.min(box.y0, box.y1);
+    const mx1 = Math.max(box.x0, box.x1);
+    const my1 = Math.max(box.y0, box.y1);
+    // Too small a drag = a click, not a selection.
+    if (mx1 - mx0 < 4 && my1 - my0 < 4) { onTextSelect(null); return; }
 
     const containerRect = pageContainer.getBoundingClientRect();
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const r of rects) {
-      minX = Math.min(minX, r.left - containerRect.left);
-      minY = Math.min(minY, r.top - containerRect.top);
-      maxX = Math.max(maxX, r.right - containerRect.left);
-      maxY = Math.max(maxY, r.bottom - containerRect.top);
-    }
-
     const dw = containerRect.width;
     const dh = containerRect.height;
-    const normalizedRect = {
-      x: clamp(minX / dw),
-      y: clamp(minY / dh),
-      width: clamp((maxX - minX) / dw, 0.002, 1),
-      height: clamp((maxY - minY) / dh, 0.002, 1),
+
+    // Select spans whose center falls inside the marquee box.
+    const words = collectSpanBoxes(textLayerDiv, containerRect).filter((w) => {
+      const cx = (w.left + w.right) / 2;
+      const cy = (w.top + w.bottom) / 2;
+      return cx >= mx0 && cx <= mx1 && cy >= my0 && cy <= my1;
+    });
+    if (!words.length) { onTextSelect(null); return; }
+
+    // Group selected words into visual lines, building one tight rect per line.
+    words.sort((a, b) => a.top - b.top || a.left - b.left);
+    const lines: Array<{ words: WordBox[]; left: number; top: number; right: number; bottom: number }> = [];
+    for (const w of words) {
+      const cy = (w.top + w.bottom) / 2;
+      const h = w.bottom - w.top;
+      const line = lines.find((l) => {
+        const lcy = (l.top + l.bottom) / 2;
+        return Math.abs(cy - lcy) < Math.min(h, l.bottom - l.top) * 0.7;
+      });
+      if (line) {
+        line.words.push(w);
+        line.left = Math.min(line.left, w.left);
+        line.top = Math.min(line.top, w.top);
+        line.right = Math.max(line.right, w.right);
+        line.bottom = Math.max(line.bottom, w.bottom);
+      } else {
+        lines.push({ words: [w], left: w.left, top: w.top, right: w.right, bottom: w.bottom });
+      }
+    }
+
+    const rects = lines.map((l) => ({
+      x: clamp(l.left / dw),
+      y: clamp(l.top / dh),
+      width: clamp((l.right - l.left) / dw, 0.002, 1),
+      height: clamp((l.bottom - l.top) / dh, 0.002, 1),
+    }));
+    const text = lines
+      .map((l) => l.words.sort((a, b) => a.left - b.left).map((w) => w.text).join(" "))
+      .join("\n");
+
+    const bounding = {
+      x: Math.min(...rects.map((r) => r.x)),
+      y: Math.min(...rects.map((r) => r.y)),
+      width: 0,
+      height: 0,
     };
+    bounding.width = clamp(Math.max(...rects.map((r) => r.x + r.width)) - bounding.x, 0.002, 1);
+    bounding.height = clamp(Math.max(...rects.map((r) => r.y + r.height)) - bounding.y, 0.002, 1);
 
     const pageData = layout.pages.find((p) => p.pageNumber === pageNumber);
     const textContent = textContentsRef.current.get(pageNumber);
     const style = textContent && pageData
-      ? extractFontFromTextContent(textContent, normalizedRect, pageData.width, pageData.height)
+      ? extractFontFromTextContent(textContent, rects[0], pageData.width, pageData.height)
       : {};
 
-    onTextSelect({ pageNumber, rect: normalizedRect, text, style });
+    onTextSelect({ pageNumber, rect: bounding, rects, text, style });
   }, [layout, onTextSelect]);
+
+  const handleMouseDown = useCallback((e: ReactMouseEvent, pageNumber: number) => {
+    if (isPreview || e.button !== 0) return;
+    const pageContainer = pageContainerRefs.current.get(pageNumber);
+    if (!pageContainer) return;
+    const cr = pageContainer.getBoundingClientRect();
+    const startX = e.clientX - cr.left;
+    const startY = e.clientY - cr.top;
+    dragRef.current = { pageNumber, startX, startY };
+    setMarquee({ pageNumber, x0: startX, y0: startY, x1: startX, y1: startY });
+
+    const onMove = (ev: globalThis.MouseEvent) => {
+      const drag = dragRef.current;
+      if (!drag) return;
+      const rect = pageContainerRefs.current.get(drag.pageNumber)?.getBoundingClientRect();
+      if (!rect) return;
+      setMarquee({
+        pageNumber: drag.pageNumber,
+        x0: drag.startX,
+        y0: drag.startY,
+        x1: ev.clientX - rect.left,
+        y1: ev.clientY - rect.top,
+      });
+    };
+    const onUp = (ev: globalThis.MouseEvent) => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      const drag = dragRef.current;
+      dragRef.current = null;
+      setMarquee(null);
+      if (!drag) return;
+      const rect = pageContainerRefs.current.get(drag.pageNumber)?.getBoundingClientRect();
+      if (!rect) return;
+      finishMarquee(drag.pageNumber, {
+        x0: drag.startX,
+        y0: drag.startY,
+        x1: ev.clientX - rect.left,
+        y1: ev.clientY - rect.top,
+      });
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    e.preventDefault();
+  }, [isPreview, finishMarquee]);
 
   return (
     <div className="space-y-6" ref={containerRef}>
@@ -470,7 +591,9 @@ export function PdfTextLayerCanvas({ sourceUrl, layout, selectedFieldId, onTextS
       {layout.pages.map((page) => {
         const displayWidth = Math.min(860, availableWidth, page.width * 1.45);
         const displayHeight = displayWidth * page.height / page.width;
-        const pageFields = layout.fields.filter((f) => f.pageNumber === page.pageNumber && f.rect);
+        const ptToPx = displayWidth / page.width;
+        const pageFields = layout.fields.filter((f) => f.pageNumber === page.pageNumber && (f.rects?.length || f.rect));
+        const showMarquee = marquee && marquee.pageNumber === page.pageNumber;
         return (
           <div
             key={page.pageNumber}
@@ -484,33 +607,93 @@ export function PdfTextLayerCanvas({ sourceUrl, layout, selectedFieldId, onTextS
             />
             <div
               className="pdf-text-layer"
+              style={isPreview ? { cursor: "default" } : undefined}
               ref={(el) => { if (el) textLayerRefs.current.set(page.pageNumber, el); else textLayerRefs.current.delete(page.pageNumber); }}
-              onMouseUp={() => handleMouseUp(page.pageNumber)}
+              onMouseDown={(e) => handleMouseDown(e, page.pageNumber)}
             />
-            {pageFields.map((field) => (
+
+            {showMarquee ? (
               <div
-                key={field.id}
-                className={`absolute z-[3] cursor-pointer rounded-sm border-2 transition-colors ${
-                  selectedFieldId === field.id
-                    ? "border-blue-500 bg-blue-200/30"
-                    : "border-amber-400 bg-amber-100/20 hover:bg-amber-200/30"
-                }`}
+                className="pointer-events-none absolute z-[6] border-2 border-blue-500 bg-blue-400/20"
                 style={{
-                  left: `${field.rect!.x * 100}%`,
-                  top: `${field.rect!.y * 100}%`,
-                  width: `${field.rect!.width * 100}%`,
-                  height: `${field.rect!.height * 100}%`,
-                  pointerEvents: "auto",
+                  left: Math.min(marquee.x0, marquee.x1),
+                  top: Math.min(marquee.y0, marquee.y1),
+                  width: Math.abs(marquee.x1 - marquee.x0),
+                  height: Math.abs(marquee.y1 - marquee.y0),
                 }}
-                onClick={() => onFieldClick(field.id)}
-                title={field.label}
-              >
-                <span className="absolute -top-5 left-0 whitespace-nowrap rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm">
-                  {field.label.slice(0, 30)}
-                </span>
-              </div>
-            ))}
-            <span className="absolute bottom-2 right-3 z-[4] rounded bg-slate-900/70 px-2 py-1 text-xs text-white">Page {page.pageNumber}</span>
+              />
+            ) : null}
+
+            {pageFields.map((field) => {
+              const fieldRects = field.rects?.length ? field.rects : (field.rect ? [field.rect] : []);
+              const isSelected = selectedFieldId === field.id;
+              const previewText = previewValues?.[field.id];
+              const bx = field.rect ?? fieldRects[0];
+              return (
+                <div key={field.id} data-field-overlay>
+                  {/* In preview mode: white out the original text under the field. */}
+                  {isPreview ? fieldRects.map((r, i) => (
+                    <div
+                      key={`mask-${i}`}
+                      className="absolute z-[3] bg-white"
+                      style={{
+                        left: `${r.x * 100}%`,
+                        top: `${r.y * 100}%`,
+                        width: `${r.width * 100}%`,
+                        height: `${r.height * 100}%`,
+                      }}
+                    />
+                  )) : null}
+
+                  {/* Preview: render the resolved value text in place. */}
+                  {isPreview && bx ? (
+                    <div
+                      className="absolute z-[4] whitespace-pre-wrap leading-tight text-slate-900"
+                      style={{
+                        left: `${bx.x * 100}%`,
+                        top: `${bx.y * 100}%`,
+                        width: `${Math.max(bx.width, 0.3) * 100}%`,
+                        fontSize: `${Math.max(7, (field.style?.fontSize ?? 12) * ptToPx)}px`,
+                        fontFamily: field.style?.fontFamily ?? "Arial",
+                        fontWeight: (field.style?.fontWeight ?? 400) >= 600 ? 700 : 400,
+                        fontStyle: field.style?.italic ? "italic" : "normal",
+                        color: field.style?.color ?? "#111827",
+                      }}
+                    >
+                      {previewText ?? field.sourceText}
+                    </div>
+                  ) : null}
+
+                  {/* Builder: amber field outline (per line). */}
+                  {!isPreview ? fieldRects.map((r, i) => (
+                    <div
+                      key={i}
+                      className={`absolute z-[3] cursor-pointer rounded-[2px] border transition-colors ${
+                        isSelected
+                          ? "border-blue-500 bg-blue-300/40"
+                          : "border-amber-400 bg-amber-200/35 hover:bg-amber-300/50"
+                      }`}
+                      style={{
+                        left: `${r.x * 100}%`,
+                        top: `${r.y * 100}%`,
+                        width: `${r.width * 100}%`,
+                        height: `${r.height * 100}%`,
+                        pointerEvents: "auto",
+                      }}
+                      onClick={() => onFieldClick(field.id)}
+                      title={field.label}
+                    >
+                      {i === 0 ? (
+                        <span className="absolute -top-[18px] left-0 z-[5] whitespace-nowrap rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm">
+                          {field.label.slice(0, 30)}
+                        </span>
+                      ) : null}
+                    </div>
+                  )) : null}
+                </div>
+              );
+            })}
+            <span className="absolute bottom-2 right-3 z-[7] rounded bg-slate-900/70 px-2 py-1 text-xs text-white">Page {page.pageNumber}</span>
           </div>
         );
       })}
@@ -589,6 +772,7 @@ function extractFontFromTextContent(
   pageWidth: number,
   pageHeight: number,
 ): Partial<PdfTextStyle> {
+  const styles = (textContent as unknown as { styles?: Record<string, { fontFamily?: string }> }).styles ?? {};
   for (const item of textContent.items) {
     if (!("str" in item)) continue;
     const ti = item as TextItem;
@@ -599,13 +783,16 @@ function extractFontFromTextContent(
     const itemWidth = Math.max((ti.width ?? 0) / pageWidth, 0.01);
     const itemHeight = fontSize * 1.3 / pageHeight;
     if (rectsOverlap({ x, y: top, width: itemWidth, height: itemHeight }, selRect)) {
-      const fontName = (ti as unknown as { fontName?: string }).fontName ?? "Helvetica";
+      const rawFontName = (ti as unknown as { fontName?: string }).fontName ?? "";
+      const styleEntry = styles[rawFontName];
+      const resolvedFamily = styleEntry?.fontFamily || fontFamily(rawFontName);
+      const fontName = resolvedFamily || "Helvetica";
       return {
         fontName,
         fontFamily: fontFamily(fontName),
         fontSize,
-        fontWeight: /bold|black|semi/i.test(fontName) ? 700 : 400,
-        italic: /italic|oblique/i.test(fontName),
+        fontWeight: /bold|black|semi/i.test(rawFontName) || /bold|black|semi/i.test(fontName) ? 700 : 400,
+        italic: /italic|oblique/i.test(rawFontName) || /italic|oblique/i.test(fontName),
         color: "#111827",
         align: "left",
       };
@@ -640,7 +827,7 @@ async function uploadTemplateSource(file: File) {
   }
   if (!uploadOk && fallback) {
     target = fallback;
-    const fallbackResponse = await fetch(fallback.url, { method: "PUT", headers: { "content-type": file.type || "application/octet-stream" }, body: file });
+    const fallbackResponse = await fetch(fallback.url, { method: "PUT", credentials: "include", headers: { "content-type": file.type || "application/octet-stream" }, body: file });
     if (!fallbackResponse.ok) throw new Error("Source document upload failed.");
   } else if (!uploadOk) {
     throw new Error("Source document upload failed.");
