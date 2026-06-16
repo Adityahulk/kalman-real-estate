@@ -1,11 +1,19 @@
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { degrees, PDFDocument, PDFFont, PDFPage, StandardFonts, rgb } from "pdf-lib";
 import {
   PdfLayoutBlock,
   PdfLayoutDocument,
+  PdfLayoutField,
   PdfTextStyle,
   pdfLayoutBlockingIssues,
   pdfLayoutDocumentSchema,
 } from "@/lib/pdf-layout";
+
+const execFileAsync = promisify(execFile);
 
 export type PdfTemplateField = {
   id: string;
@@ -197,4 +205,144 @@ function parseHexColor(value: string) {
   const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(value);
   if (!match) return rgb(0.07, 0.09, 0.14);
   return rgb(parseInt(match[1], 16) / 255, parseInt(match[2], 16) / 255, parseInt(match[3], 16) / 255);
+}
+
+function hexToFloats(value: string): [number, number, number] {
+  const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(value);
+  if (!match) return [0.07, 0.09, 0.14];
+  return [parseInt(match[1], 16) / 255, parseInt(match[2], 16) / 255, parseInt(match[3], 16) / 255];
+}
+
+type FieldReplacement = {
+  pageNumber: number;
+  rect: { x: number; y: number; width: number; height: number };
+  sourceText: string;
+  text: string;
+  fontSize: number;
+  fontName: string;
+  fontWeight: number;
+  italic: boolean;
+  color: [number, number, number];
+  align: string;
+};
+
+function buildReplacementsFromLayout(layout: PdfLayoutDocument): FieldReplacement[] {
+  const replacements: FieldReplacement[] = [];
+  for (const page of layout.pages) {
+    for (const block of page.blocks) {
+      if (!block.changed && block.text === block.originalText) continue;
+      replacements.push({
+        pageNumber: page.pageNumber,
+        rect: block.rect,
+        sourceText: block.originalText,
+        text: block.text,
+        fontSize: block.style.fontSize,
+        fontName: block.style.fontName,
+        fontWeight: block.style.fontWeight,
+        italic: block.style.italic,
+        color: hexToFloats(block.style.color),
+        align: block.style.align,
+      });
+    }
+  }
+  return replacements;
+}
+
+function buildReplacementsFromFields(
+  fields: Array<PdfLayoutField & { rect: { x: number; y: number; width: number; height: number }; pageNumber: number; style: PdfTextStyle }>,
+  values: Record<string, string>,
+): FieldReplacement[] {
+  return fields
+    .filter((field) => {
+      const value = values[`field.${field.id}`];
+      return value != null && value !== field.sourceText;
+    })
+    .map((field) => ({
+      pageNumber: field.pageNumber,
+      rect: field.rect,
+      sourceText: field.sourceText,
+      text: values[`field.${field.id}`] ?? field.sourceText,
+      fontSize: field.style.fontSize,
+      fontName: field.style.fontName,
+      fontWeight: field.style.fontWeight,
+      italic: field.style.italic,
+      color: hexToFloats(field.style.color),
+      align: field.style.align,
+    }));
+}
+
+const RENDER_LETTER_SCRIPT = join(process.cwd(), "src/workers/cad-python/render_letter.py");
+
+export async function buildPdfWithPyMuPdf(input: {
+  bytes: Buffer;
+  replacements: FieldReplacement[];
+}): Promise<Buffer> {
+  const directory = await mkdtemp(join(tmpdir(), "letter-render-"));
+  const inputPath = join(directory, "input.pdf");
+  const outputPath = join(directory, "output.pdf");
+  const replacementsPath = join(directory, "replacements.json");
+  try {
+    await writeFile(inputPath, input.bytes);
+    await writeFile(replacementsPath, JSON.stringify(input.replacements));
+    const { stdout, stderr } = await execFileAsync(
+      "python3",
+      [RENDER_LETTER_SCRIPT, inputPath, outputPath, replacementsPath],
+      { timeout: 30_000 },
+    );
+    if (stderr) console.warn("[render_letter.py]", stderr);
+    let result: { success: boolean; applied: number };
+    try {
+      result = JSON.parse(stdout);
+    } catch {
+      throw new Error(`render_letter.py produced invalid output: ${stdout.slice(0, 200)}`);
+    }
+    if (!result.success) {
+      throw new Error("render_letter.py failed");
+    }
+    return await readFile(outputPath);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+export async function buildPdfFromLayoutV2(input: {
+  bytes: Buffer;
+  layout: PdfLayoutDocument;
+}): Promise<Buffer> {
+  const layout = pdfLayoutDocumentSchema.parse(input.layout);
+  const blockingIssues = pdfLayoutBlockingIssues(layout);
+  if (blockingIssues.length) {
+    const error = new Error(blockingIssues.join(". "));
+    error.name = "BadRequestError";
+    throw error;
+  }
+
+  const blockReplacements = buildReplacementsFromLayout(layout);
+
+  const fieldReplacements: FieldReplacement[] = layout.fields
+    .filter((f): f is PdfLayoutField & { rect: NonNullable<PdfLayoutField["rect"]>; pageNumber: number; style: NonNullable<PdfLayoutField["style"]> } =>
+      Boolean(f.rect && f.pageNumber && f.style),
+    )
+    .filter((f) => {
+      const resolved = (f as unknown as { resolvedValue?: string }).resolvedValue;
+      return resolved != null && resolved !== f.sourceText;
+    })
+    .map((f) => ({
+      pageNumber: f.pageNumber,
+      rect: f.rect,
+      sourceText: f.sourceText,
+      text: (f as unknown as { resolvedValue?: string }).resolvedValue ?? f.sourceText,
+      fontSize: f.style.fontSize,
+      fontName: f.style.fontName,
+      fontWeight: f.style.fontWeight,
+      italic: f.style.italic,
+      color: hexToFloats(f.style.color),
+      align: f.style.align,
+    }));
+
+  const replacements = [...blockReplacements, ...fieldReplacements];
+  if (!replacements.length) {
+    return input.bytes;
+  }
+  return buildPdfWithPyMuPdf({ bytes: input.bytes, replacements });
 }

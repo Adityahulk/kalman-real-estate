@@ -26,11 +26,14 @@ export const pdfLayoutFieldSchema = z.object({
   id: z.string().min(1),
   key: z.string().min(1),
   label: z.string().min(1),
-  blockId: z.string().min(1),
-  start: z.number().int().min(0),
-  end: z.number().int().positive(),
+  blockId: z.string().default(""),
+  start: z.number().int().min(0).default(0),
+  end: z.number().int().min(0).default(0),
   sourceText: z.string(),
   mapping: z.string().nullable(),
+  pageNumber: z.number().int().positive().optional(),
+  rect: pdfLayoutRectSchema.optional(),
+  style: pdfTextStyleSchema.optional(),
 });
 
 export const pdfLayoutBlockSchema = z.object({
@@ -71,6 +74,16 @@ export type PdfLayoutPage = z.infer<typeof pdfLayoutPageSchema>;
 export type PdfLayoutDocument = z.infer<typeof pdfLayoutDocumentSchema>;
 
 export function resolvePdfLayoutFields(layout: PdfLayoutDocument, variables: Record<string, string>) {
+  const hasV2Fields = layout.fields.some((f) => f.rect && f.pageNumber);
+  if (hasV2Fields) {
+    const resolvedFields = layout.fields.map((field) => ({
+      ...field,
+      resolvedValue: field.mapping
+        ? variables[field.mapping] || variables[`field.${field.id}`] || field.sourceText
+        : variables[`field.${field.id}`] || field.sourceText,
+    }));
+    return { ...layout, fields: resolvedFields };
+  }
   const pages = layout.pages.map((page) => ({
     ...page,
     blocks: page.blocks.map((block) => {

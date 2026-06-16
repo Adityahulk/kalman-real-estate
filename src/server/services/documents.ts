@@ -10,7 +10,7 @@ import { buildGeneratedDocumentPdf, buildGeneratedDocumentPdfFromHtml } from "./
 import { createNotification } from "./notifications";
 import { ambeyAllotmentTemplate, registryStatusLetterTemplate, transferLetterTemplate } from "./letter-templates";
 import { templateFields } from "./document-templates";
-import { buildPdfFromExactTemplate, buildPdfFromLayout, type PdfTemplateField } from "./pdf-template-render";
+import { buildPdfFromExactTemplate, buildPdfFromLayout, buildPdfFromLayoutV2, type PdfTemplateField } from "./pdf-template-render";
 import { pdfLayoutBlockingIssues, pdfLayoutDocumentSchema, resolvePdfLayoutFields } from "@/lib/pdf-layout";
 
 export const generateDocumentSchema = z.object({
@@ -226,7 +226,12 @@ export async function renderDocumentDraft(context: RequestContext, id: string) {
       where: { id: editableLayout.data.sourceFileId, tenantId: context.tenantId, deletedAt: null },
     });
     const sourceBytes = await getObjectResilient(source.storageKey);
-    const pdf = await buildPdfFromLayout({ bytes: sourceBytes, layout: editableLayout.data });
+    let pdf: Buffer;
+    try {
+      pdf = await buildPdfFromLayoutV2({ bytes: sourceBytes, layout: editableLayout.data });
+    } catch {
+      pdf = await buildPdfFromLayout({ bytes: sourceBytes, layout: editableLayout.data });
+    }
     return persistRenderedDocument(context, document, pdf);
   }
   const exactPdfTemplate = exactPdfTemplateFromData(document.data);

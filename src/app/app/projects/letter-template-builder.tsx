@@ -1,18 +1,18 @@
 "use client";
 
-import { ChangeEvent, CSSProperties, MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, MouseEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlignCenter, AlignLeft, AlignRight, Bold, CheckCircle2, ChevronLeft, ChevronRight,
-  Highlighter, Italic, Loader2, Redo2, Save, Trash2, Underline, Undo2, UploadCloud,
+  CheckCircle2, ChevronLeft, ChevronRight, Highlighter,
+  Loader2, Save, Trash2, Undo2, Redo2, UploadCloud,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import {
-  PdfLayoutBlock, PdfLayoutDocument, PdfLayoutField, PdfLayoutPage, PdfTextStyle,
-  pdfLayoutDocumentSchema,
+  PdfLayoutDocument, PdfLayoutField, PdfLayoutPage, PdfTextStyle,
+  pdfLayoutDocumentSchema, pdfLayoutRectSchema,
 } from "@/lib/pdf-layout";
 import { createClientId } from "@/lib/id";
 import { loadBrowserPdfJs } from "@/lib/pdfjs-browser";
-import type { PDFPageProxy } from "pdfjs-dist";
+import type { TextContent, TextItem } from "pdfjs-dist/types/src/display/api";
 
 type Template = {
   id: string;
@@ -24,7 +24,16 @@ type Template = {
   createdAt: string;
 };
 type FieldCategory = { id: string; name: string; fields: Array<{ id: string; label: string; mapping: string | null }> };
-type SavedSelection = { blockId: string; start: number; end: number; text: string };
+type PendingSelection = {
+  pageNumber: number;
+  rect: { x: number; y: number; width: number; height: number };
+  text: string;
+  style: Partial<PdfTextStyle>;
+};
+
+// ---------------------------------------------------------------------------
+// Main builder
+// ---------------------------------------------------------------------------
 
 export function LetterTemplateBuilder({ projectId, templates, categories }: {
   projectId: string;
@@ -38,8 +47,8 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
   const [sourceFileId, setSourceFileId] = useState<string | null>(null);
   const [sourceUrl, setSourceUrl] = useState<string | null>(null);
   const [layout, setLayout] = useState<PdfLayoutDocument | null>(null);
-  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
-  const [selection, setSelection] = useState<SavedSelection | null>(null);
+  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
+  const [pendingSelection, setPendingSelection] = useState<PendingSelection | null>(null);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState<"upload" | "save" | "activate" | "">("");
   const undoRef = useRef<PdfLayoutDocument[]>([]);
@@ -49,27 +58,18 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
     if (sourceUrl?.startsWith("blob:")) URL.revokeObjectURL(sourceUrl);
   }, [sourceUrl]);
 
-  const selectedBlock = useMemo(() => layout?.pages.flatMap((page) => page.blocks).find((block) => block.id === selectedBlockId) ?? null, [layout, selectedBlockId]);
-
   async function readPdf(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
     setLoading("upload");
-    setMessage("Reading PDF text and preparing editable pages...");
+    setMessage("Reading PDF and preparing pages...");
     try {
       if (!file.name.toLowerCase().endsWith(".pdf") && file.type !== "application/pdf") throw new Error("Upload a PDF file.");
       const uploadedId = await uploadTemplateSource(file);
       const analyzed = await analyzePdf(file, uploadedId, (status) => setMessage(status));
-      resetEditor({
-        templateId: null,
-        sourceFileId: uploadedId,
-        sourceUrl: URL.createObjectURL(file),
-        name: file.name.replace(/\.pdf$/i, ""),
-        type,
-        layout: analyzed,
-      });
-      setMessage(analyzed.warnings.length ? analyzed.warnings.join(" ") : "PDF ready. Edit text directly or select text to make a dynamic field.");
+      resetEditor({ templateId: null, sourceFileId: uploadedId, sourceUrl: URL.createObjectURL(file), name: file.name.replace(/\.pdf$/i, ""), type, layout: analyzed });
+      setMessage(analyzed.warnings.length ? analyzed.warnings.join(" ") : "PDF ready. Select text and click 'Make dynamic field' to mark template placeholders.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "PDF could not be prepared.");
     } finally {
@@ -85,11 +85,8 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
       if (!response.ok) throw new Error("Could not load the template PDF.");
       const blob = await response.blob();
       resetEditor({
-        templateId: template.id,
-        sourceFileId: template.sourceFileId,
-        sourceUrl: URL.createObjectURL(blob),
-        name: template.name,
-        type: template.type,
+        templateId: template.id, sourceFileId: template.sourceFileId,
+        sourceUrl: URL.createObjectURL(blob), name: template.name, type: template.type,
         layout: pdfLayoutDocumentSchema.parse(template.layoutData),
       });
       setMessage(template.active ? "Active template opened." : "Template opened. Activate it when ready.");
@@ -100,14 +97,7 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
     }
   }
 
-  function resetEditor(input: {
-    templateId: string | null;
-    sourceFileId: string;
-    sourceUrl: string;
-    name: string;
-    type: string;
-    layout: PdfLayoutDocument;
-  }) {
+  function resetEditor(input: { templateId: string | null; sourceFileId: string; sourceUrl: string; name: string; type: string; layout: PdfLayoutDocument }) {
     if (sourceUrl?.startsWith("blob:")) URL.revokeObjectURL(sourceUrl);
     setTemplateId(input.templateId);
     setSourceFileId(input.sourceFileId);
@@ -115,8 +105,8 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
     setName(input.name);
     setType(input.type);
     setLayout(input.layout);
-    setSelectedBlockId(null);
-    setSelection(null);
+    setSelectedFieldId(null);
+    setPendingSelection(null);
     undoRef.current = [];
     redoRef.current = [];
   }
@@ -127,103 +117,56 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
     setLayout(next);
   }
 
-  function updateBlock(blockId: string, update: (block: PdfLayoutBlock) => PdfLayoutBlock, track = true) {
-    if (!layout) return;
-    const next = {
-      ...layout,
-      pages: layout.pages.map((page) => ({
-        ...page,
-        blocks: page.blocks.map((block) => block.id === blockId ? update(block) : block),
-      })),
-    };
-    if (track) commit(next);
-    else setLayout(next);
-  }
-
-  function updateBlockText(blockId: string, text: string, overflow: boolean, fittedFontSize?: number) {
-    if (!layout) return;
-    const previous = layout.pages.flatMap((page) => page.blocks).find((block) => block.id === blockId);
-    if (!previous) return;
-    const fields = rebaseFields(layout.fields, previous, text);
-    const next = {
-      ...layout,
-      fields,
-      pages: layout.pages.map((page) => ({
-        ...page,
-        blocks: page.blocks.map((block) => block.id === blockId
-          ? {
-              ...block,
-              text,
-              style: fittedFontSize && fittedFontSize !== block.style.fontSize
-                ? { ...block.style, fontSize: fittedFontSize, lineHeight: fittedFontSize * (block.style.lineHeight / block.style.fontSize) }
-                : block.style,
-              changed: text !== block.originalText,
-              overflow,
-            }
-          : block),
-      })),
-    };
-    commit(next);
-  }
-
-  function undo() {
-    const previous = undoRef.current.pop();
-    if (!previous || !layout) return;
-    redoRef.current.push(layout);
-    setLayout(previous);
-  }
-
-  function redo() {
-    const next = redoRef.current.pop();
-    if (!next || !layout) return;
-    undoRef.current.push(layout);
-    setLayout(next);
-  }
-
-  function rememberSelection(event: MouseEvent<HTMLElement>, block: PdfLayoutBlock) {
-    setSelectedBlockId(block.id);
-    const browserSelection = window.getSelection();
-    if (!browserSelection?.rangeCount || browserSelection.isCollapsed) return setSelection(null);
-    const element = event.currentTarget;
-    if (!element.contains(browserSelection.anchorNode) || !element.contains(browserSelection.focusNode)) return setSelection(null);
-    const range = browserSelection.getRangeAt(0);
-    const start = textOffset(element, range.startContainer, range.startOffset);
-    const end = textOffset(element, range.endContainer, range.endOffset);
-    const from = Math.min(start, end);
-    const to = Math.max(start, end);
-    const text = element.innerText.slice(from, to);
-    setSelection(text.trim() ? { blockId: block.id, start: from, end: to, text } : null);
-  }
+  function undo() { const prev = undoRef.current.pop(); if (prev && layout) { redoRef.current.push(layout); setLayout(prev); } }
+  function redo() { const next = redoRef.current.pop(); if (next && layout) { undoRef.current.push(layout); setLayout(next); } }
 
   function makeField() {
-    if (!layout || !selection) return setMessage("Select text inside one text block first.");
-    if (layout.fields.some((field) => field.blockId === selection.blockId && rangesOverlap(field.start, field.end, selection.start, selection.end))) {
-      return setMessage("That text already overlaps another dynamic field.");
-    }
+    if (!layout || !pendingSelection) return setMessage("Select text in the PDF first.");
+    const { pageNumber, rect, text, style } = pendingSelection;
+    const overlapping = layout.fields.some((f) =>
+      f.pageNumber === pageNumber && f.rect && rectsOverlap(f.rect, rect),
+    );
+    if (overlapping) return setMessage("That area already overlaps another dynamic field.");
     const field: PdfLayoutField = {
       id: createClientId(),
-      key: uniqueFieldKey(selection.text, layout.fields),
-      label: selection.text.trim().slice(0, 100),
-      blockId: selection.blockId,
-      start: selection.start,
-      end: selection.end,
-      sourceText: selection.text,
+      key: uniqueFieldKey(text, layout.fields),
+      label: text.trim().slice(0, 100),
+      blockId: "",
+      start: 0,
+      end: 0,
+      sourceText: text,
       mapping: null,
+      pageNumber,
+      rect,
+      style: {
+        fontName: style.fontName ?? "Helvetica",
+        fontFamily: style.fontFamily ?? "Arial",
+        fontSize: style.fontSize ?? 12,
+        fontWeight: style.fontWeight ?? 400,
+        italic: style.italic ?? false,
+        underline: false,
+        color: style.color ?? "#111827",
+        align: style.align ?? "left",
+        letterSpacing: 0,
+        wordSpacing: 0,
+        lineHeight: (style.fontSize ?? 12) * 1.2,
+        rotation: 0,
+      },
     };
     commit({ ...layout, fields: [...layout.fields, field] });
-    setSelection(null);
+    setPendingSelection(null);
     window.getSelection()?.removeAllRanges();
-    setMessage("Dynamic field created. Choose its source in the Fields panel.");
+    setMessage("Dynamic field created. Choose its data source in the Fields panel.");
   }
 
   function updateField(id: string, update: (field: PdfLayoutField) => PdfLayoutField) {
     if (!layout) return;
-    commit({ ...layout, fields: layout.fields.map((field) => field.id === id ? update(field) : field) });
+    commit({ ...layout, fields: layout.fields.map((f) => f.id === id ? update(f) : f) });
   }
 
   function removeField(id: string) {
     if (!layout) return;
-    commit({ ...layout, fields: layout.fields.filter((field) => field.id !== id) });
+    commit({ ...layout, fields: layout.fields.filter((f) => f.id !== id) });
   }
 
   async function save() {
@@ -247,10 +190,7 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
   }
 
   async function activate() {
-    if (!templateId) {
-      setMessage("Save the template before activating it.");
-      return;
-    }
+    if (!templateId) return setMessage("Save the template before activating it.");
     setLoading("activate");
     const response = await fetch(`/api/v1/projects/${projectId}/letter-templates/${templateId}/activate`, { method: "POST" });
     const result = await response.json();
@@ -263,12 +203,7 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
     if (!window.confirm("Delete this PDF template?")) return;
     const response = await fetch(`/api/v1/projects/${projectId}/letter-templates/${id}`, { method: "DELETE" });
     if (response.ok) {
-      if (id === templateId) {
-        setTemplateId(null);
-        setLayout(null);
-        setSourceFileId(null);
-        setSourceUrl(null);
-      }
+      if (id === templateId) { setTemplateId(null); setLayout(null); setSourceFileId(null); setSourceUrl(null); }
       router.refresh();
     }
   }
@@ -279,11 +214,11 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
         <div className="sticky top-16 z-20 flex flex-wrap items-end gap-2 border-b border-slate-200 bg-white p-3">
           <label className="min-w-52 flex-1">
             <span className="label">Template name</span>
-            <input className="input h-10" value={name} onChange={(event) => setName(event.target.value)} />
+            <input className="input h-10" value={name} onChange={(e) => setName(e.target.value)} />
           </label>
           <label className="w-48">
             <span className="label">Letter type</span>
-            <select className="input h-10" value={type} disabled={Boolean(templateId)} onChange={(event) => setType(event.target.value)}>
+            <select className="input h-10" value={type} disabled={Boolean(templateId)} onChange={(e) => setType(e.target.value)}>
               <option value="allotment_letter">Allotment letter</option>
               <option value="transfer_letter">Transfer letter</option>
               <option value="registry_status_letter">Registry letter</option>
@@ -296,7 +231,9 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
           </label>
           <button className="btn-outline h-10 px-3" type="button" onClick={undo} disabled={!undoRef.current.length} title="Undo"><Undo2 size={16} /></button>
           <button className="btn-outline h-10 px-3" type="button" onClick={redo} disabled={!redoRef.current.length} title="Redo"><Redo2 size={16} /></button>
-          <button className="btn-outline h-10" type="button" onClick={makeField} disabled={!selection}><Highlighter size={16} />Make dynamic field</button>
+          <button className="btn-outline h-10" type="button" onClick={makeField} disabled={!pendingSelection}>
+            <Highlighter size={16} />Make dynamic field
+          </button>
           <button className="btn-primary h-10" type="button" onClick={save} disabled={!layout || Boolean(loading)}>
             {loading === "save" ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}Save
           </button>
@@ -305,30 +242,25 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
           </button>
         </div>
 
-        {selectedBlock ? (
-          <PdfLayoutFormattingToolbar
-            block={selectedBlock}
-            onChange={(style) => updateBlock(selectedBlock.id, (block) => ({ ...block, style, changed: true }))}
-          />
-        ) : null}
         {message ? <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-sm text-slate-600">{message}</div> : null}
 
         <div className="max-h-[calc(100dvh-14rem)] overflow-auto bg-slate-200 p-3 sm:p-6">
           {layout && sourceUrl ? (
-            <PdfLayoutCanvas
+            <PdfTextLayerCanvas
               sourceUrl={sourceUrl}
               layout={layout}
-              selectedBlockId={selectedBlockId}
-              onBlockSelection={rememberSelection}
-              onBlockChange={updateBlockText}
-              onConfirmOcr={(blockId) => updateBlock(blockId, (block) => ({ ...block, confirmed: true }))}
+              selectedFieldId={selectedFieldId}
+              onTextSelect={setPendingSelection}
+              onFieldClick={setSelectedFieldId}
             />
           ) : (
             <div className="grid min-h-[620px] place-items-center rounded-lg border border-dashed border-slate-300 bg-white/70 p-8 text-center">
               <div>
                 <UploadCloud className="mx-auto text-slate-400" size={42} />
                 <h2 className="mt-3 font-semibold text-navy-900">Upload the builder&apos;s PDF letter</h2>
-                <p className="mt-2 max-w-md text-sm text-slate-500">The PDF will open as editable fixed pages. Existing graphics and letterhead stay untouched.</p>
+                <p className="mt-2 max-w-md text-sm text-slate-500">
+                  The PDF will display exactly as-is. Select any text and mark it as a dynamic field — it will be auto-filled when generating letters.
+                </p>
               </div>
             </div>
           )}
@@ -338,19 +270,31 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
       <aside className="space-y-4 xl:max-h-[calc(100dvh-7rem)] xl:overflow-auto">
         <section className="rounded-lg border border-slate-200 bg-white p-4">
           <h2 className="font-semibold text-navy-900">Dynamic fields</h2>
-          <p className="mt-1 text-xs leading-5 text-slate-500">Select real text in the letter, then make it dynamic. The letter keeps showing the actual value and formatting.</p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">Select text in the PDF, then click &quot;Make dynamic field&quot;. Map each field to auto-fill from plot/owner data.</p>
+          {pendingSelection ? (
+            <div className="mt-3 rounded-lg border-2 border-dashed border-blue-300 bg-blue-50/50 p-3">
+              <div className="text-xs font-semibold text-blue-600">Text selected</div>
+              <div className="mt-1 truncate text-sm">&ldquo;{pendingSelection.text.slice(0, 80)}&rdquo;</div>
+              <button className="btn-primary mt-2 h-8 w-full justify-center text-xs" type="button" onClick={makeField}>
+                <Highlighter size={14} />Create field from selection
+              </button>
+            </div>
+          ) : null}
           <div className="mt-4 space-y-3">
             {layout?.fields.map((field) => (
               <FieldEditor
                 key={field.id}
                 field={field}
                 categories={categories}
-                onFocus={() => setSelectedBlockId(field.blockId)}
+                selected={selectedFieldId === field.id}
+                onFocus={() => setSelectedFieldId(field.id)}
                 onChange={(next) => updateField(field.id, () => next)}
                 onDelete={() => removeField(field.id)}
               />
             ))}
-            {!layout?.fields.length ? <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">No dynamic fields yet.</div> : null}
+            {!layout?.fields.length && !pendingSelection ? (
+              <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">No dynamic fields yet. Select text in the PDF to get started.</div>
+            ) : null}
           </div>
         </section>
         <section className="rounded-lg border border-slate-200 bg-white p-4">
@@ -375,23 +319,55 @@ export function LetterTemplateBuilder({ projectId, templates, categories }: {
   );
 }
 
-export function PdfLayoutCanvas({ sourceUrl, layout, selectedBlockId, onBlockSelection, onBlockChange, onConfirmOcr }: {
+// ---------------------------------------------------------------------------
+// PDF canvas with native text layer
+// ---------------------------------------------------------------------------
+
+const TEXT_LAYER_CSS = `
+.pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  z-index: 2;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.pdf-text-layer span {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.pdf-text-layer span::selection {
+  background: rgba(59, 130, 246, 0.35);
+}
+.pdf-text-layer span::-moz-selection {
+  background: rgba(59, 130, 246, 0.35);
+}
+`;
+
+export function PdfTextLayerCanvas({ sourceUrl, layout, selectedFieldId, onTextSelect, onFieldClick }: {
   sourceUrl: string;
   layout: PdfLayoutDocument;
-  selectedBlockId: string | null;
-  onBlockSelection: (event: MouseEvent<HTMLElement>, block: PdfLayoutBlock) => void;
-  onBlockChange: (blockId: string, text: string, overflow: boolean, fittedFontSize?: number) => void;
-  onConfirmOcr: (blockId: string) => void;
+  selectedFieldId: string | null;
+  onTextSelect: (selection: PendingSelection | null) => void;
+  onFieldClick: (fieldId: string) => void;
 }) {
-  const canvasRefs = useRef(new Map<number, HTMLCanvasElement>());
   const containerRef = useRef<HTMLDivElement>(null);
+  const canvasRefs = useRef(new Map<number, HTMLCanvasElement>());
+  const textLayerRefs = useRef(new Map<number, HTMLDivElement>());
+  const pageContainerRefs = useRef(new Map<number, HTMLDivElement>());
+  const textContentsRef = useRef(new Map<number, TextContent>());
   const [availableWidth, setAvailableWidth] = useState(860);
 
   useEffect(() => {
-    const element = containerRef.current;
-    if (!element) return;
+    const el = containerRef.current;
+    if (!el) return;
     const observer = new ResizeObserver(([entry]) => setAvailableWidth(Math.max(320, entry.contentRect.width)));
-    observer.observe(element);
+    observer.observe(el);
     return () => observer.disconnect();
   }, []);
 
@@ -399,141 +375,157 @@ export function PdfLayoutCanvas({ sourceUrl, layout, selectedBlockId, onBlockSel
     let cancelled = false;
     void (async () => {
       const pdfjs = await loadBrowserPdfJs();
-      const bytes = await fetch(sourceUrl).then((response) => response.arrayBuffer());
+      const bytes = await fetch(sourceUrl).then((r) => r.arrayBuffer());
       const pdf = await pdfjs.getDocument({ data: bytes }).promise;
+
       for (const pageData of layout.pages) {
+        if (cancelled) break;
         const canvas = canvasRefs.current.get(pageData.pageNumber);
-        if (!canvas || cancelled) continue;
+        const textLayerDiv = textLayerRefs.current.get(pageData.pageNumber);
+        if (!canvas || !textLayerDiv) continue;
+
         const page = await pdf.getPage(pageData.pageNumber);
-        const scale = Math.min(1.75, 860 / pageData.width);
+        const displayWidth = Math.min(860, availableWidth, pageData.width * 1.45);
+        const scale = displayWidth / pageData.width;
         const viewport = page.getViewport({ scale });
+
+        // Render canvas
         const dpr = Math.min(2, window.devicePixelRatio || 1);
         canvas.width = Math.ceil(viewport.width * dpr);
         canvas.height = Math.ceil(viewport.height * dpr);
-        canvas.style.width = "100%";
-        canvas.style.height = "100%";
-        const context = canvas.getContext("2d");
-        if (!context) continue;
-        await page.render({ canvasContext: context, viewport, transform: dpr === 1 ? undefined : [dpr, 0, 0, dpr, 0, 0] }).promise;
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) continue;
+        await page.render({ canvasContext: ctx, viewport, transform: dpr === 1 ? undefined : [dpr, 0, 0, dpr, 0, 0] }).promise;
+
+        // Render text layer
+        textLayerDiv.innerHTML = "";
+        textLayerDiv.style.width = `${viewport.width}px`;
+        textLayerDiv.style.height = `${viewport.height}px`;
+        const textContent = await page.getTextContent();
+        textContentsRef.current.set(pageData.pageNumber, textContent);
+
+        const { TextLayer } = pdfjs;
+        const textLayer = new TextLayer({
+          textContentSource: textContent,
+          container: textLayerDiv,
+          viewport,
+        });
+        await textLayer.render();
       }
     })();
     return () => { cancelled = true; };
-  }, [sourceUrl, layout.pageCount]);
+  }, [sourceUrl, layout.pageCount, availableWidth]);
 
-  return <div className="space-y-6" ref={containerRef}>
-    {layout.pages.map((page) => {
-      const displayWidth = Math.min(860, availableWidth, page.width * 1.45);
-      const displayHeight = displayWidth * page.height / page.width;
-      return (
-        <div className="relative mx-auto bg-white shadow-xl" key={page.pageNumber} style={{ width: displayWidth, height: displayHeight }}>
-          <canvas className="absolute inset-0 size-full" ref={(canvas) => {
-            if (canvas) canvasRefs.current.set(page.pageNumber, canvas);
-            else canvasRefs.current.delete(page.pageNumber);
-          }} />
-          {page.blocks.map((block) => (
-            <EditablePdfBlock
-              key={block.id}
-              block={block}
-              displayScale={displayWidth / page.width}
-              selected={selectedBlockId === block.id}
-              dynamic={layout.fields.some((field) => field.blockId === block.id)}
-              onSelection={onBlockSelection}
-              onChange={onBlockChange}
-              onConfirmOcr={onConfirmOcr}
+  const handleMouseUp = useCallback((pageNumber: number) => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.rangeCount) {
+      onTextSelect(null);
+      return;
+    }
+
+    const pageContainer = pageContainerRefs.current.get(pageNumber);
+    const textLayerDiv = textLayerRefs.current.get(pageNumber);
+    if (!pageContainer || !textLayerDiv) return;
+    if (!textLayerDiv.contains(sel.anchorNode) && !textLayerDiv.contains(sel.focusNode)) return;
+
+    const text = sel.toString().trim();
+    if (!text) { onTextSelect(null); return; }
+
+    const range = sel.getRangeAt(0);
+    const rects = Array.from(range.getClientRects());
+    if (!rects.length) { onTextSelect(null); return; }
+
+    const containerRect = pageContainer.getBoundingClientRect();
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const r of rects) {
+      minX = Math.min(minX, r.left - containerRect.left);
+      minY = Math.min(minY, r.top - containerRect.top);
+      maxX = Math.max(maxX, r.right - containerRect.left);
+      maxY = Math.max(maxY, r.bottom - containerRect.top);
+    }
+
+    const dw = containerRect.width;
+    const dh = containerRect.height;
+    const normalizedRect = {
+      x: clamp(minX / dw),
+      y: clamp(minY / dh),
+      width: clamp((maxX - minX) / dw, 0.002, 1),
+      height: clamp((maxY - minY) / dh, 0.002, 1),
+    };
+
+    const pageData = layout.pages.find((p) => p.pageNumber === pageNumber);
+    const textContent = textContentsRef.current.get(pageNumber);
+    const style = textContent && pageData
+      ? extractFontFromTextContent(textContent, normalizedRect, pageData.width, pageData.height)
+      : {};
+
+    onTextSelect({ pageNumber, rect: normalizedRect, text, style });
+  }, [layout, onTextSelect]);
+
+  return (
+    <div className="space-y-6" ref={containerRef}>
+      <style dangerouslySetInnerHTML={{ __html: TEXT_LAYER_CSS }} />
+      {layout.pages.map((page) => {
+        const displayWidth = Math.min(860, availableWidth, page.width * 1.45);
+        const displayHeight = displayWidth * page.height / page.width;
+        const pageFields = layout.fields.filter((f) => f.pageNumber === page.pageNumber && f.rect);
+        return (
+          <div
+            key={page.pageNumber}
+            ref={(el) => { if (el) pageContainerRefs.current.set(page.pageNumber, el); else pageContainerRefs.current.delete(page.pageNumber); }}
+            className="relative mx-auto overflow-hidden bg-white shadow-xl"
+            style={{ width: displayWidth, height: displayHeight }}
+          >
+            <canvas
+              className="absolute inset-0"
+              ref={(el) => { if (el) canvasRefs.current.set(page.pageNumber, el); else canvasRefs.current.delete(page.pageNumber); }}
             />
-          ))}
-          <span className="absolute bottom-2 right-3 rounded bg-slate-900/70 px-2 py-1 text-xs text-white">Page {page.pageNumber}</span>
-        </div>
-      );
-    })}
-  </div>;
-}
-
-function EditablePdfBlock({ block, displayScale, selected, dynamic, onSelection, onChange, onConfirmOcr }: {
-  block: PdfLayoutBlock;
-  displayScale: number;
-  selected: boolean;
-  dynamic: boolean;
-  onSelection: (event: MouseEvent<HTMLElement>, block: PdfLayoutBlock) => void;
-  onChange: (blockId: string, text: string, overflow: boolean, fittedFontSize?: number) => void;
-  onConfirmOcr: (blockId: string) => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (ref.current && ref.current.innerText !== block.text) ref.current.innerText = block.text;
-  }, [block.text]);
-  const style: CSSProperties = {
-    left: `${block.rect.x * 100}%`,
-    top: `${block.rect.y * 100}%`,
-    width: `${block.rect.width * 100}%`,
-    minHeight: `${block.rect.height * 100}%`,
-    maxHeight: `${Math.max(block.rect.height, block.rect.height * 1.35) * 100}%`,
-    fontFamily: block.style.fontFamily,
-    fontSize: `${block.style.fontSize * displayScale}px`,
-    fontWeight: block.style.fontWeight,
-    fontStyle: block.style.italic ? "italic" : "normal",
-    textDecoration: block.style.underline ? "underline" : "none",
-    color: block.style.color,
-    textAlign: block.style.align,
-    lineHeight: block.style.lineHeight / block.style.fontSize,
-    letterSpacing: block.style.letterSpacing,
-    transform: block.style.rotation ? `rotate(${block.style.rotation}deg)` : undefined,
-    transformOrigin: "left top",
-  };
-  return (
-    <div
-      ref={ref}
-      data-pdf-block={block.id}
-      contentEditable
-      suppressContentEditableWarning
-      spellCheck
-      className={`absolute z-10 overflow-hidden whitespace-pre-wrap px-[1px] outline-none transition ${
-        selected ? "ring-2 ring-blue-500" : dynamic ? "ring-1 ring-amber-400" : "hover:ring-1 hover:ring-blue-300"
-      } ${block.source === "OCR" && !block.confirmed ? "bg-amber-100/95" : "bg-white/95"} ${block.overflow ? "ring-2 ring-rose-500" : ""}`}
-      style={style}
-      onMouseUp={(event) => onSelection(event, block)}
-      onInput={(event) => {
-        const element = event.currentTarget;
-        const scale = displayScale;
-        let displaySize = parseFloat(element.style.fontSize) || block.style.fontSize * scale;
-        const minimum = block.style.fontSize * 0.62 * scale;
-        while ((element.scrollHeight > element.clientHeight + 2 || element.scrollWidth > element.clientWidth + 2) && displaySize > minimum) {
-          displaySize = Math.max(minimum, displaySize - 0.5);
-          element.style.fontSize = `${displaySize}px`;
-        }
-        const overflow = element.scrollHeight > element.clientHeight + 2 || element.scrollWidth > element.clientWidth + 2;
-        onChange(block.id, element.innerText, overflow, displaySize / scale);
-      }}
-      onBlur={(event) => {
-        const element = event.currentTarget;
-        onChange(block.id, element.innerText, element.scrollHeight > element.clientHeight + 2 || element.scrollWidth > element.clientWidth + 2);
-      }}
-      title={block.source === "OCR" && !block.confirmed ? "OCR text requires confirmation" : undefined}
-      onDoubleClick={() => block.source === "OCR" && !block.confirmed ? onConfirmOcr(block.id) : undefined}
-    />
-  );
-}
-
-export function PdfLayoutFormattingToolbar({ block, onChange }: { block: PdfLayoutBlock; onChange: (style: PdfTextStyle) => void }) {
-  const style = block.style;
-  return (
-    <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2">
-      <button type="button" className={`btn-ghost h-9 px-2 ${style.fontWeight >= 600 ? "bg-slate-200" : ""}`} onClick={() => onChange({ ...style, fontWeight: style.fontWeight >= 600 ? 400 : 700 })} title="Bold"><Bold size={15} /></button>
-      <button type="button" className={`btn-ghost h-9 px-2 ${style.italic ? "bg-slate-200" : ""}`} onClick={() => onChange({ ...style, italic: !style.italic })} title="Italic"><Italic size={15} /></button>
-      <button type="button" className={`btn-ghost h-9 px-2 ${style.underline ? "bg-slate-200" : ""}`} onClick={() => onChange({ ...style, underline: !style.underline })} title="Underline"><Underline size={15} /></button>
-      <input className="input h-9 w-20" type="number" min={5} max={72} step={0.5} value={style.fontSize} onChange={(event) => onChange({ ...style, fontSize: Number(event.target.value) || style.fontSize, lineHeight: (Number(event.target.value) || style.fontSize) * 1.2 })} aria-label="Font size" />
-      <input className="h-9 w-10 cursor-pointer rounded border border-slate-200 bg-white p-1" type="color" value={style.color} onChange={(event) => onChange({ ...style, color: event.target.value })} aria-label="Text color" />
-      <button type="button" className={`btn-ghost h-9 px-2 ${style.align === "left" ? "bg-slate-200" : ""}`} onClick={() => onChange({ ...style, align: "left" })} title="Align left"><AlignLeft size={15} /></button>
-      <button type="button" className={`btn-ghost h-9 px-2 ${style.align === "center" ? "bg-slate-200" : ""}`} onClick={() => onChange({ ...style, align: "center" })} title="Align center"><AlignCenter size={15} /></button>
-      <button type="button" className={`btn-ghost h-9 px-2 ${style.align === "right" ? "bg-slate-200" : ""}`} onClick={() => onChange({ ...style, align: "right" })} title="Align right"><AlignRight size={15} /></button>
-      <span className="ml-auto text-xs text-slate-500">Editing page {block.pageNumber}</span>
+            <div
+              className="pdf-text-layer"
+              ref={(el) => { if (el) textLayerRefs.current.set(page.pageNumber, el); else textLayerRefs.current.delete(page.pageNumber); }}
+              onMouseUp={() => handleMouseUp(page.pageNumber)}
+            />
+            {pageFields.map((field) => (
+              <div
+                key={field.id}
+                className={`absolute z-[3] cursor-pointer rounded-sm border-2 transition-colors ${
+                  selectedFieldId === field.id
+                    ? "border-blue-500 bg-blue-200/30"
+                    : "border-amber-400 bg-amber-100/20 hover:bg-amber-200/30"
+                }`}
+                style={{
+                  left: `${field.rect!.x * 100}%`,
+                  top: `${field.rect!.y * 100}%`,
+                  width: `${field.rect!.width * 100}%`,
+                  height: `${field.rect!.height * 100}%`,
+                  pointerEvents: "auto",
+                }}
+                onClick={() => onFieldClick(field.id)}
+                title={field.label}
+              >
+                <span className="absolute -top-5 left-0 whitespace-nowrap rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-medium text-white shadow-sm">
+                  {field.label.slice(0, 30)}
+                </span>
+              </div>
+            ))}
+            <span className="absolute bottom-2 right-3 z-[4] rounded bg-slate-900/70 px-2 py-1 text-xs text-white">Page {page.pageNumber}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function FieldEditor({ field, categories, onFocus, onChange, onDelete }: {
+// ---------------------------------------------------------------------------
+// Field editor
+// ---------------------------------------------------------------------------
+
+function FieldEditor({ field, categories, selected, onFocus, onChange, onDelete }: {
   field: PdfLayoutField;
   categories: FieldCategory[];
+  selected: boolean;
   onFocus: () => void;
   onChange: (field: PdfLayoutField) => void;
   onDelete: () => void;
@@ -541,28 +533,31 @@ function FieldEditor({ field, categories, onFocus, onChange, onDelete }: {
   const [category, setCategory] = useState(field.mapping ? categoryFor(field.mapping, categories) : "Manual");
   const options = category === "Manual" ? [] : categories.find((item) => item.id === category)?.fields ?? [];
   return (
-    <div className="rounded-lg border border-slate-200 p-3" onClick={onFocus}>
+    <div className={`rounded-lg border p-3 ${selected ? "border-blue-400 bg-blue-50/50" : "border-slate-200"}`} onClick={onFocus}>
       <div className="flex gap-2">
-        <input className="input h-9 min-w-0" value={field.label} onChange={(event) => onChange({ ...field, label: event.target.value })} />
+        <input className="input h-9 min-w-0" value={field.label} onChange={(e) => onChange({ ...field, label: e.target.value })} />
         <button className="btn-ghost h-9 px-2 text-rose-700" type="button" onClick={onDelete}><Trash2 size={14} /></button>
       </div>
       <div className="mt-2 grid gap-2">
-        <select className="input h-9" value={category} onChange={(event) => {
-          setCategory(event.target.value);
-          onChange({ ...field, mapping: null });
-        }}>
+        <select className="input h-9" value={category} onChange={(e) => { setCategory(e.target.value); onChange({ ...field, mapping: null }); }}>
           <option>Manual</option>
           {categories.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}
         </select>
-        <select className="input h-9" value={field.mapping ?? ""} disabled={category === "Manual"} onChange={(event) => onChange({ ...field, mapping: event.target.value || null })}>
+        <select className="input h-9" value={field.mapping ?? ""} disabled={category === "Manual"} onChange={(e) => onChange({ ...field, mapping: e.target.value || null })}>
           <option value="">Choose parameter</option>
-          {options.map((option) => <option value={option.mapping ?? ""} key={option.id}>{option.label}</option>)}
+          {options.map((opt) => <option value={opt.mapping ?? ""} key={opt.id}>{opt.label}</option>)}
         </select>
       </div>
-      <div className="mt-2 truncate text-xs text-slate-500">{field.mapping ? `Auto-fill: ${field.mapping}` : `Manual value: ${field.sourceText}`}</div>
+      <div className="mt-2 truncate text-xs text-slate-500">
+        {field.mapping ? `Auto-fill: ${field.mapping}` : `Manual entry · Original: "${field.sourceText.slice(0, 50)}"`}
+      </div>
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// PDF analysis
+// ---------------------------------------------------------------------------
 
 async function analyzePdf(file: File, sourceFileId: string, progress: (message: string) => void): Promise<PdfLayoutDocument> {
   const pdfjs = await loadBrowserPdfJs();
@@ -574,159 +569,53 @@ async function analyzePdf(file: File, sourceFileId: string, progress: (message: 
     const page = await pdf.getPage(pageNumber);
     const viewport = page.getViewport({ scale: 1 });
     const content = await page.getTextContent();
-    const blocks = textBlocksFromPdf(content.items as PdfTextItem[], pageNumber, viewport.width, viewport.height);
-    if (!blocks.length) {
-      progress(`Running OCR on page ${pageNumber} of ${pdf.numPages}...`);
-      const ocrBlocks = await ocrPage(page, pageNumber, viewport.width, viewport.height);
-      blocks.push(...ocrBlocks);
-      warnings.push(`Page ${pageNumber} used OCR. Double-click each amber text block after checking it.`);
+    const hasText = content.items.some((item) => "str" in item && (item as TextItem).str?.trim());
+    if (!hasText) {
+      progress(`Page ${pageNumber} has no extractable text. OCR may be needed.`);
+      warnings.push(`Page ${pageNumber} appears to be a scanned image. Text selection may not work on this page.`);
     }
-    pages.push({ pageNumber, width: viewport.width, height: viewport.height, rotation: viewport.rotation, blocks });
+    pages.push({ pageNumber, width: viewport.width, height: viewport.height, rotation: viewport.rotation, blocks: [] });
   }
   return { version: 1, sourceFileId, pageCount: pdf.numPages, pages, fields: [], warnings };
 }
 
-type PdfTextItem = {
-  str?: string;
-  transform?: number[];
-  width?: number;
-  height?: number;
-  fontName?: string;
-  hasEOL?: boolean;
-};
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-function textBlocksFromPdf(items: PdfTextItem[], pageNumber: number, pageWidth: number, pageHeight: number) {
-  const raw = items.flatMap((item) => {
-    const text = item.str ?? "";
-    const transform = item.transform ?? [];
-    if (!text.trim() || transform.length < 6) return [];
-    const fontSize = Math.max(5, Math.hypot(transform[2] ?? 0, transform[3] ?? 0) || item.height || 10);
-    const x = transform[4] ?? 0;
-    const baseline = transform[5] ?? 0;
-    const width = Math.max(item.width ?? fontSize, fontSize * 0.35);
-    const top = pageHeight - baseline - fontSize;
-    return [{
-      text,
-      x,
-      top,
-      width,
-      height: Math.max(fontSize * 1.25, item.height ?? fontSize),
-      fontSize,
-      fontName: item.fontName ?? "Helvetica",
-      hasEOL: Boolean(item.hasEOL),
-    }];
-  });
-  const lines: typeof raw[] = [];
-  for (const item of raw.sort((a, b) => a.top - b.top || a.x - b.x)) {
-    const line = lines.find((candidate) => Math.abs(candidate[0].top - item.top) <= Math.max(2, item.fontSize * 0.35));
-    if (line) line.push(item);
-    else lines.push([item]);
-  }
-  return lines.flatMap((line): PdfLayoutBlock[] => {
-    const ordered = line.sort((a, b) => a.x - b.x);
-    const left = Math.min(...ordered.map((item) => item.x));
-    const top = Math.min(...ordered.map((item) => item.top));
-    const right = Math.max(...ordered.map((item) => item.x + item.width));
-    const bottom = Math.max(...ordered.map((item) => item.top + item.height));
-    const text = ordered.reduce((value, item, index) => {
-      if (!index) return item.text;
-      const previous = ordered[index - 1];
-      const gap = item.x - (previous.x + previous.width);
-      return `${value}${gap > Math.max(1.5, item.fontSize * 0.16) ? " " : ""}${item.text}`;
-    }, "");
-    const primary = ordered[0];
-    const fontName = primary.fontName;
-    return [{
-      id: createClientId(),
-      pageNumber,
-      text,
-      originalText: text,
-      rect: {
-        x: clamp(left / pageWidth),
-        y: clamp(top / pageHeight),
-        width: clamp((right - left) / pageWidth, 0.002, 1 - clamp(left / pageWidth)),
-        height: clamp((bottom - top) / pageHeight, 0.008, 1 - clamp(top / pageHeight)),
-      },
-      style: {
+function extractFontFromTextContent(
+  textContent: TextContent,
+  selRect: { x: number; y: number; width: number; height: number },
+  pageWidth: number,
+  pageHeight: number,
+): Partial<PdfTextStyle> {
+  for (const item of textContent.items) {
+    if (!("str" in item)) continue;
+    const ti = item as TextItem;
+    if (!ti.str?.trim() || !ti.transform || ti.transform.length < 6) continue;
+    const fontSize = Math.max(5, Math.hypot(ti.transform[2] ?? 0, ti.transform[3] ?? 0) || 12);
+    const x = (ti.transform[4] ?? 0) / pageWidth;
+    const top = 1 - ((ti.transform[5] ?? 0) + fontSize) / pageHeight;
+    const itemWidth = Math.max((ti.width ?? 0) / pageWidth, 0.01);
+    const itemHeight = fontSize * 1.3 / pageHeight;
+    if (rectsOverlap({ x, y: top, width: itemWidth, height: itemHeight }, selRect)) {
+      const fontName = (ti as unknown as { fontName?: string }).fontName ?? "Helvetica";
+      return {
         fontName,
         fontFamily: fontFamily(fontName),
-        fontSize: primary.fontSize,
+        fontSize,
         fontWeight: /bold|black|semi/i.test(fontName) ? 700 : 400,
         italic: /italic|oblique/i.test(fontName),
-        underline: false,
         color: "#111827",
         align: "left",
-        letterSpacing: 0,
-        wordSpacing: 0,
-        lineHeight: primary.fontSize * 1.2,
-        rotation: 0,
-      },
-      source: "PDF_TEXT",
-      confidence: 1,
-      confirmed: true,
-      changed: false,
-      overflow: false,
-    }];
-  });
+      };
+    }
+  }
+  return { fontName: "Helvetica", fontFamily: "Arial", fontSize: 12, fontWeight: 400, italic: false, color: "#111827", align: "left" };
 }
 
-async function ocrPage(page: PDFPageProxy, pageNumber: number, pageWidth: number, pageHeight: number) {
-  const viewport = page.getViewport({ scale: 2 });
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.ceil(viewport.width);
-  canvas.height = Math.ceil(viewport.height);
-  const context = canvas.getContext("2d");
-  if (!context) return [];
-  await page.render({ canvasContext: context, viewport }).promise;
-  const { createWorker } = await import("tesseract.js");
-  const worker = await createWorker("eng", 1, {
-    workerPath: "/ocr/worker.min.js",
-    langPath: "/ocr/",
-    corePath: "/ocr/core/",
-  });
-  let result;
-  try {
-    result = await worker.recognize(canvas);
-  } finally {
-    await worker.terminate();
-  }
-  const data = result.data as unknown as { words?: Array<{ text: string; confidence: number; bbox: { x0: number; y0: number; x1: number; y1: number } }> };
-  return (data.words ?? []).filter((word) => word.text.trim()).map((word): PdfLayoutBlock => {
-    const width = word.bbox.x1 - word.bbox.x0;
-    const height = word.bbox.y1 - word.bbox.y0;
-    const fontSize = Math.max(6, height / 2);
-    return {
-      id: createClientId(),
-      pageNumber,
-      text: word.text,
-      originalText: word.text,
-      rect: {
-        x: clamp(word.bbox.x0 / viewport.width),
-        y: clamp(word.bbox.y0 / viewport.height),
-        width: clamp(width / viewport.width, 0.002, 1),
-        height: clamp(height / viewport.height, 0.008, 1),
-      },
-      style: {
-        fontName: "OCR Helvetica",
-        fontFamily: "Arial",
-        fontSize,
-        fontWeight: 400,
-        italic: false,
-        underline: false,
-        color: "#111827",
-        align: "left",
-        letterSpacing: 0,
-        wordSpacing: 0,
-        lineHeight: fontSize * 1.2,
-        rotation: 0,
-      },
-      source: "OCR",
-      confidence: clamp(word.confidence / 100),
-      confirmed: false,
-      changed: false,
-      overflow: false,
-    };
-  });
+function rectsOverlap(a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }) {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
 }
 
 async function uploadTemplateSource(file: File) {
@@ -758,74 +647,16 @@ async function uploadTemplateSource(file: File) {
   return completed.data.id as string;
 }
 
-function textOffset(root: HTMLElement, node: Node, offset: number) {
-  const range = document.createRange();
-  range.selectNodeContents(root);
-  try {
-    range.setEnd(node, offset);
-  } catch {
-    return 0;
-  }
-  return range.toString().length;
-}
-
 function uniqueFieldKey(label: string, fields: PdfLayoutField[]) {
   const base = label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 60) || "field";
   let key = base;
   let suffix = 2;
-  while (fields.some((field) => field.key === key)) key = `${base}_${suffix++}`;
+  while (fields.some((f) => f.key === key)) key = `${base}_${suffix++}`;
   return key;
 }
 
-function rangesOverlap(startA: number, endA: number, startB: number, endB: number) {
-  return Math.max(startA, startB) < Math.min(endA, endB);
-}
-
-function rebaseFields(fields: PdfLayoutField[], previous: PdfLayoutBlock, nextText: string) {
-  if (previous.text === nextText) return fields;
-  let prefix = 0;
-  while (prefix < previous.text.length && prefix < nextText.length && previous.text[prefix] === nextText[prefix]) prefix += 1;
-  let suffix = 0;
-  while (
-    suffix < previous.text.length - prefix
-    && suffix < nextText.length - prefix
-    && previous.text[previous.text.length - 1 - suffix] === nextText[nextText.length - 1 - suffix]
-  ) suffix += 1;
-  const oldChangeEnd = previous.text.length - suffix;
-  const newChangeEnd = nextText.length - suffix;
-  const delta = newChangeEnd - oldChangeEnd;
-  return fields.flatMap((field): PdfLayoutField[] => {
-    if (field.blockId !== previous.id || field.end <= prefix) return [field];
-    if (field.start >= oldChangeEnd) return [{ ...field, start: field.start + delta, end: field.end + delta }];
-    if (field.start >= prefix && field.end <= oldChangeEnd) {
-      const start = Math.min(field.start, nextText.length);
-      const end = Math.min(nextText.length, Math.max(start + 1, start + (newChangeEnd - prefix)));
-      return [{ ...field, start, end, sourceText: nextText.slice(start, end) }];
-    }
-    const occurrences = allOccurrences(nextText, field.sourceText);
-    if (!occurrences.length) {
-      const start = Math.min(Math.max(0, prefix), nextText.length);
-      const end = Math.min(nextText.length, Math.max(start + 1, newChangeEnd));
-      return [{ ...field, start, end, sourceText: nextText.slice(start, end) }];
-    }
-    const nearest = occurrences.sort((a, b) => Math.abs(a - field.start) - Math.abs(b - field.start))[0];
-    return [{ ...field, start: nearest, end: nearest + field.sourceText.length }];
-  });
-}
-
-function allOccurrences(value: string, search: string) {
-  const output: number[] = [];
-  if (!search) return output;
-  let cursor = value.indexOf(search);
-  while (cursor >= 0) {
-    output.push(cursor);
-    cursor = value.indexOf(search, cursor + Math.max(1, search.length));
-  }
-  return output;
-}
-
 function categoryFor(mapping: string, categories: FieldCategory[]) {
-  return categories.find((category) => category.fields.some((field) => field.mapping === mapping))?.id ?? "Manual";
+  return categories.find((c) => c.fields.some((f) => f.mapping === mapping))?.id ?? "Manual";
 }
 
 function fontFamily(fontName: string) {

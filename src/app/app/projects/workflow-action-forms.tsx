@@ -4,8 +4,8 @@ import Link from "next/link";
 import { FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, Bold, CheckCircle2, Download, Eye, FileText, Italic, Loader2, Plus, Save, Send, Underline, Wand2, X } from "lucide-react";
-import { PdfLayoutBlock, PdfLayoutDocument } from "@/lib/pdf-layout";
-import { PdfLayoutCanvas, PdfLayoutFormattingToolbar } from "./letter-template-builder";
+import { PdfLayoutDocument, PdfLayoutField } from "@/lib/pdf-layout";
+import { PdfTextLayerCanvas } from "./letter-template-builder";
 
 type ProjectInfo = {
   id: string;
@@ -735,50 +735,74 @@ function PdfLayoutDraftEditor({ layout, onChange }: {
   layout: PdfLayoutDocument;
   onChange: (layout: PdfLayoutDocument) => void;
 }) {
-  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
-  const selectedBlock = layout.pages.flatMap((page) => page.blocks).find((block) => block.id === selectedBlockId) ?? null;
+  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
+  const fields = layout.fields.filter((f) => f.rect && f.pageNumber);
 
-  function updateBlock(blockId: string, update: (block: PdfLayoutBlock) => PdfLayoutBlock) {
+  function updateFieldValue(fieldId: string, value: string) {
     onChange({
       ...layout,
+      fields: layout.fields.map((f) => f.id === fieldId ? { ...f, sourceText: value } : f),
       pages: layout.pages.map((page) => ({
         ...page,
-        blocks: page.blocks.map((block) => block.id === blockId ? update(block) : block),
+        blocks: page.blocks.map((block) => {
+          const blockFields = layout.fields.filter((f) => f.blockId === block.id);
+          if (!blockFields.length) return block;
+          let text = block.originalText;
+          for (const field of blockFields.sort((a, b) => b.start - a.start)) {
+            const val = field.id === fieldId ? value : (field as unknown as { resolvedValue?: string }).resolvedValue ?? field.sourceText;
+            if (field.start >= 0 && field.end > 0) {
+              text = `${text.slice(0, field.start)}${val}${text.slice(field.end)}`;
+            }
+          }
+          return { ...block, text, changed: text !== block.originalText };
+        }),
       })),
     });
   }
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-200/70 shadow-inner">
-      {selectedBlock ? (
-        <PdfLayoutFormattingToolbar
-          block={selectedBlock}
-          onChange={(style) => updateBlock(selectedBlock.id, (block) => ({ ...block, style, changed: true }))}
-        />
-      ) : (
-        <div className="border-b border-slate-200 bg-white px-4 py-2 text-sm text-slate-500">
-          Click any text in the letter to edit or format it.
+    <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
+      <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
+        <h2 className="font-semibold text-navy-900">Letter fields</h2>
+        <p className="mt-1 text-xs leading-5 text-slate-500">
+          Edit field values below. The PDF preview shows the original template — changes will appear in the generated PDF.
+        </p>
+        <div className="mt-4 space-y-3">
+          {fields.map((field) => (
+            <label key={field.id} className={`block rounded-lg border p-3 ${selectedFieldId === field.id ? "border-blue-400 bg-blue-50/50" : "border-slate-200"}`}>
+              <span className="text-xs font-semibold text-slate-500">{field.label}</span>
+              {field.mapping ? <span className="mt-1 block text-[11px] text-slate-400">Auto-filled from {field.mapping}</span> : null}
+              <textarea
+                className="input mt-2 min-h-16 py-2 text-sm"
+                value={(field as unknown as { resolvedValue?: string }).resolvedValue ?? field.sourceText}
+                placeholder={field.sourceText}
+                onChange={(e) => updateFieldValue(field.id, e.target.value)}
+                onFocus={() => setSelectedFieldId(field.id)}
+              />
+            </label>
+          ))}
+          {!fields.length ? (
+            <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+              No editable fields in this template.
+            </div>
+          ) : null}
         </div>
-      )}
-      <div className="max-h-[calc(100dvh-13rem)] overflow-auto p-3 md:p-6">
-        <PdfLayoutCanvas
-          sourceUrl={`/api/v1/files/${layout.sourceFileId}/download?disposition=inline&proxy=1`}
-          layout={layout}
-          selectedBlockId={selectedBlockId}
-          onBlockSelection={(_event, block) => setSelectedBlockId(block.id)}
-          onBlockChange={(blockId, text, overflow, fittedFontSize) => updateBlock(blockId, (block) => ({
-            ...block,
-            text,
-            style: fittedFontSize && fittedFontSize !== block.style.fontSize
-              ? { ...block.style, fontSize: fittedFontSize, lineHeight: fittedFontSize * (block.style.lineHeight / block.style.fontSize) }
-              : block.style,
-            changed: text !== block.originalText,
-            overflow,
-          }))}
-          onConfirmOcr={(blockId) => updateBlock(blockId, (block) => ({ ...block, confirmed: true }))}
-        />
-      </div>
-    </section>
+      </aside>
+      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-200/70 shadow-inner">
+        <div className="border-b border-slate-200 bg-white px-4 py-2 text-sm text-slate-500">
+          PDF template preview — field values will be replaced in the generated PDF.
+        </div>
+        <div className="max-h-[calc(100dvh-13rem)] overflow-auto p-3 md:p-6">
+          <PdfTextLayerCanvas
+            sourceUrl={`/api/v1/files/${layout.sourceFileId}/download?disposition=inline&proxy=1`}
+            layout={layout}
+            selectedFieldId={selectedFieldId}
+            onTextSelect={() => {}}
+            onFieldClick={setSelectedFieldId}
+          />
+        </div>
+      </section>
+    </div>
   );
 }
 
