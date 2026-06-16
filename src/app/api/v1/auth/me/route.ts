@@ -10,16 +10,18 @@ export async function GET(_request: NextRequest) {
       return NextResponse.json({ ok: false, error: "Unauthenticated" }, { status: 401 });
     }
 
+    const hasSelectedFirm = session.tenantId !== "__unselected__";
+
     const [user, tenant] = await Promise.all([
       prisma.user.findUnique({ where: { id: session.id }, select: { name: true } }),
-      prisma.tenant.findUnique({ where: { id: session.tenantId } }),
+      hasSelectedFirm ? prisma.tenant.findUnique({ where: { id: session.tenantId } }) : Promise.resolve(null),
     ]);
 
     return NextResponse.json({
       ok: true,
       data: {
         id: session.id,
-        tenantId: session.tenantId,
+        tenantId: hasSelectedFirm ? session.tenantId : null,
         role: session.role,
         email: session.email,
         name: user?.name,
