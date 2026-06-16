@@ -27,11 +27,13 @@ const LETTER_TYPES = [
 ] as const;
 
 const CATEGORY_COLORS: Record<string, { bg: string; text: string; ring: string }> = {
-  Firm:    { bg: "bg-blue-50",   text: "text-blue-700",   ring: "ring-blue-200" },
-  Project: { bg: "bg-emerald-50", text: "text-emerald-700", ring: "ring-emerald-200" },
-  Plot:    { bg: "bg-orange-50", text: "text-orange-700", ring: "ring-orange-200" },
-  Payment: { bg: "bg-purple-50", text: "text-purple-700", ring: "ring-purple-200" },
-  Extra:   { bg: "bg-teal-50",   text: "text-teal-700",   ring: "ring-teal-200" },
+  Firm:     { bg: "bg-blue-50",    text: "text-blue-700",    ring: "ring-blue-200" },
+  Project:  { bg: "bg-emerald-50", text: "text-emerald-700", ring: "ring-emerald-200" },
+  Plot:     { bg: "bg-orange-50",  text: "text-orange-700",  ring: "ring-orange-200" },
+  Payment:  { bg: "bg-purple-50",  text: "text-purple-700",  ring: "ring-purple-200" },
+  Buyer:    { bg: "bg-rose-50",    text: "text-rose-700",    ring: "ring-rose-200" },
+  Document: { bg: "bg-slate-100",  text: "text-slate-700",   ring: "ring-slate-300" },
+  Extra:    { bg: "bg-teal-50",    text: "text-teal-700",    ring: "ring-teal-200" },
 };
 const DEFAULT_COLOR = { bg: "bg-slate-50", text: "text-slate-700", ring: "ring-slate-200" };
 
