@@ -631,12 +631,20 @@ async function uploadTemplateSource(file: File) {
     : meta.data.upload.primary;
   const fallback = typeof meta.data.upload === "object" ? meta.data.upload.fallback : null;
   let target = primary;
-  let uploadResponse = await fetch(primary.url, { method: "PUT", headers: { "content-type": file.type || "application/octet-stream" }, body: file });
-  if (!uploadResponse.ok && fallback) {
-    target = fallback;
-    uploadResponse = await fetch(fallback.url, { method: "PUT", headers: { "content-type": file.type || "application/octet-stream" }, body: file });
+  let uploadOk = false;
+  try {
+    const uploadResponse = await fetch(primary.url, { method: "PUT", headers: { "content-type": file.type || "application/octet-stream" }, body: file });
+    uploadOk = uploadResponse.ok;
+  } catch {
+    // network error (e.g. S3/MinIO not reachable) — fall through to local fallback
   }
-  if (!uploadResponse.ok) throw new Error("Source document upload failed.");
+  if (!uploadOk && fallback) {
+    target = fallback;
+    const fallbackResponse = await fetch(fallback.url, { method: "PUT", headers: { "content-type": file.type || "application/octet-stream" }, body: file });
+    if (!fallbackResponse.ok) throw new Error("Source document upload failed.");
+  } else if (!uploadOk) {
+    throw new Error("Source document upload failed.");
+  }
   const completeResponse = await fetch(`/api/v1/files/${meta.data.file.id}/upload-complete`, {
     method: "POST",
     headers: { "content-type": "application/json" },
