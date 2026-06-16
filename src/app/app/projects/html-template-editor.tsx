@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Bold, Check, ChevronDown, Italic, Loader2, Plus, Save, Settings, Trash2, Underline, X } from "lucide-react";
+import { Bold, Check, ChevronDown, ChevronUp, Italic, Loader2, Plus, Save, Trash2, Underline, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { letterSystemFields } from "@/lib/letter-system-fields";
 
@@ -26,6 +26,49 @@ const LETTER_TYPES = [
   { value: "registry_status_letter", label: "Registry Status Letter" },
 ] as const;
 
+const CATEGORY_COLORS: Record<string, { bg: string; text: string; ring: string }> = {
+  Firm:    { bg: "bg-blue-50",   text: "text-blue-700",   ring: "ring-blue-200" },
+  Project: { bg: "bg-emerald-50", text: "text-emerald-700", ring: "ring-emerald-200" },
+  Plot:    { bg: "bg-orange-50", text: "text-orange-700", ring: "ring-orange-200" },
+  Payment: { bg: "bg-purple-50", text: "text-purple-700", ring: "ring-purple-200" },
+  Extra:   { bg: "bg-teal-50",   text: "text-teal-700",   ring: "ring-teal-200" },
+};
+const DEFAULT_COLOR = { bg: "bg-slate-50", text: "text-slate-700", ring: "ring-slate-200" };
+
+const AUTOFILL_OPTIONS = [
+  { group: "Buyer / Owner", items: [
+    { label: "Buyer name", value: "owner.name" },
+    { label: "Buyer phone", value: "owner.phone" },
+    { label: "Buyer address", value: "owner.address" },
+    { label: "Father's name", value: "owner.fatherName" },
+    { label: "Aadhaar number", value: "owner.aadhaarNo" },
+    { label: "PAN number", value: "owner.panNo" },
+  ]},
+  { group: "Plot", items: [
+    { label: "Plot number", value: "plot.code" },
+    { label: "Plot area", value: "plot.areaSqyd" },
+    { label: "Plot dimensions", value: "plot.dimensions" },
+    { label: "Plot price", value: "plot.priceInrFormatted" },
+    { label: "Price in words", value: "plot.priceInrWords" },
+  ]},
+  { group: "Project", items: [
+    { label: "Project name", value: "project.name" },
+    { label: "Project city", value: "project.city" },
+    { label: "Project address", value: "project.fullAddress" },
+  ]},
+  { group: "Firm", items: [
+    { label: "Firm name", value: "firm.name" },
+    { label: "Firm address", value: "firm.address" },
+    { label: "Firm PAN", value: "tenant.pan" },
+  ]},
+  { group: "Dates & Others", items: [
+    { label: "Allotment date", value: "ownership.effectiveDate" },
+    { label: "Today's date", value: "today" },
+    { label: "Document number", value: "document.number" },
+    { label: "RERA number", value: "rera.number" },
+  ]},
+];
+
 function isRealBody(body: string | null | undefined): body is string {
   return Boolean(body && body.length > 100 && !body.includes("data-pdf-layout-template") && !body.includes("data-exact-pdf-draft"));
 }
@@ -38,14 +81,13 @@ function groupedFields(categories: FieldCategory[]) {
   for (const cat of categories) {
     for (const f of cat.fields) {
       if (f.mapping) {
-        (groups[cat.name] ??= []).push({ label: f.label, value: f.mapping });
+        const existing = Object.values(groups).flat().some((g) => g.value === f.mapping);
+        if (!existing) (groups[cat.name] ??= []).push({ label: f.label, value: f.mapping });
       }
     }
   }
   return groups;
 }
-
-const SYSTEM_VARIABLE_OPTIONS = letterSystemFields.map((f) => ({ label: `${f.category}: ${f.label}`, value: f.value }));
 
 export function HtmlTemplateEditor({
   projectId,
@@ -65,7 +107,7 @@ export function HtmlTemplateEditor({
   const [type, setType] = useState("allotment_letter");
   const [loading, setLoading] = useState<"save" | "activate" | "delete" | "load" | "">("");
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
-  const [variableOpen, setVariableOpen] = useState(false);
+  const [fieldsOpen, setFieldsOpen] = useState(true);
   const [addFieldOpen, setAddFieldOpen] = useState(false);
   const [initialized, setInitialized] = useState(false);
   const groups = groupedFields(categories);
@@ -199,10 +241,9 @@ export function HtmlTemplateEditor({
     globalThis.document.execCommand(command);
   }
 
-  function insertVariable(value: string) {
+  function insertField(value: string) {
     editorRef.current?.focus();
     globalThis.document.execCommand("insertText", false, `{{${value}}}`);
-    setVariableOpen(false);
   }
 
   async function refreshCategories() {
@@ -219,17 +260,6 @@ export function HtmlTemplateEditor({
       }
     } catch {}
   }
-
-  useEffect(() => {
-    function handleClick(e: MouseEvent) {
-      const target = e.target as Element;
-      if (variableOpen && !target?.closest?.("[data-variable-picker]")) {
-        setVariableOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [variableOpen]);
 
   return (
     <div className="flex flex-col gap-6 lg:flex-row">
@@ -326,58 +356,65 @@ export function HtmlTemplateEditor({
           <button onClick={() => format("underline")} className="rounded p-1.5 text-slate-600 hover:bg-slate-200" title="Underline">
             <Underline className="h-4 w-4" />
           </button>
-          <div className="mx-1 h-5 w-px bg-slate-300" />
-          <div className="relative" data-variable-picker>
-            <button
-              onClick={() => { setVariableOpen((v) => !v); setAddFieldOpen(false); }}
-              className="flex items-center gap-1 rounded px-2 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50"
-            >
-              Insert variable <ChevronDown className="h-3.5 w-3.5" />
-            </button>
-            {variableOpen && (
-              <div className="absolute left-0 top-full z-20 mt-1 max-h-80 w-72 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
-                {Object.entries(groups).map(([category, fields]) => (
-                  <div key={category}>
-                    <div className="sticky top-0 bg-slate-50 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      {category}
-                    </div>
-                    {fields.map((field) => (
-                      <button
-                        key={field.value}
-                        onClick={() => insertVariable(field.value)}
-                        className="w-full px-3 py-1.5 text-left text-sm text-slate-700 hover:bg-blue-50"
-                      >
-                        {field.label}
-                        <span className="ml-1 text-xs text-slate-400">{`{{${field.value}}}`}</span>
-                      </button>
-                    ))}
-                  </div>
-                ))}
-                <div className="border-t border-slate-100 p-2">
-                  <button
-                    onClick={() => { setAddFieldOpen(true); setVariableOpen(false); }}
-                    className="flex w-full items-center gap-1.5 rounded-md px-2 py-2 text-sm font-medium text-blue-600 hover:bg-blue-50"
-                  >
-                    <Plus className="h-3.5 w-3.5" /> Add custom variable
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
         </div>
 
-        {/* Add custom variable panel */}
-        {addFieldOpen && (
-          <AddCustomFieldPanel
-            categories={categories}
-            onCreated={(mapping) => {
-              refreshCategories();
-              setAddFieldOpen(false);
-              if (mapping) insertVariable(mapping);
-            }}
-            onClose={() => setAddFieldOpen(false)}
-          />
-        )}
+        {/* Field picker panel */}
+        <div className="mb-3 rounded-lg border border-slate-200 bg-white">
+          <button
+            onClick={() => setFieldsOpen((v) => !v)}
+            className="flex w-full items-center justify-between px-4 py-2.5 text-left"
+          >
+            <span className="text-sm font-semibold text-slate-700">
+              Insert Fields
+              <span className="ml-2 font-normal text-slate-400">Click any field below to add it to your letter</span>
+            </span>
+            {fieldsOpen ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+          </button>
+          {fieldsOpen && (
+            <div className="border-t border-slate-100 px-4 pb-4 pt-3">
+              {Object.entries(groups).map(([category, fields]) => {
+                const color = CATEGORY_COLORS[category] ?? DEFAULT_COLOR;
+                return (
+                  <div key={category} className="mb-3 last:mb-0">
+                    <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{category}</div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {fields.map((field) => (
+                        <button
+                          key={field.value}
+                          onClick={() => insertField(field.value)}
+                          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition hover:shadow-sm active:scale-95 ${color.bg} ${color.text} ${color.ring}`}
+                          title={`Inserts {{${field.value}}} — auto-fills with ${field.label.toLowerCase()}`}
+                        >
+                          {field.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+              <div className="mt-3 border-t border-slate-100 pt-3">
+                {addFieldOpen ? (
+                  <AddCustomFieldInline
+                    categories={categories}
+                    onCreated={(mapping) => {
+                      refreshCategories();
+                      setAddFieldOpen(false);
+                      if (mapping) insertField(mapping);
+                    }}
+                    onClose={() => setAddFieldOpen(false)}
+                  />
+                ) : (
+                  <button
+                    onClick={() => setAddFieldOpen(true)}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-slate-300 px-3 py-1 text-xs font-medium text-slate-500 transition hover:border-slate-400 hover:text-slate-700"
+                  >
+                    <Plus className="h-3 w-3" /> Add your own field
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Editor */}
         <section className="rounded-2xl border border-slate-200 bg-slate-200/70 p-3 shadow-inner md:p-6">
@@ -390,6 +427,9 @@ export function HtmlTemplateEditor({
             style={{ minHeight: "600px" }}
           />
         </section>
+        <p className="mt-2 text-xs text-slate-400">
+          Text like <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px]">{`{{buyer name}}`}</code> will be replaced automatically with actual details when generating the letter.
+        </p>
 
         {/* Actions */}
         <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -422,7 +462,7 @@ export function HtmlTemplateEditor({
   );
 }
 
-function AddCustomFieldPanel({
+function AddCustomFieldInline({
   categories,
   onCreated,
   onClose,
@@ -432,123 +472,81 @@ function AddCustomFieldPanel({
   onClose: () => void;
 }) {
   const [label, setLabel] = useState("");
-  const [categoryId, setCategoryId] = useState(categories[0]?.id ?? "");
-  const [newCategoryName, setNewCategoryName] = useState("");
-  const [useNewCategory, setUseNewCategory] = useState(false);
-  const [mapping, setMapping] = useState("");
+  const [autofill, setAutofill] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  const customCategory = categories.find((c) => c.name === "Extra") ?? categories[categories.length - 1];
+
   async function handleCreate() {
-    if (!label.trim()) { setError("Label is required."); return; }
-    if (!useNewCategory && !categoryId) { setError("Select a category."); return; }
-    if (useNewCategory && !newCategoryName.trim()) { setError("Category name is required."); return; }
+    if (!label.trim()) { setError("Please enter a name for this field."); return; }
+    if (!customCategory) { setError("No category available."); return; }
     setSaving(true);
     setError("");
     try {
-      let targetCategoryId = categoryId;
-      if (useNewCategory) {
-        const catRes = await fetch("/api/v1/settings/letter-fields?kind=category", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ name: newCategoryName.trim() }),
-        });
-        const catJson = await catRes.json();
-        if (!catRes.ok) { setError(catJson.error ?? "Failed to create category."); setSaving(false); return; }
-        targetCategoryId = catJson.data?.id ?? catJson.id;
-      }
-      const fieldMapping = mapping || `manual.${label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
-      const fieldRes = await fetch("/api/v1/settings/letter-fields", {
+      const fieldMapping = autofill || `manual.${label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
+      const res = await fetch("/api/v1/settings/letter-fields", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ categoryId: targetCategoryId, label: label.trim(), mapping: fieldMapping }),
+        body: JSON.stringify({ categoryId: customCategory.id, label: label.trim(), mapping: fieldMapping }),
       });
-      const fieldJson = await fieldRes.json();
-      if (!fieldRes.ok) { setError(fieldJson.error ?? "Failed to create field."); setSaving(false); return; }
+      const json = await res.json();
+      if (!res.ok) { setError(json.error ?? json.data?.error ?? "Could not create field."); setSaving(false); return; }
       onCreated(fieldMapping);
     } catch {
-      setError("Something went wrong.");
+      setError("Something went wrong. Please try again.");
       setSaving(false);
     }
   }
 
   return (
-    <div className="mb-3 rounded-lg border border-blue-200 bg-blue-50/50 p-4">
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-800">Add custom variable</h3>
-        <button onClick={onClose} className="rounded p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-600">
-          <X className="h-4 w-4" />
+    <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-semibold text-slate-700">Create a new field</span>
+        <button onClick={onClose} className="rounded p-0.5 text-slate-400 hover:text-slate-600">
+          <X className="h-3.5 w-3.5" />
         </button>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">Variable label</label>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+        <div className="flex-1">
+          <label className="mb-0.5 block text-[11px] text-slate-500">Field name</label>
           <input
             type="text"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            placeholder="e.g. Witness Name"
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
+            placeholder="e.g. Witness Name, Stamp Number"
+            className="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
+            onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); }}
+            autoFocus
           />
         </div>
-        <div>
-          <label className="mb-1 block text-xs font-medium text-slate-600">Category</label>
-          {useNewCategory ? (
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={newCategoryName}
-                onChange={(e) => setNewCategoryName(e.target.value)}
-                placeholder="New category name"
-                className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
-              />
-              <button onClick={() => setUseNewCategory(false)} className="text-xs text-blue-600 hover:underline whitespace-nowrap">Existing</button>
-            </div>
-          ) : (
-            <div className="flex gap-2">
-              <select
-                value={categoryId}
-                onChange={(e) => setCategoryId(e.target.value)}
-                className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
-              >
-                {categories.map((cat) => (
-                  <option key={cat.id} value={cat.id}>{cat.name}</option>
-                ))}
-              </select>
-              <button onClick={() => setUseNewCategory(true)} className="text-xs text-blue-600 hover:underline whitespace-nowrap">+ New</button>
-            </div>
-          )}
-        </div>
-        <div className="sm:col-span-2">
-          <label className="mb-1 block text-xs font-medium text-slate-600">
-            Map to system variable <span className="font-normal text-slate-400">(optional — leave empty for manual value)</span>
-          </label>
+        <div className="flex-1">
+          <label className="mb-0.5 block text-[11px] text-slate-500">Auto-fill from <span className="text-slate-400">(or leave for manual entry)</span></label>
           <select
-            value={mapping}
-            onChange={(e) => setMapping(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
+            value={autofill}
+            onChange={(e) => setAutofill(e.target.value)}
+            className="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
           >
-            <option value="">Manual — set value during generation</option>
-            {SYSTEM_VARIABLE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label} ({`{{${opt.value}}}`})</option>
+            <option value="">I&apos;ll fill this myself each time</option>
+            {AUTOFILL_OPTIONS.map((group) => (
+              <optgroup key={group.group} label={group.group}>
+                {group.items.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </div>
-      </div>
-      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
-      <div className="mt-3 flex gap-2">
         <button
           onClick={handleCreate}
           disabled={saving}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
           {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-          Create & insert
-        </button>
-        <button onClick={onClose} className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50">
-          Cancel
+          Add
         </button>
       </div>
+      {error && <p className="mt-1.5 text-xs text-red-600">{error}</p>}
     </div>
   );
 }
