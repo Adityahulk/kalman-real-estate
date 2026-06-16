@@ -2,10 +2,8 @@ import "@/server/load-env";
 import { FileVisibility, PrismaClient } from "@prisma/client";
 import { Worker } from "bullmq";
 import IORedis from "ioredis";
-import { generatedDocumentStorageKey, getObjectResilient, putGeneratedObject } from "@/server/storage";
+import { generatedDocumentStorageKey, putGeneratedObject } from "@/server/storage";
 import { buildGeneratedDocumentPdf, buildGeneratedDocumentPdfFromHtml } from "@/server/services/document-pdf";
-import { pdfLayoutBlockingIssues, pdfLayoutDocumentSchema } from "@/lib/pdf-layout";
-import { buildPdfFromLayout } from "@/server/services/pdf-template-render";
 
 const prisma = new PrismaClient();
 const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379";
@@ -26,24 +24,14 @@ async function processDocument(job: DocumentJob) {
     ? document.data as Record<string, unknown>
     : {};
 
-  const layout = pdfLayoutDocumentSchema.safeParse(document.editableLayout);
-  if (layout.success) {
-    const issues = pdfLayoutBlockingIssues(layout.data);
-    if (issues.length) throw new Error(issues.join(". "));
-  }
-  const source = layout.success
-    ? await prisma.fileAsset.findFirstOrThrow({ where: { id: layout.data.sourceFileId, tenantId: job.tenantId, deletedAt: null } })
-    : null;
-  const pdf = layout.success && source
-    ? await buildPdfFromLayout({ bytes: await getObjectResilient(source.storageKey), layout: layout.data })
-    : document.editableHtml
-      ? await buildGeneratedDocumentPdfFromHtml({
+  const pdf = document.editableHtml
+    ? await buildGeneratedDocumentPdfFromHtml({
         title: document.type.replaceAll("_", " ").toUpperCase(),
         number: document.number,
         tenantName: tenant.name,
         html: document.editableHtml,
       })
-      : await buildGeneratedDocumentPdf({
+    : await buildGeneratedDocumentPdf({
         title: document.type.replaceAll("_", " ").toUpperCase(),
         number: document.number,
         tenantName: tenant.name,

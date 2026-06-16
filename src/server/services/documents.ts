@@ -4,14 +4,11 @@ import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
 import { enqueueDocumentGeneration } from "../jobs";
-import { generatedDocumentStorageKey, getObjectResilient, putGeneratedObject } from "../storage";
+import { generatedDocumentStorageKey, putGeneratedObject } from "../storage";
 import { createGeneratedFileAsset } from "./files";
 import { buildGeneratedDocumentPdf, buildGeneratedDocumentPdfFromHtml } from "./document-pdf";
 import { createNotification } from "./notifications";
-import { ambeyAllotmentTemplate, registryStatusLetterTemplate, transferLetterTemplate } from "./letter-templates";
-import { templateFields } from "./document-templates";
-import { buildPdfFromExactTemplate, buildPdfFromLayout, buildPdfFromLayoutV2, type PdfTemplateField } from "./pdf-template-render";
-import { pdfLayoutBlockingIssues, pdfLayoutDocumentSchema, resolvePdfLayoutFields } from "@/lib/pdf-layout";
+import { defaultLetterBody } from "./document-templates";
 
 export const generateDocumentSchema = z.object({
   templateId: z.string().optional(),
@@ -29,10 +26,8 @@ export const createDocumentDraftSchema = z.object({
 });
 
 export const updateDocumentDraftSchema = z.object({
-  editableHtml: z.string().min(20).optional(),
-  editableLayout: pdfLayoutDocumentSchema.optional(),
-  exactPdfValues: z.record(z.string()).optional(),
-}).refine((input) => input.editableHtml || input.editableLayout || input.exactPdfValues, "An editable document draft is required.");
+  editableHtml: z.string().min(20),
+});
 
 export async function generateDocument(context: RequestContext, input: z.infer<typeof generateDocumentSchema>) {
   const count = await prisma.generatedDocument.count({ where: { tenantId: context.tenantId, type: input.type } });
@@ -100,63 +95,11 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
   const template = selectedTemplate
     ?? await prisma.documentTemplate.findFirst({ where: { tenantId: context.tenantId, projectId: snapshot.projectId, type: input.type, active: true }, orderBy: { createdAt: "desc" } })
     ?? await prisma.documentTemplate.findFirst({ where: { tenantId: context.tenantId, projectId: null, type: input.type, active: true }, orderBy: { createdAt: "desc" } });
-  const configuredFields = templateFields(template?.variables);
-  for (const field of configuredFields) {
-    const fallback = field.sourceText ?? field.label ?? "";
-    snapshot.variables[`field.${field.id}`] = field.mapping
-      ? snapshot.variables[field.mapping] || fallback
-      : snapshot.variables[`manual.${field.key}`] || fallback;
-  }
-  if (template?.editorMode === "PDF_LAYOUT") {
-    const sourceLayout = pdfLayoutDocumentSchema.parse(template.layoutData);
-    for (const field of sourceLayout.fields) {
-      const fallback = field.sourceText || field.label;
-      snapshot.variables[`field.${field.id}`] = field.mapping
-        ? snapshot.variables[field.mapping] || fallback
-        : snapshot.variables[`manual.${field.key}`] || fallback;
-    }
-    const editableLayout = resolvePdfLayoutFields(sourceLayout, snapshot.variables);
-    const missingVariables = sourceLayout.fields
-      .filter((field) => field.mapping && !snapshot.variables[field.mapping])
-      .map((field) => field.mapping as string);
-    const document = await prisma.generatedDocument.create({
-      data: {
-        tenantId: context.tenantId,
-        templateId: template.id,
-        type: input.type,
-        recordType: input.recordType,
-        recordId: input.recordId,
-        data: {
-          ...snapshot,
-          templateBody: template.body,
-          pdfLayoutTemplate: true,
-          missingVariables,
-        } as Prisma.InputJsonValue,
-        editableHtml: null,
-        editableLayout: editableLayout as unknown as Prisma.InputJsonValue,
-        status: DocumentStatus.DRAFT,
-        number: documentNumber,
-        createdById: context.userId,
-      },
-    });
-    await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "GeneratedDocument", entityId: document.id, after: document as unknown as Prisma.InputJsonValue });
-    await linkDocumentToLatestOwnershipRecord(context, document);
-    return { document, missingVariables };
-  }
+  const hasRealBody = template?.body && template.body.length > 100 && !template.body.includes("data-pdf-layout-template") && !template.body.includes("data-exact-pdf-draft");
+  const templateBody = hasRealBody ? template.body : defaultLetterBody(input.type);
+  const { html, missingVariables } = renderTemplate(templateBody, snapshot.variables);
 
-  const templateSourceFileId = sourceFileIdOfTemplate(template);
-  const exactPdfTemplate = templateSourceFileId && configuredFields.some((field) => field.rects?.length)
-    ? {
-        sourceFileId: templateSourceFileId,
-        fields: configuredFields,
-      }
-    : null;
-  const templateBody = template?.body ?? defaultTemplate(input.type);
-  const { html, missingVariables } = exactPdfTemplate
-    ? { html: exactPdfDraftHtml(template?.name ?? input.type), missingVariables: missingFieldVariables(configuredFields, snapshot.variables) }
-    : renderTemplate(templateBody, snapshot.variables);
-
-  let document = await prisma.generatedDocument.create({
+  const document = await prisma.generatedDocument.create({
     data: {
       tenantId: context.tenantId,
       templateId: template?.id,
@@ -166,7 +109,6 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
       data: {
         ...snapshot,
         templateBody,
-        exactPdfTemplate,
         missingVariables,
       } as Prisma.InputJsonValue,
       editableHtml: html,
@@ -176,11 +118,6 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
     },
   });
 
-  if (exactPdfTemplate) {
-    const rendered = await renderExactPdfTemplateForDocument(context, document.id, exactPdfTemplate, snapshot.variables, DocumentStatus.DRAFT);
-    document = rendered.document;
-  }
-
   await linkDocumentToLatestOwnershipRecord(context, document);
   await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "GeneratedDocument", entityId: document.id, after: document as unknown as Prisma.InputJsonValue });
   return { document, missingVariables };
@@ -188,18 +125,10 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
 
 export async function updateDocumentDraft(context: RequestContext, id: string, input: z.infer<typeof updateDocumentDraftSchema>) {
   const before = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
-  const beforeData = jsonRecord(before.data);
   const document = await prisma.generatedDocument.update({
     where: { id },
     data: {
       editableHtml: input.editableHtml,
-      editableLayout: input.editableLayout as unknown as Prisma.InputJsonValue | undefined,
-      data: input.exactPdfValues
-        ? {
-            ...beforeData,
-            exactPdfValues: input.exactPdfValues,
-          } as Prisma.InputJsonValue
-        : undefined,
       status: before.status === DocumentStatus.REJECTED ? DocumentStatus.DRAFT : before.status,
     },
   });
@@ -216,42 +145,6 @@ export async function updateDocumentDraft(context: RequestContext, id: string, i
 export async function renderDocumentDraft(context: RequestContext, id: string) {
   const document = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
   const tenant = await prisma.tenant.findUnique({ where: { id: context.tenantId } });
-  const editableLayout = pdfLayoutDocumentSchema.safeParse(document.editableLayout);
-  if (editableLayout.success) {
-    const blockingIssues = pdfLayoutBlockingIssues(editableLayout.data);
-    if (blockingIssues.length) {
-      const error = new Error(blockingIssues.join(". "));
-      error.name = "BadRequestError";
-      throw error;
-    }
-    const source = await prisma.fileAsset.findFirstOrThrow({
-      where: { id: editableLayout.data.sourceFileId, tenantId: context.tenantId, deletedAt: null },
-    });
-    const sourceBytes = await getObjectResilient(source.storageKey);
-    let pdf: Buffer;
-    try {
-      pdf = await buildPdfFromLayoutV2({ bytes: sourceBytes, layout: editableLayout.data });
-    } catch {
-      pdf = await buildPdfFromLayout({ bytes: sourceBytes, layout: editableLayout.data });
-    }
-    return persistRenderedDocument(context, document, pdf);
-  }
-  const exactPdfTemplate = exactPdfTemplateFromData(document.data);
-  if (exactPdfTemplate) {
-    const data = jsonRecord(document.data);
-    const variables = jsonRecord(data.variables);
-    const exactPdfValues = jsonRecord(data.exactPdfValues);
-    const mergedVariables = {
-      ...Object.fromEntries(Object.entries(variables).map(([key, value]) => [key, String(value ?? "")])),
-      ...Object.fromEntries(Object.entries(exactPdfValues).map(([key, value]) => [key, String(value ?? "")])),
-    };
-    return renderExactPdfTemplateForDocument(
-      context,
-      document.id,
-      exactPdfTemplate,
-      mergedVariables,
-    );
-  }
   const html = document.editableHtml ?? "";
   const pdf = await buildGeneratedDocumentPdfFromHtml({
     title: document.type.replaceAll("_", " ").toUpperCase(),
@@ -310,15 +203,6 @@ export async function approveDocument(context: RequestContext, id: string, input
       const error = new Error("Generate the PDF before approving or issuing it.");
       error.name = "BadRequestError";
       throw error;
-    }
-    const layout = pdfLayoutDocumentSchema.safeParse(current.editableLayout);
-    if (layout.success) {
-      const issues = pdfLayoutBlockingIssues(layout.data);
-      if (issues.length) {
-        const error = new Error(issues.join(". "));
-        error.name = "BadRequestError";
-        throw error;
-      }
     }
   }
   const document = await prisma.generatedDocument.update({
@@ -583,105 +467,6 @@ function renderTemplate(template: string, variables: Record<string, string>) {
   return { html, missingVariables: [...new Set(missingVariables)] };
 }
 
-async function renderExactPdfTemplateForDocument(
-  context: RequestContext,
-  documentId: string,
-  template: { sourceFileId: string; fields: PdfTemplateField[] },
-  variables: Record<string, string>,
-  status: DocumentStatus = DocumentStatus.GENERATED,
-) {
-  const source = await prisma.fileAsset.findFirstOrThrow({
-    where: { id: template.sourceFileId, tenantId: context.tenantId, deletedAt: null },
-  });
-  const sourceBytes = await getObjectResilient(source.storageKey);
-  const pdf = await buildPdfFromExactTemplate({
-    bytes: sourceBytes,
-    fields: template.fields,
-    values: variables,
-  });
-  const key = generatedDocumentStorageKey(context.tenantId, documentId);
-  const stored = await putGeneratedObject(key, pdf, "application/pdf");
-  const current = await prisma.generatedDocument.findUniqueOrThrow({ where: { id: documentId } });
-  const file = await createGeneratedFileAsset(context, {
-    storageKey: stored.storageKey,
-    storageProvider: stored.storageProvider,
-    fallbackStorageKey: stored.fallbackStorageKey,
-    fileName: `${current.number ?? documentId}.pdf`,
-    mimeType: "application/pdf",
-    sizeBytes: pdf.length,
-    visibility: FileVisibility.OWNER_VISIBLE,
-    documentType: documentTypeForLetter(current.type),
-    ownerType: current.recordType,
-    ownerId: current.recordId,
-  });
-  const document = await prisma.generatedDocument.update({
-    where: { id: documentId },
-    data: {
-      fileAssetId: file.id,
-      status,
-      finalizedAt: status === DocumentStatus.GENERATED ? new Date() : null,
-    },
-  });
-  return { document, file, storage: stored };
-}
-
-function exactPdfDraftHtml(templateName: string) {
-  return `<div data-exact-pdf-draft="true"><p><strong>${escapeHtml(templateName)}</strong></p><p>This draft uses the uploaded PDF exactly. Field replacements are rendered directly on the original PDF pages.</p></div>`;
-}
-
-function exactPdfTemplateFromData(value: Prisma.JsonValue) {
-  const data = jsonRecord(value);
-  const raw = jsonRecord(data.exactPdfTemplate);
-  const sourceFileId = typeof raw.sourceFileId === "string" ? raw.sourceFileId : "";
-  const fields = Array.isArray(raw.fields) ? raw.fields.flatMap((item): PdfTemplateField[] => {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
-    const field = item as Record<string, unknown>;
-    const id = typeof field.id === "string" ? field.id : "";
-    if (!id) return [];
-    return [{
-      id,
-      label: typeof field.label === "string" ? field.label : id,
-      sourceText: typeof field.sourceText === "string" ? field.sourceText : undefined,
-      mapping: typeof field.mapping === "string" ? field.mapping : null,
-      rects: Array.isArray(field.rects)
-        ? field.rects.flatMap((rect): NonNullable<PdfTemplateField["rects"]> => {
-            if (!rect || typeof rect !== "object" || Array.isArray(rect)) return [];
-            const value = rect as Record<string, unknown>;
-            return typeof value.pageNumber === "number"
-              && typeof value.x === "number"
-              && typeof value.y === "number"
-              && typeof value.width === "number"
-              && typeof value.height === "number"
-              ? [{ pageNumber: value.pageNumber, x: value.x, y: value.y, width: value.width, height: value.height }]
-              : [];
-          })
-        : [],
-    }];
-  }) : [];
-  return sourceFileId && fields.length ? { sourceFileId, fields } : null;
-}
-
-function missingFieldVariables(fields: PdfTemplateField[], variables: Record<string, string>) {
-  return fields
-    .map((field) => `field.${field.id}`)
-    .filter((key) => !variables[key]);
-}
-
-function sourceFileIdOfTemplate(template: unknown) {
-  return template && typeof template === "object" && !Array.isArray(template) && typeof (template as { sourceFileId?: unknown }).sourceFileId === "string"
-    ? (template as { sourceFileId: string }).sourceFileId
-    : null;
-}
-
-function defaultTemplate(type: string) {
-  if (type === "transfer_letter") {
-    return transferLetterTemplate();
-  }
-  if (type === "registry_status_letter") {
-    return registryStatusLetterTemplate();
-  }
-  return ambeyAllotmentTemplate();
-}
 
 function documentTypeForLetter(type: string): RealEstateDocumentType {
   if (type.toLowerCase().includes("transfer")) return RealEstateDocumentType.TRANSFER_LETTER;

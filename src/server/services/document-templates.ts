@@ -4,45 +4,14 @@ import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
 import { ambeyAllotmentTemplate, transferLetterTemplate, registryStatusLetterTemplate } from "./letter-templates";
-import { pdfLayoutDocumentSchema } from "@/lib/pdf-layout";
-
-const templateFieldSchema = z.object({
-  id: z.string().min(1),
-  label: z.string().min(1).max(100),
-  sourceText: z.string().min(1).max(500).optional(),
-  key: z.string().min(1).max(100),
-  mapping: z.string().max(120).nullable(),
-  pageNumber: z.number().int().positive().optional(),
-  rects: z.array(z.object({
-    pageNumber: z.number().int().positive(),
-    x: z.number().min(0).max(1),
-    y: z.number().min(0).max(1),
-    width: z.number().min(0).max(1),
-    height: z.number().min(0).max(1),
-  })).optional(),
-});
 
 export const saveProjectLetterTemplateSchema = z.object({
   name: z.string().min(2).max(120),
   type: z.enum(["allotment_letter", "transfer_letter", "registry_status_letter"]).default("allotment_letter"),
   body: z.string().min(20).optional(),
-  sourceFileId: z.string().optional(),
-  fields: z.array(templateFieldSchema).default([]),
 });
 
-export const importPdfTemplateSchema = z.object({
-  name: z.string().min(2).max(120),
-  type: z.enum(["allotment_letter", "transfer_letter", "registry_status_letter"]),
-  sourceFileId: z.string().min(1),
-  layoutData: pdfLayoutDocumentSchema,
-});
-
-export const updatePdfTemplateLayoutSchema = z.object({
-  name: z.string().min(2).max(120).optional(),
-  layoutData: pdfLayoutDocumentSchema,
-});
-
-function defaultLetterBody(type: string): string {
+export function defaultLetterBody(type: string): string {
   if (type === "transfer_letter") return transferLetterTemplate();
   if (type === "registry_status_letter") return registryStatusLetterTemplate();
   return ambeyAllotmentTemplate();
@@ -50,10 +19,6 @@ function defaultLetterBody(type: string): string {
 
 export async function saveProjectLetterTemplate(context: RequestContext, projectId: string, input: z.infer<typeof saveProjectLetterTemplateSchema>) {
   await prisma.project.findFirstOrThrow({ where: { id: projectId, tenantId: context.tenantId } });
-  if (input.sourceFileId) await prisma.fileAsset.findFirstOrThrow({ where: { id: input.sourceFileId, tenantId: context.tenantId, deletedAt: null } });
-  if (input.sourceFileId && input.fields.some((field) => !field.rects?.length)) {
-    throwBadRequest("One or more fields are missing their PDF position. Re-select those fields and save again.");
-  }
   const body = input.body?.trim() || defaultLetterBody(input.type);
   await prisma.documentTemplate.updateMany({
     where: { tenantId: context.tenantId, projectId, type: input.type, active: true },
@@ -63,11 +28,9 @@ export async function saveProjectLetterTemplate(context: RequestContext, project
     data: {
       tenantId: context.tenantId,
       projectId,
-      sourceFileId: input.sourceFileId,
       name: input.name,
       type: input.type,
       body,
-      variables: { fields: input.fields } as Prisma.InputJsonValue,
       active: true,
     },
   });
@@ -82,65 +45,13 @@ export async function deleteProjectLetterTemplate(context: RequestContext, id: s
   return deleted;
 }
 
-export async function importPdfTemplate(context: RequestContext, projectId: string, input: z.infer<typeof importPdfTemplateSchema>) {
-  await prisma.project.findFirstOrThrow({ where: { id: projectId, tenantId: context.tenantId } });
-  await prisma.fileAsset.findFirstOrThrow({ where: { id: input.sourceFileId, tenantId: context.tenantId, deletedAt: null } });
-  if (input.layoutData.sourceFileId !== input.sourceFileId) throwBadRequest("PDF layout does not match the uploaded source file.");
-  const template = await prisma.documentTemplate.create({
-    data: {
-      tenantId: context.tenantId,
-      projectId,
-      sourceFileId: input.sourceFileId,
-      name: input.name,
-      type: input.type,
-      body: "<div data-pdf-layout-template=\"true\"></div>",
-      variables: { fields: input.layoutData.fields } as Prisma.InputJsonValue,
-      editorMode: "PDF_LAYOUT",
-      analysisStatus: "READY",
-      layoutData: input.layoutData as unknown as Prisma.InputJsonValue,
-      layoutVersion: 1,
-      active: false,
-    },
-  });
-  await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "DocumentTemplate", entityId: template.id, after: template as unknown as Prisma.InputJsonValue });
-  return template;
-}
-
-export async function getPdfTemplateAnalysis(context: RequestContext, projectId: string, templateId: string) {
-  return prisma.documentTemplate.findFirstOrThrow({
-    where: { id: templateId, projectId, tenantId: context.tenantId, editorMode: "PDF_LAYOUT" },
-  });
-}
-
-export async function updatePdfTemplateLayout(context: RequestContext, projectId: string, templateId: string, input: z.infer<typeof updatePdfTemplateLayoutSchema>) {
-  const before = await getPdfTemplateAnalysis(context, projectId, templateId);
-  if (input.layoutData.sourceFileId !== before.sourceFileId) throwBadRequest("PDF layout does not match the template source file.");
-  const template = await prisma.documentTemplate.update({
-    where: { id: templateId },
-    data: {
-      name: input.name,
-      layoutData: input.layoutData as unknown as Prisma.InputJsonValue,
-      variables: { fields: input.layoutData.fields } as Prisma.InputJsonValue,
-      analysisStatus: "READY",
-      analysisError: null,
-      layoutVersion: { increment: 1 },
-    },
-  });
-  await writeAuditEvent(context, { action: AuditAction.UPDATE, entityType: "DocumentTemplate", entityId: template.id, before: before as unknown as Prisma.InputJsonValue, after: template as unknown as Prisma.InputJsonValue });
-  return template;
-}
-
-export async function activatePdfTemplate(context: RequestContext, projectId: string, templateId: string) {
-  const template = await getPdfTemplateAnalysis(context, projectId, templateId);
-  pdfLayoutDocumentSchema.parse(template.layoutData);
-  return prisma.$transaction(async (tx) => {
-    await tx.documentTemplate.updateMany({
-      where: { tenantId: context.tenantId, projectId, type: template.type, active: true },
-      data: { active: false },
-    });
-    return tx.documentTemplate.update({ where: { id: template.id }, data: { active: true } });
-  });
-}
+const templateFieldSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1).max(100),
+  sourceText: z.string().min(1).max(500).optional(),
+  key: z.string().min(1).max(100),
+  mapping: z.string().max(120).nullable(),
+});
 
 export function templateFields(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
@@ -148,8 +59,15 @@ export function templateFields(value: unknown) {
   return result.success ? result.data : [];
 }
 
-function throwBadRequest(message: string): never {
-  const error = new Error(message);
-  error.name = "BadRequestError";
-  throw error;
+export async function activateTemplate(context: RequestContext, projectId: string, templateId: string) {
+  const template = await prisma.documentTemplate.findFirstOrThrow({
+    where: { id: templateId, projectId, tenantId: context.tenantId },
+  });
+  return prisma.$transaction(async (tx) => {
+    await tx.documentTemplate.updateMany({
+      where: { tenantId: context.tenantId, projectId, type: template.type, active: true },
+      data: { active: false },
+    });
+    return tx.documentTemplate.update({ where: { id: template.id }, data: { active: true } });
+  });
 }

@@ -4,8 +4,6 @@ import Link from "next/link";
 import { FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, Bold, CheckCircle2, Download, Eye, FileText, Italic, Loader2, Plus, Save, Send, Underline, Wand2, X } from "lucide-react";
-import { PdfLayoutDocument, PdfLayoutField } from "@/lib/pdf-layout";
-import { PdfTextLayerCanvas } from "./letter-template-builder";
 
 type ProjectInfo = {
   id: string;
@@ -434,16 +432,6 @@ export function LetterStudioEditor({
     status: string;
     editableHtml: string | null;
     fileAssetId: string | null;
-    exactPdfTemplate?: boolean;
-    exactPdfFields?: Array<{
-      id: string;
-      key: string;
-      label: string;
-      sourceText: string;
-      mapping: string | null;
-      value: string;
-    }>;
-    editableLayout?: PdfLayoutDocument | null;
   };
   missingVariables: string[];
   backHref?: string;
@@ -457,25 +445,18 @@ export function LetterStudioEditor({
   const [loading, setLoading] = useState<"save" | "render" | "">("");
   const [approvalLoading, setApprovalLoading] = useState<"APPROVED" | "ISSUED" | "REJECTED" | "">("");
   const [dirty, setDirty] = useState(false);
-  const isExactPdfTemplate = Boolean(letter.exactPdfTemplate);
-  const isPdfLayout = Boolean(letter.editableLayout);
-  const [view, setView] = useState<"edit" | "preview">(isExactPdfTemplate ? "edit" : letter.fileAssetId ? "preview" : "edit");
+  const [view, setView] = useState<"edit" | "preview">(letter.fileAssetId ? "preview" : "edit");
   const [draftHtml, setDraftHtml] = useState(letter.editableHtml ?? "");
   const [fileAssetId, setFileAssetId] = useState(letter.fileAssetId);
   const [renderVersion, setRenderVersion] = useState(0);
   const [status, setStatus] = useState(letter.status);
   const [missingOpen, setMissingOpen] = useState(false);
-  const [exactPdfValues, setExactPdfValues] = useState<Record<string, string>>(
-    Object.fromEntries((letter.exactPdfFields ?? []).map((field) => [field.key, field.value])),
-  );
-  const [editableLayout, setEditableLayout] = useState<PdfLayoutDocument | null>(letter.editableLayout ?? null);
 
   useEffect(() => {
     setMounted(true);
   }, []);
 
   function currentHtml() {
-    if (isExactPdfTemplate || isPdfLayout) return draftHtml;
     return editorRef.current?.innerHTML ?? draftHtml;
   }
 
@@ -491,15 +472,7 @@ export function LetterStudioEditor({
   }
 
   function draftPayload() {
-    if (isPdfLayout) {
-      return { editableLayout, editableHtml: undefined, exactPdfValues: undefined };
-    }
-    const editableHtml = currentHtml();
-    return {
-      editableHtml,
-      editableLayout: undefined,
-      exactPdfValues: isExactPdfTemplate ? exactPdfValues : undefined,
-    };
+    return { editableHtml: currentHtml() };
   }
 
   async function saveDraft() {
@@ -546,7 +519,7 @@ export function LetterStudioEditor({
       setFileAssetId(body.data?.file?.id ?? body.data?.document?.fileAssetId ?? fileAssetId);
       setRenderVersion((v) => v + 1);
       setStatus(body.data?.document?.status ?? "GENERATED");
-      if (!isPdfLayout) changeView("preview");
+      changeView("preview");
       router.refresh();
     }
   }
@@ -607,19 +580,19 @@ export function LetterStudioEditor({
             <div className="flex flex-wrap items-center gap-2">
               <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 bg-white text-sm">
                 <button type="button" className={`px-3 py-2 font-medium ${view === "edit" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => changeView("edit")}>
-                  {isExactPdfTemplate ? "Draft PDF" : "Edit Draft"}
+                  Edit Draft
                 </button>
                 <button type="button" className={`px-3 py-2 font-medium ${view === "preview" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"}`} onClick={() => changeView("preview")}>
                   PDF Preview
                 </button>
               </div>
-              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("bold")} disabled={view !== "edit" || isExactPdfTemplate || isPdfLayout}>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("bold")} disabled={view !== "edit"}>
                 <Bold size={14} />
               </button>
-              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("italic")} disabled={view !== "edit" || isExactPdfTemplate || isPdfLayout}>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("italic")} disabled={view !== "edit"}>
                 <Italic size={14} />
               </button>
-              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("underline")} disabled={view !== "edit" || isExactPdfTemplate || isPdfLayout}>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("underline")} disabled={view !== "edit"}>
                 <Underline size={14} />
               </button>
               <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={saveDraft} disabled={Boolean(loading)}>
@@ -697,30 +670,6 @@ export function LetterStudioEditor({
           <section className="rounded-2xl border border-slate-200 bg-white p-10 text-center text-sm text-slate-500 shadow-card">
             Opening letter studio...
           </section>
-        ) : view === "edit" && isPdfLayout && editableLayout ? (
-          <PdfLayoutDraftEditor
-            layout={editableLayout}
-            onChange={(next) => {
-              setEditableLayout(next);
-              setDirty(true);
-            }}
-            onGenerate={renderPdf}
-            fileAssetId={fileAssetId}
-            renderVersion={renderVersion}
-            loading={loading}
-          />
-        ) : view === "edit" && isExactPdfTemplate ? (
-          <ExactPdfDraftEditor
-            fields={letter.exactPdfFields ?? []}
-            values={exactPdfValues}
-            fileAssetId={fileAssetId}
-            loading={loading}
-            onChange={(key, value) => {
-              setExactPdfValues((current) => ({ ...current, [key]: value }));
-              setDirty(true);
-            }}
-            onGenerate={renderPdf}
-          />
         ) : view === "edit" ? (
           <LetterDraftCanvas
             key={`letter-edit-${letter.id}`}
@@ -772,162 +721,6 @@ function LetterDraftCanvas({
   );
 }
 
-function PdfLayoutDraftEditor({ layout, onChange, onGenerate, fileAssetId, renderVersion = 0, loading = "" }: {
-  layout: PdfLayoutDocument;
-  onChange: (layout: PdfLayoutDocument) => void;
-  onGenerate?: () => void;
-  fileAssetId?: string | null;
-  renderVersion?: number;
-  loading?: "save" | "render" | "";
-}) {
-  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
-  const [previewMode, setPreviewMode] = useState<"live" | "generated">(fileAssetId ? "generated" : "live");
-  const fields = layout.fields.filter((f) => f.rect && f.pageNumber);
-  const previewValues = Object.fromEntries(
-    layout.fields.map((f) => [f.id, f.resolvedValue ?? f.sourceText]),
-  );
-
-  useEffect(() => {
-    if (fileAssetId && renderVersion > 0) setPreviewMode("generated");
-  }, [fileAssetId, renderVersion]);
-
-  function updateFieldValue(fieldId: string, value: string) {
-    onChange({
-      ...layout,
-      fields: layout.fields.map((f) => f.id === fieldId ? { ...f, resolvedValue: value } : f),
-    });
-  }
-
-  return (
-    <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
-      <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
-        <h2 className="font-semibold text-navy-900">Letter fields</h2>
-        <p className="mt-1 text-xs leading-5 text-slate-500">
-          Edit field values below, then click Generate. The generated PDF preserves the original document formatting.
-        </p>
-        <div className="mt-4 space-y-3">
-          {fields.map((field) => (
-            <label key={field.id} className={`block rounded-lg border p-3 ${selectedFieldId === field.id ? "border-blue-400 bg-blue-50/50" : "border-slate-200"}`}>
-              <span className="text-xs font-semibold text-slate-500">{field.label}</span>
-              {field.mapping ? <span className="mt-1 block text-[11px] text-slate-400">Auto-filled from {field.mapping}</span> : null}
-              <textarea
-                className="input mt-2 min-h-16 py-2 text-sm"
-                value={field.resolvedValue ?? field.sourceText}
-                placeholder={field.sourceText}
-                onChange={(e) => updateFieldValue(field.id, e.target.value)}
-                onFocus={() => setSelectedFieldId(field.id)}
-              />
-            </label>
-          ))}
-          {!fields.length ? (
-            <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
-              No editable fields in this template.
-            </div>
-          ) : null}
-        </div>
-        {onGenerate ? (
-          <button
-            type="button"
-            className="btn-primary mt-4 w-full justify-center"
-            onClick={onGenerate}
-            disabled={Boolean(loading)}
-          >
-            {loading === "render" ? <Loader2 className="animate-spin" size={17} /> : <Eye size={17} />}
-            Generate PDF
-          </button>
-        ) : null}
-      </aside>
-      <section className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-200/70 shadow-inner">
-        <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-2">
-          <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 text-xs">
-            <button
-              type="button"
-              className={`px-3 py-1.5 font-medium ${previewMode === "live" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
-              onClick={() => setPreviewMode("live")}
-            >
-              Live Preview
-            </button>
-            <button
-              type="button"
-              className={`px-3 py-1.5 font-medium ${previewMode === "generated" ? "bg-navy-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
-              onClick={() => setPreviewMode("generated")}
-              disabled={!fileAssetId}
-            >
-              Generated PDF
-            </button>
-          </div>
-          {previewMode === "live" ? (
-            <span className="text-xs text-slate-400">Shows your edits in place — fonts match after Generate</span>
-          ) : null}
-        </div>
-        <div className="max-h-[calc(100dvh-13rem)] overflow-auto p-3 md:p-6">
-          {previewMode === "generated" && fileAssetId ? (
-            <iframe
-              key={`gen-preview-${renderVersion}`}
-              title="Generated PDF"
-              className="h-[calc(100dvh-16rem)] min-h-[640px] w-full rounded-lg border-0 bg-white shadow-lg"
-              src={`/api/v1/files/${fileAssetId}/download?disposition=inline&proxy=1&v=${renderVersion}`}
-            />
-          ) : (
-            <PdfTextLayerCanvas
-              sourceUrl={`/api/v1/files/${layout.sourceFileId}/download?disposition=inline&proxy=1`}
-              layout={layout}
-              selectedFieldId={selectedFieldId}
-              onTextSelect={() => {}}
-              onFieldClick={setSelectedFieldId}
-              previewValues={previewValues}
-            />
-          )}
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function ExactPdfDraftEditor({
-  fields,
-  values,
-  fileAssetId,
-  loading,
-  onChange,
-  onGenerate,
-}: {
-  fields: Array<{ id: string; key: string; label: string; sourceText: string; mapping: string | null; value: string }>;
-  values: Record<string, string>;
-  fileAssetId: string | null;
-  loading: "save" | "render" | "";
-  onChange: (key: string, value: string) => void;
-  onGenerate: () => void;
-}) {
-  return (
-    <div className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
-      <aside className="h-fit rounded-2xl border border-slate-200 bg-white p-4 shadow-card">
-        <h2 className="font-semibold text-navy-900">Editable PDF fields</h2>
-        <p className="mt-1 text-xs leading-5 text-slate-500">Change these values, then generate the PDF. Unchanged fields keep the original uploaded PDF text.</p>
-        <div className="mt-4 space-y-3">
-          {fields.map((field) => (
-            <label key={field.id} className="block rounded-lg border border-slate-200 p-3">
-              <span className="text-xs font-semibold text-slate-500">{field.label}</span>
-              {field.mapping ? <span className="mt-1 block text-[11px] text-slate-400">Mapped from {field.mapping}</span> : null}
-              <textarea
-                className="input mt-2 min-h-20 py-2 text-sm"
-                value={values[field.key] ?? field.value ?? ""}
-                placeholder={field.sourceText}
-                onChange={(event) => onChange(field.key, event.target.value)}
-              />
-            </label>
-          ))}
-          {!fields.length ? <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">No PDF fields were saved on this template.</div> : null}
-        </div>
-        <button type="button" className="btn-primary mt-4 w-full justify-center" onClick={onGenerate} disabled={Boolean(loading)}>
-          {loading === "render" ? <Loader2 className="animate-spin" size={17} /> : <Eye size={17} />}
-          Generate PDF
-        </button>
-      </aside>
-      <LetterPdfPreview fileAssetId={fileAssetId} loading={loading} onGenerate={onGenerate} />
-    </div>
-  );
-}
 
 function normalizeEditableTemplateFields(editor: HTMLDivElement) {
   const markers = [...editor.querySelectorAll<HTMLElement>("mark[data-template-field]")];
