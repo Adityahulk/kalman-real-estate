@@ -88,6 +88,19 @@ export async function transferPlot(context: RequestContext, plotId: string, inpu
     if (!before.currentOwnerId || before.status === PlotStatus.COMPANY_OWNED) {
       throwBadRequest("Company-owned plots cannot be transferred. Record the first allotment instead.");
     }
+    const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: context.tenantId }, select: { maxTransfersPerPlot: true } });
+    const transferRecords = await tx.ownershipRecord.findMany({
+      where: { tenantId: context.tenantId, plotId, kind: OwnershipKind.TRANSFER, documentId: { not: null } },
+      select: { documentId: true },
+    });
+    const acceptedTransfers = transferRecords.length
+      ? await tx.generatedDocument.count({
+          where: { tenantId: context.tenantId, id: { in: transferRecords.map((record) => record.documentId).filter(Boolean) as string[] }, status: { in: ["APPROVED", "ISSUED"] } },
+        })
+      : 0;
+    if (acceptedTransfers >= tenant.maxTransfersPerPlot) {
+      throwBadRequest(`Transfer limit reached for this plot. Only registry is available now.`);
+    }
     await tx.owner.findFirstOrThrow({ where: { id: input.buyerOwnerId, tenantId: context.tenantId } });
     const plot = await tx.plot.update({
       where: { id: plotId },

@@ -6,6 +6,7 @@ import { AppShell } from "./app-shell";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await getSessionUser();
   if (!session) redirect("/login");
+  if (session.tenantId === "__unselected__") redirect("/firms");
 
   const [user, tenant, projects, memberships] = await Promise.all([
     prisma.user.findUnique({

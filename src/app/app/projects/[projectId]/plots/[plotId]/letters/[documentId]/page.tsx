@@ -6,7 +6,7 @@ import { pdfLayoutDocumentSchema } from "@/lib/pdf-layout";
 
 export const dynamic = "force-dynamic";
 
-export default async function LetterStudioPage({ params }: { params: { projectId: string; plotId: string; documentId: string } }) {
+export default async function LetterStudioPage({ params, searchParams }: { params: { projectId: string; plotId: string; documentId: string }; searchParams: { returnTo?: string } }) {
   const session = await getSessionUser();
   if (!session) return null;
   const [plot, document] = await Promise.all([
@@ -20,6 +20,7 @@ export default async function LetterStudioPage({ params }: { params: { projectId
   ]);
   if (!plot || !document) notFound();
   const missingVariables = extractMissingVariables(document.data);
+  const returnTo = safeReturnTo(searchParams.returnTo, plot.projectId);
 
   return (
       <LetterStudioEditor
@@ -37,11 +38,21 @@ export default async function LetterStudioPage({ params }: { params: { projectId
             : null,
         }}
         missingVariables={missingVariables}
-        backHref={`/app/projects/${plot.projectId}/plots/${plot.id}?tab=documents`}
+        backHref={returnTo ?? `/app/projects/${plot.projectId}/plots/${plot.id}?tab=documents`}
         arrangeHref={`/app/projects/${plot.projectId}/plots/${plot.id}/letters/${document.id}/pdf`}
         eyebrow={`${plot.project.name} / Plot ${plot.code}`}
       />
   );
+}
+
+function safeReturnTo(value: string | undefined, projectId: string) {
+  if (!value) return null;
+  try {
+    const decoded = decodeURIComponent(value);
+    return decoded.startsWith(`/app/projects/${projectId}/`) ? decoded : null;
+  } catch {
+    return null;
+  }
 }
 
 function extractMissingVariables(data: unknown) {

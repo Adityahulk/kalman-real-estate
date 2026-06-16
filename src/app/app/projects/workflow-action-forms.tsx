@@ -160,10 +160,39 @@ export function ProjectAllotmentFlow({
   const calculatedFromUnitPrice = Number(perUnitPrice || 0) * Number(selectedPlot?.areaSqYards || 0);
   const calculatedPrice = Number(totalAreaPrice || 0) || calculatedFromUnitPrice;
   const paymentTotal = paymentEntries.reduce((total, entry) => total + Number(entry.amount || 0), 0);
+  const restoreKey = `widestate:new-allotment:${projectId}`;
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!new URLSearchParams(window.location.search).has("restore")) return;
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(restoreKey) ?? "{}") as Partial<{
+        plotId: string; name: string; phone: string; totalAreaPrice: string; perUnitPrice: string; paymentEntries: PaymentEntry[];
+        effectiveAt: string; eStampNumber: string; witnessDetails: string; extraFields: Array<{ label: string; value: string }>; letterFields: Record<string, string>;
+      }>;
+      if (saved.plotId) setPlotId(saved.plotId);
+      if (saved.name) setName(saved.name);
+      if (saved.phone) setPhone(saved.phone);
+      if (saved.totalAreaPrice) setTotalAreaPrice(saved.totalAreaPrice);
+      if (saved.perUnitPrice) setPerUnitPrice(saved.perUnitPrice);
+      if (Array.isArray(saved.paymentEntries) && saved.paymentEntries.length) setPaymentEntries(saved.paymentEntries);
+      if (saved.effectiveAt) setEffectiveAt(saved.effectiveAt);
+      if (saved.eStampNumber) setEStampNumber(saved.eStampNumber);
+      if (saved.witnessDetails) setWitnessDetails(saved.witnessDetails);
+      if (Array.isArray(saved.extraFields)) setExtraFields(saved.extraFields);
+      if (saved.letterFields) setLetterFields(saved.letterFields);
+    } catch {
+      // Ignore invalid local restore data.
+    }
+  }, [restoreKey]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!plotId) return;
+    const restorePayload = {
+      plotId, name, phone, totalAreaPrice, perUnitPrice, paymentEntries, effectiveAt, eStampNumber, witnessDetails, extraFields, letterFields,
+    };
+    if (typeof window !== "undefined") window.sessionStorage.setItem(restoreKey, JSON.stringify(restorePayload));
     setLoading(true);
     setMessage("");
     const ownerResponse = await fetch("/api/v1/ownership/owners", {
@@ -226,7 +255,8 @@ export function ProjectAllotmentFlow({
       router.refresh();
       return;
     }
-    router.push(`/app/projects/${projectId}/plots/${plotId}/letters/${draftBody.data.document.id}`);
+    const returnTo = `/app/projects/${projectId}/ownership/new-allotment?plotId=${encodeURIComponent(plotId)}&restore=1`;
+    router.push(`/app/projects/${projectId}/plots/${plotId}/letters/${draftBody.data.document.id}?returnTo=${encodeURIComponent(returnTo)}`);
   }
 
   if (!plots.length) {

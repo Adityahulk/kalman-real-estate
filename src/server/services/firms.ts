@@ -31,6 +31,10 @@ export const firmFieldSchema = z.object({
   label: z.string().min(2).max(80),
 });
 
+export const ownershipSettingsSchema = z.object({
+  maxTransfersPerPlot: z.number().int().min(0).max(50),
+});
+
 export async function firmsForUser(userId: string) {
   const memberships = await prisma.userFirmMembership.findMany({
     where: { userId },
@@ -94,6 +98,23 @@ export async function createFirmField(user: SessionUser, input: z.infer<typeof f
   }
   return prisma.firmCustomField.create({
     data: { ownerUserId: user.id, label: input.label, key },
+  });
+}
+
+export async function updateOwnershipSettings(user: SessionUser, input: z.infer<typeof ownershipSettingsSchema>) {
+  if (!user.tenantId) {
+    const error = new Error("Select a firm before updating ownership settings");
+    error.name = "BadRequestError";
+    throw error;
+  }
+  if (user.role !== Role.PLATFORM_ADMIN && user.role !== Role.BUILDER_OWNER && user.role !== Role.BUILDER_ADMIN) {
+    const error = new Error("Only an admin can update ownership settings");
+    error.name = "ForbiddenError";
+    throw error;
+  }
+  return prisma.tenant.update({
+    where: { id: user.tenantId },
+    data: { maxTransfersPerPlot: input.maxTransfersPerPlot },
   });
 }
 

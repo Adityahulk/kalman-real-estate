@@ -3,7 +3,8 @@ import { Building2, Plus, Settings } from "lucide-react";
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/server/session";
 import { firmFieldsForUser, firmsForUser } from "@/server/services/firms";
-import { AddFirmFieldForm } from "./settings-actions";
+import { prisma } from "@/server/db";
+import { AddFirmFieldForm, OwnershipSettingsForm } from "./settings-actions";
 import { BackButton } from "@/components/back-button";
 import { SettingsTabs } from "../settings-tabs";
 
@@ -13,9 +14,10 @@ export default async function FirmDetailsPage() {
   const session = await getSessionUser();
   if (!session) redirect("/login");
 
-  const [firms, fields] = await Promise.all([
+  const [firms, fields, selectedFirm] = await Promise.all([
     firmsForUser(session.id),
     firmFieldsForUser(session.id),
+    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { maxTransfersPerPlot: true } }),
   ]);
 
   return (
@@ -49,6 +51,7 @@ export default async function FirmDetailsPage() {
 
         <aside className="space-y-4">
           <AddFirmFieldForm />
+          <OwnershipSettingsForm maxTransfersPerPlot={selectedFirm?.maxTransfersPerPlot ?? 3} />
           <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-card">
             <div className="flex items-center gap-2">
               <Plus size={17} />

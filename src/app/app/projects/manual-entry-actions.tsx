@@ -4,14 +4,33 @@ import { FormEvent, PointerEvent, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Building2, Loader2, Minus, Plus, Route, Wrench, ZoomIn } from "lucide-react";
 
-export function ManualPlotForm({ projectId, cadFileId }: { projectId: string; cadFileId?: string }) {
+type ManualPlotInput = {
+  id?: string;
+  code: string;
+  areaSqYards?: string | null;
+  primeLocation?: string | null;
+  allottedBy?: string | null;
+  dimensions?: string | null;
+  boundaries?: Record<string, unknown> | null;
+};
+
+export function ManualPlotForm({ projectId, cadFileId, plot }: { projectId: string; cadFileId?: string; plot?: ManualPlotInput }) {
   const router = useRouter();
-  const [code, setCode] = useState("");
-  const [areaSqYards, setAreaSqYards] = useState("");
-  const [primeLocation, setPrimeLocation] = useState("");
-  const [allottedBy, setAllottedBy] = useState("");
-  const [dimensions, setDimensions] = useState("");
-  const [boundaries, setBoundaries] = useState({ north: "", south: "", east: "", west: "" });
+  const [code, setCode] = useState(plot?.code ?? "");
+  const [areaSqYards, setAreaSqYards] = useState(plot?.areaSqYards ?? "");
+  const [primeLocation, setPrimeLocation] = useState(plot?.primeLocation ?? "");
+  const [allottedBy, setAllottedBy] = useState(plot?.allottedBy ?? "");
+  const [dimensions, setDimensions] = useState(plot?.dimensions ?? "");
+  const [boundaries, setBoundaries] = useState({
+    north: boundaryText(plot?.boundaries, "north"),
+    northDimension: boundaryText(plot?.boundaries, "northDimension"),
+    south: boundaryText(plot?.boundaries, "south"),
+    southDimension: boundaryText(plot?.boundaries, "southDimension"),
+    east: boundaryText(plot?.boundaries, "east"),
+    eastDimension: boundaryText(plot?.boundaries, "eastDimension"),
+    west: boundaryText(plot?.boundaries, "west"),
+    westDimension: boundaryText(plot?.boundaries, "westDimension"),
+  });
   const [zoom, setZoom] = useState(100);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -22,8 +41,8 @@ export function ManualPlotForm({ projectId, cadFileId }: { projectId: string; ca
     event.preventDefault();
     setLoading(true);
     setMessage("");
-    const response = await fetch(`/api/v1/projects/${projectId}/plots`, {
-      method: "POST",
+    const response = await fetch(plot?.id ? `/api/v1/plots/${plot.id}` : `/api/v1/projects/${projectId}/plots`, {
+      method: plot?.id ? "PATCH" : "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         code,
@@ -40,7 +59,8 @@ export function ManualPlotForm({ projectId, cadFileId }: { projectId: string; ca
       setMessage(body.error ?? "Plot creation failed");
       return;
     }
-    router.push(`/app/projects/${projectId}/ownership?created=${encodeURIComponent(body.data.plot.code)}`);
+    const savedCode = body.data.plot?.code ?? body.data.code ?? code;
+    router.push(plot?.id ? `/app/projects/${projectId}/plots/${plot.id}` : `/app/projects/${projectId}/ownership?created=${encodeURIComponent(savedCode)}`);
   }
 
   function startPan(event: PointerEvent<HTMLDivElement>) {
@@ -104,21 +124,27 @@ export function ManualPlotForm({ projectId, cadFileId }: { projectId: string; ca
       <section className="rounded-xl border border-slate-200 bg-white p-5">
         <h3 className="font-semibold">Plot boundaries</h3>
         <div className="mx-auto mt-5 grid max-w-4xl grid-cols-[minmax(180px,1fr)_minmax(180px,280px)_minmax(180px,1fr)] grid-rows-[auto_minmax(180px,280px)_auto] items-center gap-4">
-          <input aria-label="North boundary" className="input col-start-2 row-start-1 text-center" placeholder="North boundary details" value={boundaries.north} onChange={(event) => setBoundaries({ ...boundaries, north: event.target.value })} />
-          <input aria-label="West boundary" className="input col-start-1 row-start-2 text-center" placeholder="West boundary details" value={boundaries.west} onChange={(event) => setBoundaries({ ...boundaries, west: event.target.value })} />
+          <div className="col-start-2 row-start-1 grid gap-2"><input aria-label="North boundary" className="input text-center" placeholder="North boundary details" value={boundaries.north} onChange={(event) => setBoundaries({ ...boundaries, north: event.target.value })} /><input aria-label="North plot dimensions" className="input text-center" placeholder="Plot dimensions" value={boundaries.northDimension} onChange={(event) => setBoundaries({ ...boundaries, northDimension: event.target.value })} /></div>
+          <div className="col-start-1 row-start-2 grid gap-2"><input aria-label="West boundary" className="input text-center" placeholder="West boundary details" value={boundaries.west} onChange={(event) => setBoundaries({ ...boundaries, west: event.target.value })} /><input aria-label="West plot dimensions" className="input text-center" placeholder="Plot dimensions" value={boundaries.westDimension} onChange={(event) => setBoundaries({ ...boundaries, westDimension: event.target.value })} /></div>
           <img className="col-start-2 row-start-2 aspect-square w-full object-contain" src="/images/plot-directions.png" alt="North south east west directions" />
-          <input aria-label="East boundary" className="input col-start-3 row-start-2 text-center" placeholder="East boundary details" value={boundaries.east} onChange={(event) => setBoundaries({ ...boundaries, east: event.target.value })} />
-          <input aria-label="South boundary" className="input col-start-2 row-start-3 text-center" placeholder="South boundary details" value={boundaries.south} onChange={(event) => setBoundaries({ ...boundaries, south: event.target.value })} />
+          <div className="col-start-3 row-start-2 grid gap-2"><input aria-label="East boundary" className="input text-center" placeholder="East boundary details" value={boundaries.east} onChange={(event) => setBoundaries({ ...boundaries, east: event.target.value })} /><input aria-label="East plot dimensions" className="input text-center" placeholder="Plot dimensions" value={boundaries.eastDimension} onChange={(event) => setBoundaries({ ...boundaries, eastDimension: event.target.value })} /></div>
+          <div className="col-start-2 row-start-3 grid gap-2"><input aria-label="South boundary" className="input text-center" placeholder="South boundary details" value={boundaries.south} onChange={(event) => setBoundaries({ ...boundaries, south: event.target.value })} /><input aria-label="South plot dimensions" className="input text-center" placeholder="Plot dimensions" value={boundaries.southDimension} onChange={(event) => setBoundaries({ ...boundaries, southDimension: event.target.value })} /></div>
         </div>
       </section>
 
       {message ? <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
       <button className="btn-primary w-fit" disabled={loading || !code}>
         {loading ? <Loader2 className="animate-spin" size={17} /> : <Plus size={17} />}
-        Save plot
+        {plot?.id ? "Save plot details" : "Save plot"}
       </button>
     </form>
   );
+}
+
+function boundaryText(boundaries: unknown, key: string) {
+  if (!boundaries || typeof boundaries !== "object" || Array.isArray(boundaries)) return "";
+  const value = (boundaries as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : "";
 }
 
 export function ManualSiteAssetForm({ projectId }: { projectId: string }) {

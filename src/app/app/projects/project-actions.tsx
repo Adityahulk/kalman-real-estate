@@ -6,8 +6,9 @@ import { Building2, Loader2, Plus, Trash2 } from "lucide-react";
 import { requestJson } from "@/lib/api-client";
 
 type CreatedProject = { id: string };
+type CustomField = { id: string; key: string; label: string };
 
-export function CreateProjectForm({ compact = false }: { compact?: boolean }) {
+export function CreateProjectForm({ compact = false, customFields = [] }: { compact?: boolean; customFields?: CustomField[] }) {
   const router = useRouter();
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
@@ -18,6 +19,7 @@ export function CreateProjectForm({ compact = false }: { compact?: boolean }) {
   const [landAreaAcres, setLandAreaAcres] = useState("");
   const [siteContactPhone, setSiteContactPhone] = useState("");
   const [totalPlots, setTotalPlots] = useState("");
+  const [customValues, setCustomValues] = useState<Record<string, string>>({});
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -39,6 +41,7 @@ export function CreateProjectForm({ compact = false }: { compact?: boolean }) {
           landAreaAcres: landAreaAcres ? Number(landAreaAcres) : undefined,
           siteContactPhone: siteContactPhone || undefined,
           totalPlots: Number(totalPlots),
+          customFields: Object.fromEntries(customFields.map((field) => [field.key, customValues[field.key] ?? ""])),
         }),
       });
       router.push(`/app/projects/${project.id}`);
@@ -93,6 +96,12 @@ export function CreateProjectForm({ compact = false }: { compact?: boolean }) {
           </label>
         </div>
         <label><span className="label">Total plots</span><input className="input" inputMode="numeric" value={totalPlots} onChange={(event) => setTotalPlots(event.target.value)} placeholder="100" /></label>
+        {customFields.map((field) => (
+          <label key={field.id}>
+            <span className="label">{field.label}</span>
+            <input className="input" value={customValues[field.key] ?? ""} onChange={(event) => setCustomValues((values) => ({ ...values, [field.key]: event.target.value }))} />
+          </label>
+        ))}
       </div>
       {message ? <div className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{message}</div> : null}
       <button className="btn-primary mt-4 w-full" disabled={loading || !name || !city || !state || !totalPlots}>

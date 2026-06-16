@@ -12,9 +12,13 @@ export const manualPlotSchema = z.object({
   dimensions: z.string().optional(),
   boundaries: z.object({
     north: z.string().optional(),
+    northDimension: z.string().optional(),
     south: z.string().optional(),
+    southDimension: z.string().optional(),
     east: z.string().optional(),
+    eastDimension: z.string().optional(),
     west: z.string().optional(),
+    westDimension: z.string().optional(),
   }).optional(),
   notes: z.string().optional(),
 });
@@ -62,6 +66,30 @@ export async function createManualPlot(context: RequestContext, projectId: strin
   });
 
   return result;
+}
+
+export async function updateManualPlot(context: RequestContext, plotId: string, input: z.infer<typeof manualPlotSchema>) {
+  const before = await prisma.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
+  const plot = await prisma.plot.update({
+    where: { id: plotId },
+    data: {
+      code: input.code,
+      areaSqYards: input.areaSqYards,
+      areaSqft: input.areaSqYards ? input.areaSqYards * 9 : null,
+      primeLocation: input.primeLocation,
+      allottedBy: input.allottedBy,
+      dimensions: input.dimensions,
+      boundaries: input.boundaries,
+    },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.UPDATE,
+    entityType: "Plot",
+    entityId: plot.id,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: plot as unknown as Prisma.InputJsonValue,
+  });
+  return plot;
 }
 
 export const manualSiteAssetSchema = z.object({
