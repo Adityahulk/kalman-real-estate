@@ -3,8 +3,8 @@
   "configurations": [
     {
       "name": "nextdev",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "set -a && source .env.local && set +a && npm run dev"],
       "port": 3000,
       "autoPort": true
     }

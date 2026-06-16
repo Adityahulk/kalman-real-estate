@@ -1832,6 +1832,163 @@ function collectStorageKeys(value: Prisma.JsonValue | undefined, keys: Set<strin
   }
 }
 
+export const updatePublishedEntitySchema = z.object({
+  source: z.enum(["plot", "asset"]),
+  label: z.string().trim().min(1).max(500),
+  type: z.nativeEnum(CadEntityType),
+});
+
+export async function updatePublishedEntity(
+  context: RequestContext,
+  projectId: string,
+  entityId: string,
+  input: z.infer<typeof updatePublishedEntitySchema>,
+) {
+  await prisma.project.findFirstOrThrow({ where: { id: projectId, tenantId: context.tenantId } });
+
+  if (input.source === "plot") {
+    const plot = await prisma.plot.findFirstOrThrow({
+      where: { id: entityId, tenantId: context.tenantId, projectId },
+    });
+    const spatialLink = await prisma.spatialLink.findFirst({
+      where: { tenantId: context.tenantId, recordType: "Plot", recordId: plot.id },
+    });
+
+    if (input.type !== "PLOT") {
+      const [ownershipActivity, registryCount, fileCount, documentCount] = await Promise.all([
+        prisma.ownershipRecord.count({
+          where: {
+            tenantId: context.tenantId,
+            plotId: plot.id,
+            OR: [{ kind: { not: "COMPANY_INVENTORY" } }, { ownerId: { not: null } }],
+          },
+        }),
+        prisma.registryRecord.count({ where: { tenantId: context.tenantId, plotId: plot.id } }),
+        prisma.fileAsset.count({ where: { tenantId: context.tenantId, ownerType: "Plot", ownerId: plot.id } }),
+        prisma.generatedDocument.count({ where: { tenantId: context.tenantId, recordType: "Plot", recordId: plot.id } }),
+      ]);
+      if (ownershipActivity || registryCount || fileCount || documentCount) {
+        const reasons = [];
+        if (ownershipActivity) reasons.push("ownership records");
+        if (registryCount) reasons.push("registry records");
+        if (fileCount) reasons.push("documents");
+        if (documentCount) reasons.push("generated letters");
+        throwBadRequest(`This plot has ${reasons.join(", ")}. Archive them before converting to ${input.type.replaceAll("_", " ").toLowerCase()}.`);
+      }
+
+      return prisma.$transaction(async (tx) => {
+        await tx.ownershipRecord.deleteMany({
+          where: { tenantId: context.tenantId, plotId: plot.id, kind: "COMPANY_INVENTORY", ownerId: null },
+        });
+        await tx.plot.update({
+          where: { id: plot.id },
+          data: { archivedAt: new Date(), archiveReason: `Converted to ${input.type} via map editor` },
+        });
+        const asset = await tx.siteAsset.create({
+          data: {
+            tenantId: context.tenantId,
+            projectId,
+            name: input.label,
+            type: input.type,
+            geometry: plot.geometry ?? Prisma.JsonNull,
+          },
+        });
+        if (spatialLink) {
+          await tx.spatialLink.update({
+            where: { id: spatialLink.id },
+            data: { recordType: "SiteAsset", recordId: asset.id },
+          });
+        }
+        if (spatialLink?.cadEntityId) {
+          await tx.cadEntity.update({
+            where: { id: spatialLink.cadEntityId },
+            data: { type: input.type as CadEntityType, label: input.label },
+          });
+        }
+        return { id: asset.id, source: "asset" as const };
+      });
+    }
+
+    await prisma.plot.update({
+      where: { id: plot.id },
+      data: { code: input.label, label: input.label },
+    });
+    if (spatialLink?.cadEntityId) {
+      await prisma.cadEntity.update({
+        where: { id: spatialLink.cadEntityId },
+        data: { label: input.label },
+      });
+    }
+    return { id: plot.id, source: "plot" as const };
+  }
+
+  const asset = await prisma.siteAsset.findFirstOrThrow({
+    where: { id: entityId, tenantId: context.tenantId, projectId, archivedAt: null },
+  });
+  const spatialLink = await prisma.spatialLink.findFirst({
+    where: { tenantId: context.tenantId, recordType: "SiteAsset", recordId: asset.id },
+  });
+
+  if (input.type === "PLOT") {
+    const existing = await prisma.plot.findFirst({
+      where: { tenantId: context.tenantId, projectId, code: input.label.trim().toUpperCase(), archivedAt: null },
+    });
+    if (existing) throwBadRequest(`Plot "${input.label}" already exists in this project.`);
+
+    return prisma.$transaction(async (tx) => {
+      await tx.siteAsset.update({
+        where: { id: asset.id },
+        data: { archivedAt: new Date(), archiveReason: `Converted to PLOT via map editor` },
+      });
+      const plot = await tx.plot.create({
+        data: {
+          tenantId: context.tenantId,
+          projectId,
+          code: input.label.trim(),
+          label: input.label.trim(),
+          geometry: asset.geometry ?? Prisma.JsonNull,
+        },
+      });
+      await tx.ownershipRecord.create({
+        data: {
+          tenantId: context.tenantId,
+          plotId: plot.id,
+          ownerId: null,
+          kind: "COMPANY_INVENTORY",
+          sharePct: 100,
+          notes: "Company inventory created from map editor type conversion.",
+          createdById: context.userId,
+        },
+      });
+      if (spatialLink) {
+        await tx.spatialLink.update({
+          where: { id: spatialLink.id },
+          data: { recordType: "Plot", recordId: plot.id },
+        });
+      }
+      if (spatialLink?.cadEntityId) {
+        await tx.cadEntity.update({
+          where: { id: spatialLink.cadEntityId },
+          data: { type: CadEntityType.PLOT, label: input.label.trim() },
+        });
+      }
+      return { id: plot.id, source: "plot" as const };
+    });
+  }
+
+  await prisma.siteAsset.update({
+    where: { id: asset.id },
+    data: { name: input.label, type: input.type },
+  });
+  if (spatialLink?.cadEntityId) {
+    await prisma.cadEntity.update({
+      where: { id: spatialLink.cadEntityId },
+      data: { type: input.type as CadEntityType, label: input.label },
+    });
+  }
+  return { id: asset.id, source: "asset" as const };
+}
+
 function throwBadRequest(message: string): never {
   const error = new Error(message);
   error.name = "BadRequestError";
