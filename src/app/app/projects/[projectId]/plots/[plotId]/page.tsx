@@ -19,12 +19,16 @@ import { prisma } from "@/server/db";
 import { fullInr } from "@/lib/format";
 import { DeleteFileButton } from "@/components/delete-file-button";
 import { DeleteCadButton } from "@/components/delete-cad-button";
+import { FileActions } from "@/components/file-actions";
+import { FilePreview } from "@/components/file-preview";
+import { FileUploader } from "@/components/file-uploader";
 import { DocumentApprovalButtons } from "../../../../documents/document-actions";
 import { ManualPlotZoneForm } from "../../../manual-entry-actions";
 import {
   PlotChecklistProgressForm,
 } from "../../../../ownership/ownership-actions";
 import { BackButton } from "@/components/back-button";
+import { CadUploadForm } from "../../../../cad/cad-upload-form";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +55,9 @@ export default async function ProjectPlotWorkspacePage({
   const activeTab = tabs.includes(requestedTab as typeof tabs[number]) ? requestedTab as typeof tabs[number] : "overview";
   const cadFileId = workspace.spatialLinks[0]?.entity.scene.cadFileId;
   const plotMapFileId = workspace.childCadFiles[0]?.id ?? cadFileId;
+  const plotMapFiles = workspace.plotFiles.filter((file) => file.categoryKey === "plot-map");
+  const latestPlotMapFile = plotMapFiles[0] ?? null;
+  const latestPlotCadPreviewId = workspace.childCadFiles.find((file) => file.analysis?.previewArtifactKey)?.id ?? null;
   const registryDocuments = workspace.plotFiles.filter((file) => file.documentType === "REGISTRY_RECEIPT" || file.documentType === "REGISTRY_DEED");
   const ownershipLetters = workspace.generatedDocuments.filter((document) => document.type.includes("allotment") || document.type.includes("transfer"));
   const developmentPct = plot.checklistItems.length
@@ -217,10 +224,46 @@ export default async function ProjectPlotWorkspacePage({
               <h2 className="font-semibold">Plot map preview</h2>
               {plotMapFileId ? <Link className="btn-outline h-9 px-3 text-xs" href={`/app/cad/${plotMapFileId}`}>Open full map with zoom</Link> : null}
             </div>
-            <PlotGeometryPreview geometry={plot.geometry} label={plot.code} />
+            <PlotGeometryPreview
+              geometry={plot.geometry}
+              label={plot.code}
+              previewCadId={latestPlotCadPreviewId}
+              previewFile={latestPlotMapFile ? { id: latestPlotMapFile.id, fileName: latestPlotMapFile.fileName, mimeType: latestPlotMapFile.mimeType } : null}
+            />
           </div>
           <aside className="space-y-4">
-            <div className="card p-4"><h3 className="font-semibold">Map versions</h3><div className="mt-3 space-y-2">{workspace.childCadFiles.map((file) => <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2" key={file.id}><Link className="min-w-0 flex-1 truncate text-sm hover:text-navy-700" href={`/app/cad/${file.id}`}>{file.originalName} · v{file.version}</Link><DeleteCadButton cadFileId={file.id} fileName={file.originalName} published={file.status === "PUBLISHED"} /></div>)}{!workspace.childCadFiles.length ? <div className="text-sm text-slate-500">No plot map uploaded yet.</div> : null}</div></div>
+            <div className="card p-4">
+              <h3 className="font-semibold">Upload plot map</h3>
+              <p className="mt-1 text-sm text-slate-500">Upload a PNG or PDF for quick preview, or a CAD/PDF drawing for full map workflow.</p>
+              <div className="mt-4 space-y-4">
+                <FileUploader
+                  label="Upload plot map image / PDF"
+                  ownerType="Plot"
+                  ownerId={plot.id}
+                  visibility="TEAM"
+                  accept="application/pdf,image/*"
+                  metadata={{ categoryKey: "plot-map", documentType: "OTHER", notes: "Plot map upload" }}
+                  refreshOnUpload
+                />
+                <CadUploadForm
+                  projects={[{ id: plot.projectId, name: plot.project.name }]}
+                  fixedProjectId={plot.projectId}
+                  fixedParentType="PLOT"
+                  fixedParentId={plot.id}
+                  title="Upload plot map CAD / PDF"
+                  description="Upload a plot-level drawing and open it in the Map workspace."
+                  simple
+                />
+              </div>
+            </div>
+            <div className="card p-4">
+              <h3 className="font-semibold">Map versions</h3>
+              <div className="mt-3 space-y-2">
+                {workspace.childCadFiles.map((file) => <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2" key={file.id}><Link className="min-w-0 flex-1 truncate text-sm hover:text-navy-700" href={`/app/cad/${file.id}`}>{file.originalName} · v{file.version}</Link><DeleteCadButton cadFileId={file.id} fileName={file.originalName} published={file.status === "PUBLISHED"} /></div>)}
+                {plotMapFiles.map((file) => <div className="rounded-lg bg-slate-50 px-3 py-2" key={file.id}><div className="flex items-center justify-between gap-2"><button className="min-w-0 flex-1 truncate text-left text-sm font-medium text-slate-700" type="button">{file.fileName}</button><FileActions fileId={file.id} fileName={file.fileName} /></div><div className="mt-1 text-xs text-slate-500">{new Date(file.createdAt).toLocaleString("en-IN")}</div></div>)}
+                {!workspace.childCadFiles.length && !plotMapFiles.length ? <div className="text-sm text-slate-500">No plot map uploaded yet.</div> : null}
+              </div>
+            </div>
           </aside>
         </section>
       ) : null}
@@ -635,7 +678,23 @@ function Timeline({
   );
 }
 
-function PlotGeometryPreview({ geometry, label }: { geometry: unknown; label: string }) {
+function PlotGeometryPreview({
+  geometry,
+  label,
+  previewCadId,
+  previewFile,
+}: {
+  geometry: unknown;
+  label: string;
+  previewCadId?: string | null;
+  previewFile?: { id: string; fileName: string; mimeType: string } | null;
+}) {
+  if (previewCadId) {
+    return <div className="overflow-hidden rounded-lg border border-slate-200 bg-slate-50"><img className="block h-[32rem] w-full object-contain bg-slate-950" src={`/api/v1/cad/${previewCadId}/preview`} alt={`${label} map preview`} /></div>;
+  }
+  if (previewFile) {
+    return <div className="overflow-hidden rounded-lg border border-slate-200 bg-white"><FilePreview id={previewFile.id} fileName={previewFile.fileName} mimeType={previewFile.mimeType} /></div>;
+  }
   const points = extractPoints(geometry);
   if (!points.length) {
     return <div className="rounded-lg border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">No Map geometry attached to this plot yet.</div>;

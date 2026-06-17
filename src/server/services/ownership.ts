@@ -73,6 +73,53 @@ export async function allotPlot(context: RequestContext, plotId: string, input: 
   return result;
 }
 
+export async function updateLatestAllotment(context: RequestContext, plotId: string, input: z.infer<typeof allotPlotSchema>) {
+  const result = await prisma.$transaction(async (tx) => {
+    const before = await tx.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
+    const recordBefore = await tx.ownershipRecord.findFirst({
+      where: { tenantId: context.tenantId, plotId, kind: OwnershipKind.ALLOTMENT },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!recordBefore) {
+      throwBadRequest("No allotment record exists for this plot yet.");
+    }
+    await tx.owner.findFirstOrThrow({ where: { id: input.ownerId, tenantId: context.tenantId } });
+    const plot = await tx.plot.update({
+      where: { id: plotId },
+      data: { currentOwnerId: input.ownerId, status: PlotStatus.ALLOTTED },
+    });
+    const record = await tx.ownershipRecord.update({
+      where: { id: recordBefore.id },
+      data: {
+        ownerId: input.ownerId,
+        amountInr: input.amountInr,
+        sharePct: input.sharePct,
+        documentId: null,
+        notes: input.notes,
+        paymentMode: input.paymentMode,
+        extraDetails: input.extraDetails as Prisma.InputJsonValue | undefined,
+        effectiveAt: input.effectiveAt ? new Date(input.effectiveAt) : undefined,
+        createdById: context.userId,
+      },
+    });
+    return { before, plot, recordBefore, record };
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.UPDATE,
+    entityType: "Plot",
+    entityId: plotId,
+    before: {
+      plot: result.before,
+      ownershipRecord: result.recordBefore,
+    } as unknown as Prisma.InputJsonValue,
+    after: {
+      plot: result.plot,
+      ownershipRecord: result.record,
+    } as unknown as Prisma.InputJsonValue,
+  });
+  return result;
+}
+
 export const transferPlotSchema = z.object({
   buyerOwnerId: z.string(),
   amountInr: z.number().nonnegative().optional(),

@@ -31,11 +31,11 @@ export default async function NewAllotmentPage({
         ],
       },
       orderBy: { code: "asc" },
-      select: { id: true, code: true, areaSqYards: true, areaSqft: true, priceInr: true },
+      select: { id: true, code: true, areaSqYards: true, areaSqft: true, priceInr: true, dimensions: true, boundaries: true, currentOwnerId: true },
     }),
     prisma.tenant.findUniqueOrThrow({
       where: { id: session.tenantId },
-      select: { name: true, address: true, pan: true, contactEmail: true, authorizedPersons: true },
+      select: { name: true, address: true, pan: true, contactEmail: true, contactPhone: true, authorizedPersons: true },
     }),
     prisma.documentTemplate.findFirst({ where: { tenantId: session.tenantId, projectId: project.id, type: "allotment_letter", active: true }, orderBy: { createdAt: "desc" } }),
   ]);
@@ -59,12 +59,32 @@ export default async function NewAllotmentPage({
       <ProjectAllotmentFlow
         projectId={project.id}
         defaultPlotId={searchParams.plotId}
-        plots={plots.map((plot) => ({
-          id: plot.id,
-          code: plot.code,
-          areaSqYards: plot.areaSqYards?.toString() ?? (plot.areaSqft ? String(Number(plot.areaSqft) / 9) : null),
-          priceInr: plot.priceInr?.toString() ?? null,
-        }))}
+        plots={plots.map((plot) => {
+          const boundaries = plot.boundaries && typeof plot.boundaries === "object" && !Array.isArray(plot.boundaries)
+            ? plot.boundaries as Record<string, unknown>
+            : null;
+          return {
+            id: plot.id,
+            code: plot.code,
+            areaSqYards: plot.areaSqYards?.toString() ?? (plot.areaSqft ? String(Number(plot.areaSqft) / 9) : null),
+            areaSqft: plot.areaSqft?.toString() ?? null,
+            priceInr: plot.priceInr?.toString() ?? null,
+            dimensions: plot.dimensions,
+            currentOwnerId: plot.currentOwnerId,
+            boundaries: boundaries
+              ? {
+                  north: typeof boundaries.north === "string" ? boundaries.north : null,
+                  northDimension: typeof boundaries.northDimension === "string" ? boundaries.northDimension : null,
+                  south: typeof boundaries.south === "string" ? boundaries.south : null,
+                  southDimension: typeof boundaries.southDimension === "string" ? boundaries.southDimension : null,
+                  east: typeof boundaries.east === "string" ? boundaries.east : null,
+                  eastDimension: typeof boundaries.eastDimension === "string" ? boundaries.eastDimension : null,
+                  west: typeof boundaries.west === "string" ? boundaries.west : null,
+                  westDimension: typeof boundaries.westDimension === "string" ? boundaries.westDimension : null,
+                }
+              : null,
+          };
+        })}
         firm={{ ...firm, authorizedPersons }}
         manualLetterFields={templateFields(letterTemplate?.variables).filter((field) => !field.mapping).map((field) => ({ key: field.key, label: field.label }))}
       />

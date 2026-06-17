@@ -1,6 +1,7 @@
 "use client";
 
-import { ChangeEvent, useState } from "react";
+import { ChangeEvent, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { FileStorageProvider, FileVisibility } from "@prisma/client";
 import { CheckCircle2, Loader2, UploadCloud, XCircle } from "lucide-react";
 
@@ -33,6 +34,7 @@ export function FileUploader({
   accept,
   onUploaded,
   compact = false,
+  refreshOnUpload = false,
 }: {
   label: string;
   visibility?: FileVisibility;
@@ -42,10 +44,19 @@ export function FileUploader({
   accept?: string;
   onUploaded?: (file: UploadedFile) => void;
   compact?: boolean;
+  refreshOnUpload?: boolean;
 }) {
+  const router = useRouter();
   const [status, setStatus] = useState<"idle" | "uploading" | "done" | "error">("idle");
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState("");
+  const resetKey = useMemo(() => JSON.stringify({ label, ownerType, ownerId, metadata, compact }), [label, ownerType, ownerId, metadata, compact]);
+
+  useEffect(() => {
+    setStatus("idle");
+    setProgress(0);
+    setMessage("");
+  }, [resetKey]);
 
   async function upload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -89,6 +100,7 @@ export function FileUploader({
       setProgress(100);
       setStatus("done");
       onUploaded?.(completeBody.data ?? meta.data.file);
+      if (refreshOnUpload) router.refresh();
     } catch (error) {
       setStatus("error");
       setProgress(0);

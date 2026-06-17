@@ -14,7 +14,17 @@ type ManualPlotInput = {
   boundaries?: Record<string, unknown> | null;
 };
 
-export function ManualPlotForm({ projectId, cadFileId, plot }: { projectId: string; cadFileId?: string; plot?: ManualPlotInput }) {
+export function ManualPlotForm({
+  projectId,
+  cadFileId,
+  plot,
+  lastPlot,
+}: {
+  projectId: string;
+  cadFileId?: string;
+  plot?: ManualPlotInput;
+  lastPlot?: ManualPlotInput;
+}) {
   const router = useRouter();
   const [code, setCode] = useState(plot?.code ?? "");
   const [areaSqYards, setAreaSqYards] = useState(plot?.areaSqYards ?? "");
@@ -36,6 +46,25 @@ export function ManualPlotForm({ projectId, cadFileId, plot }: { projectId: stri
   const [loading, setLoading] = useState(false);
   const mapViewport = useRef<HTMLDivElement>(null);
   const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+
+  function copyFromLastPlot() {
+    if (!lastPlot) return;
+    setAreaSqYards(lastPlot.areaSqYards ?? "");
+    setPrimeLocation(lastPlot.primeLocation ?? "");
+    setAllottedBy(lastPlot.allottedBy ?? "");
+    setDimensions(lastPlot.dimensions ?? "");
+    setBoundaries({
+      north: boundaryText(lastPlot.boundaries, "north"),
+      northDimension: boundaryText(lastPlot.boundaries, "northDimension"),
+      south: boundaryText(lastPlot.boundaries, "south"),
+      southDimension: boundaryText(lastPlot.boundaries, "southDimension"),
+      east: boundaryText(lastPlot.boundaries, "east"),
+      eastDimension: boundaryText(lastPlot.boundaries, "eastDimension"),
+      west: boundaryText(lastPlot.boundaries, "west"),
+      westDimension: boundaryText(lastPlot.boundaries, "westDimension"),
+    });
+    setMessage(`Copied details from the last added plot${lastPlot.code ? ` (${lastPlot.code})` : ""}.`);
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -80,9 +109,12 @@ export function ManualPlotForm({ projectId, cadFileId, plot }: { projectId: stri
   return (
     <form onSubmit={submit} className="grid gap-5">
       <section className="rounded-xl border border-slate-200 bg-white p-5">
-      <div className="flex items-center gap-2">
-        <Building2 size={17} />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Building2 size={17} />
           <h3 className="font-semibold">Plot details</h3>
+        </div>
+        {lastPlot && !plot?.id ? <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={copyFromLastPlot}>Copy from last added plot</button> : null}
       </div>
       <div className="mt-4 grid gap-3 md:grid-cols-2">
         <label><span className="label">Plot code</span><input className="input" value={code} onChange={(event) => setCode(event.target.value)} placeholder="A-101" /></label>

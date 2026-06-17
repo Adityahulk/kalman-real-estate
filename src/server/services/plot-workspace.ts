@@ -79,7 +79,11 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
     }),
     prisma.cadFile.findMany({
       where: { tenantId: context.tenantId, parentType: "PLOT", parentId: plot.id },
-      include: { scenes: { take: 1, orderBy: { createdAt: "desc" } }, reviewIssues: { where: { resolved: false } } },
+      include: {
+        analysis: { select: { previewArtifactKey: true } },
+        scenes: { take: 1, orderBy: { createdAt: "desc" } },
+        reviewIssues: { where: { resolved: false } },
+      },
       orderBy: { createdAt: "desc" },
     }),
   ]);
