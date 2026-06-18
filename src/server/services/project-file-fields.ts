@@ -15,7 +15,7 @@ export const defaultProjectMapFields = [
   { label: "Water sewage", key: "water_sewage" },
 ] as const;
 
-const projectFileSections = ["PROJECT_FILES", "PROJECT_MAPS", "PROJECT_DETAILS"] as const;
+const projectFileSections = ["PROJECT_FILES", "PROJECT_MAPS", "PROJECT_DETAILS", "DEVELOPMENT_TASK_CATEGORIES"] as const;
 
 export const projectFileFieldSchema = z.object({
   label: z.string().min(2).max(80),

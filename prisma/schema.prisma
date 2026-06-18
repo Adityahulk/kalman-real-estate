@@ -811,6 +811,8 @@ model SiteAsset {
   projectId     String
   name          String
   type          String
+  totalArea     Decimal?  @db.Decimal(14, 2)
+  units         String?
   contractorId  String?
   progressPct   Int       @default(0)
   deadline      DateTime?
@@ -861,7 +863,9 @@ model ProgressUpdate {
   parentType     String
   parentId       String
   progressPct    Int
+  quantityDone   Decimal? @db.Decimal(14, 2)
   summary        String
+  recordedAt     DateTime?
   photoFileIds   Json?
   visibleToOwner Boolean  @default(false)
   createdById    String?

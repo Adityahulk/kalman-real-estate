@@ -6,24 +6,36 @@ import { prisma } from "../db";
 import { createNotification } from "./notifications";
 
 export const progressSchema = z.object({
-  progressPct: z.number().min(0).max(100),
+  areaDone: z.number().nonnegative(),
+  progressPct: z.number().min(0).max(100).optional(),
+  recordedAt: z.string().datetime().optional(),
   summary: z.string().min(1),
   photoFileIds: z.array(z.string()).optional(),
   visibleToOwner: z.boolean().default(false),
 });
 
 export async function updateSiteAssetProgress(context: RequestContext, siteAssetId: string, input: z.infer<typeof progressSchema>) {
-  await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
+  const assetBefore = await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
   if (input.photoFileIds?.length) await assertFilesInTenant(context, input.photoFileIds);
+  const totalArea = assetBefore.totalArea ? Number(assetBefore.totalArea) : 0;
+  const progressPct = totalArea > 0 ? Math.max(0, Math.min(100, Math.round((input.areaDone / totalArea) * 100))) : assetBefore.progressPct;
   const [asset, update] = await prisma.$transaction([
-    prisma.siteAsset.update({ where: { id: siteAssetId }, data: { progressPct: input.progressPct, status: input.progressPct >= 100 ? "COMPLETED" : "IN_PROGRESS" } }),
+    prisma.siteAsset.update({
+      where: { id: siteAssetId },
+      data: {
+        progressPct,
+        status: progressPct >= 100 ? "COMPLETED" : "IN_PROGRESS",
+      },
+    }),
     prisma.progressUpdate.create({
       data: {
         tenantId: context.tenantId,
         parentType: "SiteAsset",
         parentId: siteAssetId,
-        progressPct: input.progressPct,
+        progressPct,
+        quantityDone: input.areaDone,
         summary: input.summary,
+        recordedAt: input.recordedAt ? new Date(input.recordedAt) : undefined,
         photoFileIds: input.photoFileIds as Prisma.InputJsonValue,
         visibleToOwner: input.visibleToOwner,
         createdById: context.userId,
@@ -33,7 +45,7 @@ export async function updateSiteAssetProgress(context: RequestContext, siteAsset
   await writeAuditEvent(context, { action: AuditAction.PROGRESS_UPDATE, entityType: "SiteAsset", entityId: siteAssetId, after: update });
   await createNotification(context, {
     title: "Site progress updated",
-    body: `${asset.name} is now ${input.progressPct}% complete.`,
+    body: `${asset.name} is now ${progressPct}% complete.`,
     data: { siteAssetId, progressUpdateId: update.id },
   });
   return { asset, update };
@@ -42,18 +54,21 @@ export async function updateSiteAssetProgress(context: RequestContext, siteAsset
 export async function updateChecklistProgress(context: RequestContext, checklistItemId: string, input: z.infer<typeof progressSchema>) {
   await prisma.checklistItem.findFirstOrThrow({ where: { id: checklistItemId, tenantId: context.tenantId } });
   if (input.photoFileIds?.length) await assertFilesInTenant(context, input.photoFileIds);
+  const progressPct = input.progressPct ?? Math.max(0, Math.min(100, Math.round(input.areaDone)));
   const [item, update] = await prisma.$transaction([
     prisma.checklistItem.update({
       where: { id: checklistItemId },
-      data: { progressPct: input.progressPct, status: input.progressPct >= 100 ? "DONE" : "IN_PROGRESS", completedAt: input.progressPct >= 100 ? new Date() : undefined },
+      data: { progressPct, status: progressPct >= 100 ? "DONE" : "IN_PROGRESS", completedAt: progressPct >= 100 ? new Date() : undefined },
     }),
     prisma.progressUpdate.create({
       data: {
         tenantId: context.tenantId,
         parentType: "ChecklistItem",
         parentId: checklistItemId,
-        progressPct: input.progressPct,
+        progressPct,
         summary: input.summary,
+        quantityDone: input.areaDone,
+        recordedAt: input.recordedAt ? new Date(input.recordedAt) : undefined,
         photoFileIds: input.photoFileIds as Prisma.InputJsonValue,
         visibleToOwner: input.visibleToOwner,
         createdById: context.userId,
@@ -63,7 +78,7 @@ export async function updateChecklistProgress(context: RequestContext, checklist
   await writeAuditEvent(context, { action: AuditAction.PROGRESS_UPDATE, entityType: "ChecklistItem", entityId: checklistItemId, after: update });
   await createNotification(context, {
     title: "Plot checklist updated",
-    body: `${item.label} is now ${input.progressPct}% complete.`,
+    body: `${item.label} is now ${progressPct}% complete.`,
     data: { checklistItemId, progressUpdateId: update.id },
   });
   return { item, update };
@@ -113,6 +128,91 @@ export async function addProgressPhotos(context: RequestContext, progressId: str
   });
   await writeAuditEvent(context, { action: AuditAction.UPLOAD, entityType: "ProgressUpdate", entityId: progressId, after: updated });
   return updated;
+}
+
+export const developmentTaskSchema = z.object({
+  name: z.string().min(2),
+  totalArea: z.number().nonnegative(),
+  units: z.string().min(1).max(40),
+  deadline: z.string().datetime().optional(),
+  category: z.string().min(2),
+  assignedTo: z.string().optional(),
+  status: z.enum(["PLANNED", "IN_PROGRESS", "COMPLETED"]).default("PLANNED"),
+});
+
+export async function updateDevelopmentTask(context: RequestContext, siteAssetId: string, input: z.infer<typeof developmentTaskSchema>) {
+  const before = await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
+  const task = await prisma.siteAsset.update({
+    where: { id: siteAssetId },
+    data: {
+      name: input.name,
+      type: input.category,
+      totalArea: input.totalArea,
+      units: input.units,
+      deadline: input.deadline ? new Date(input.deadline) : null,
+      contractorId: input.assignedTo || null,
+      status: input.status,
+    },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.UPDATE,
+    entityType: "SiteAsset",
+    entityId: siteAssetId,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: task as unknown as Prisma.InputJsonValue,
+  });
+  return task;
+}
+
+export async function assignDevelopmentTask(context: RequestContext, siteAssetId: string, assignedTo: string) {
+  const before = await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
+  const task = await prisma.siteAsset.update({
+    where: { id: siteAssetId },
+    data: {
+      contractorId: assignedTo,
+      status: "IN_PROGRESS",
+    },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.UPDATE,
+    entityType: "SiteAsset",
+    entityId: siteAssetId,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: task as unknown as Prisma.InputJsonValue,
+  });
+  return task;
+}
+
+export async function markDevelopmentTaskComplete(context: RequestContext, siteAssetId: string) {
+  const before = await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
+  const task = await prisma.siteAsset.update({
+    where: { id: siteAssetId },
+    data: { progressPct: 100, status: "COMPLETED" },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.UPDATE,
+    entityType: "SiteAsset",
+    entityId: siteAssetId,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: task as unknown as Prisma.InputJsonValue,
+  });
+  return task;
+}
+
+export async function deleteDevelopmentTask(context: RequestContext, siteAssetId: string) {
+  const before = await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
+  const task = await prisma.siteAsset.update({
+    where: { id: siteAssetId },
+    data: { archivedAt: new Date(), archiveReason: "Deleted from development task workflow." },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.DELETE,
+    entityType: "SiteAsset",
+    entityId: siteAssetId,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: task as unknown as Prisma.InputJsonValue,
+  });
+  return task;
 }
 
 async function assertFilesInTenant(context: RequestContext, fileAssetIds: string[]) {
