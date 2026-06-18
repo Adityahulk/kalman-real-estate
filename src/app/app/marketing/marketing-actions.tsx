@@ -1,50 +1,101 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { Loader2, Plus } from "lucide-react";
+import { Check, Loader2, Plus, X } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { FileUploader } from "@/components/file-uploader";
 
-export function MarketingTaskForm({ projects }: { projects: { id: string; name: string }[] }) {
-  const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
+export function MarketingTaskForm() {
+  const router = useRouter();
   const [title, setTitle] = useState("");
   const [brief, setBrief] = useState("");
+  const [dueAt, setDueAt] = useState("");
+  const [assignee, setAssignee] = useState("");
+  const [links, setLinks] = useState<string[]>([""]);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
+    setMessage("");
     const response = await fetch("/api/v1/marketing/tasks", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ projectId, title, brief }),
+      body: JSON.stringify({
+        title,
+        brief,
+        dueAt: dueAt ? new Date(dueAt).toISOString() : undefined,
+        assignee: assignee || undefined,
+        links: links.map((item) => item.trim()).filter(Boolean),
+      }),
     });
     const payload = await response.json();
     setLoading(false);
-    setMessage(response.ok ? `Task created: ${payload.data.title}` : payload.error ?? "Task creation failed");
+    if (!response.ok) {
+      setMessage(payload.error ?? "Project idea creation failed");
+      return;
+    }
+    setMessage(`Added to team ideas: ${payload.data.title}`);
+    setTitle("");
+    setBrief("");
+    setDueAt("");
+    setAssignee("");
+    setLinks([""]);
+    router.refresh();
   }
 
   return (
     <form onSubmit={submit} className="card p-5">
-      <h2 className="font-semibold">Create marketing task</h2>
-      <label className="mt-4 block">
-        <span className="label">Project</span>
-        <select className="input" value={projectId} onChange={(event) => setProjectId(event.target.value)}>
-          {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
-        </select>
-      </label>
+      <h2 className="font-semibold">Add new project idea</h2>
       <label className="mt-3 block">
-        <span className="label">Title</span>
+        <span className="label">Project name</span>
         <input className="input" value={title} onChange={(event) => setTitle(event.target.value)} />
       </label>
       <label className="mt-3 block">
-        <span className="label">Brief</span>
+        <span className="label">Deadline</span>
+        <input className="input" type="date" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
+      </label>
+      <label className="mt-3 block">
+        <span className="label">Project idea</span>
         <textarea className="input min-h-24" value={brief} onChange={(event) => setBrief(event.target.value)} />
       </label>
+      <label className="mt-3 block">
+        <span className="label">Assign to</span>
+        <input className="input" value={assignee} onChange={(event) => setAssignee(event.target.value)} />
+      </label>
+      <div className="mt-3">
+        <span className="label">Add links</span>
+        <div className="mt-2 space-y-2">
+          {links.map((link, index) => (
+            <div className="flex gap-2" key={index}>
+              <input
+                className="input"
+                value={link}
+                onChange={(event) => setLinks((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))}
+                placeholder="https://..."
+              />
+              {links.length > 1 ? (
+                <button
+                  className="btn-outline h-10 px-3"
+                  type="button"
+                  onClick={() => setLinks((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                >
+                  <X size={16} />
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+        <button className="btn-outline mt-3 h-9 px-3 text-sm" type="button" onClick={() => setLinks((current) => [...current, ""])}>
+          <Plus size={15} />
+          Add link
+        </button>
+      </div>
       {message ? <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
-      <button className="btn-primary mt-4" disabled={loading || !projectId || !title || !brief}>
+      <button className="btn-primary mt-4" disabled={loading || !title || !brief}>
         {loading ? <Loader2 className="animate-spin" size={17} /> : <Plus size={17} />}
-        Create task
+        Add to team ideas
       </button>
     </form>
   );
@@ -68,6 +119,11 @@ export function MarketingMediaPanel({ tasks }: { tasks: { id: string; title: str
   return (
     <div className="card p-5">
       <h2 className="font-semibold">Upload task media</h2>
+      {!tasks.length ? (
+        <div className="mt-4 rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
+          Add a team idea first to upload task media.
+        </div>
+      ) : (
       <div className="mt-4 grid gap-3">
         <label>
           <span className="label">Task</span>
@@ -85,7 +141,47 @@ export function MarketingMediaPanel({ tasks }: { tasks: { id: string; title: str
         </label>
         <FileUploader label="Upload media file" visibility="TEAM" ownerType="MarketingTask" ownerId={taskId} accept="video/*,image/*" onUploaded={attach} />
       </div>
+      )}
       {message ? <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
+    </div>
+  );
+}
+
+export function MarketingIdeaActions({ taskId }: { taskId: string }) {
+  const router = useRouter();
+  const [loading, setLoading] = useState<"" | "approve" | "reject">("");
+  const [message, setMessage] = useState("");
+
+  async function submit(kind: "approve" | "reject") {
+    setLoading(kind);
+    setMessage("");
+    const response = await fetch(`/api/v1/marketing/tasks/${taskId}/${kind}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(kind === "approve" ? { status: "APPROVED" } : { notes: "Idea rejected." }),
+    });
+    const body = await response.json().catch(() => ({}));
+    setLoading("");
+    if (!response.ok) {
+      setMessage(body.error ?? "Could not update idea.");
+      return;
+    }
+    router.refresh();
+  }
+
+  return (
+    <div className="mt-4 space-y-2">
+      <div className="flex flex-wrap gap-2">
+        <button className="btn-primary h-9 px-3 text-sm" type="button" disabled={Boolean(loading)} onClick={() => void submit("approve")}>
+          {loading === "approve" ? <Loader2 className="animate-spin" size={15} /> : <Check size={15} />}
+          Approve
+        </button>
+        <button className="btn-outline h-9 px-3 text-sm text-rose-700" type="button" disabled={Boolean(loading)} onClick={() => void submit("reject")}>
+          {loading === "reject" ? <Loader2 className="animate-spin" size={15} /> : <X size={15} />}
+          Reject
+        </button>
+      </div>
+      {message ? <div className="text-sm text-rose-700">{message}</div> : null}
     </div>
   );
 }

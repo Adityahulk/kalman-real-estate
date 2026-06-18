@@ -3,9 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
-  Bot,
   Building2,
-  ChartNoAxesCombined,
   ChevronLeft,
   ChevronRight,
   Clapperboard,
@@ -51,8 +49,6 @@ const moduleNav = [
 
 const globalNav = [
   { href: "/app/marketing", label: "Marketing", icon: Clapperboard },
-  { href: "/app/finance", label: "Cost + BOQ", icon: ChartNoAxesCombined },
-  { href: "/app/ai", label: "AI Insights", icon: Bot },
 ];
 
 export function AppShell({

@@ -6,34 +6,31 @@ import { prisma } from "../db";
 import { createNotification } from "./notifications";
 
 export const marketingTaskSchema = z.object({
-  projectId: z.string(),
   title: z.string().min(2),
   brief: z.string().min(2),
   dueAt: z.string().datetime().optional(),
-  videographerId: z.string().optional(),
-  editorId: z.string().optional(),
+  assignee: z.string().optional(),
+  links: z.array(z.string().trim().min(1)).default([]),
 });
 
 export async function createMarketingTask(context: RequestContext, input: z.infer<typeof marketingTaskSchema>) {
-  await prisma.project.findFirstOrThrow({ where: { id: input.projectId, tenantId: context.tenantId } });
   const task = await prisma.marketingTask.create({
     data: {
       tenantId: context.tenantId,
-      projectId: input.projectId,
       title: input.title,
       brief: input.brief,
       dueAt: input.dueAt ? new Date(input.dueAt) : undefined,
-      videographerId: input.videographerId,
-      editorId: input.editorId,
+      assignee: input.assignee?.trim() || null,
+      links: input.links,
       createdById: context.userId,
-      status: input.videographerId ? MarketingTaskStatus.SHOOT_ASSIGNED : MarketingTaskStatus.TODO,
+      status: MarketingTaskStatus.TODO,
     },
   });
   await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "MarketingTask", entityId: task.id, after: task });
   await createNotification(context, {
-    title: "Marketing task created",
+    title: "Team idea added",
     body: task.title,
-    data: { taskId: task.id, projectId: task.projectId },
+    data: { taskId: task.id },
   });
   return task;
 }
@@ -117,5 +114,22 @@ export async function approveMarketingTask(context: RequestContext, taskId: stri
 }
 
 export async function rejectMarketingTask(context: RequestContext, taskId: string, input: z.infer<typeof marketingApprovalSchema>) {
-  return approveMarketingTask(context, taskId, { ...input, status: "REJECTED" });
+  await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId } });
+  const task = await prisma.marketingTask.update({
+    where: { id: taskId },
+    data: { status: "CHANGES_REQUESTED" },
+  });
+  await prisma.approval.create({
+    data: {
+      tenantId: context.tenantId,
+      recordType: "MarketingTask",
+      recordId: taskId,
+      status: "REJECTED",
+      notes: input.notes,
+      decidedById: context.userId,
+      decidedAt: new Date(),
+    },
+  });
+  await writeAuditEvent(context, { action: AuditAction.REJECT, entityType: "MarketingTask", entityId: taskId, after: task });
+  return task;
 }

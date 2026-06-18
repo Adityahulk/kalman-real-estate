@@ -894,9 +894,11 @@ model Issue {
 model MarketingTask {
   id             String              @id @default(cuid())
   tenantId       String
-  projectId      String
+  projectId      String?
   title          String
   brief          String
+  assignee       String?
+  links          Json?
   status         MarketingTaskStatus @default(TODO)
   dueAt          DateTime?
   createdById    String?
@@ -904,7 +906,7 @@ model MarketingTask {
   editorId       String?
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
-  project        Project             @relation(fields: [projectId], references: [id])
+  project        Project?            @relation(fields: [projectId], references: [id])
   media          MediaAsset[]
   comments       ReviewComment[]
 
