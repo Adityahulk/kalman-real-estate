@@ -6,6 +6,7 @@ type RenderContext = {
   font: PDFFont;
   bold: PDFFont;
   italic: PDFFont;
+  boldItalic: PDFFont;
   y: number;
 };
 
@@ -16,6 +17,12 @@ const RIGHT = 72;
 const TEXT_WIDTH = PAGE_WIDTH - LEFT - RIGHT;
 const BODY_SIZE = 10.4;
 const LINE_HEIGHT = 14.4;
+const INK = rgb(0.12, 0.15, 0.18);
+
+// One contiguous run of identically-styled characters within a word.
+type StyledRun = { text: string; b: boolean; i: boolean; u: boolean };
+// A space-delimited word, possibly containing several differently-styled runs.
+type Word = StyledRun[];
 
 export function isLetterStudioHtml(html: string) {
   return /data-template=["']ambey-allotment["']/i.test(html) || /data-letter-template=["'][^"']+["']/i.test(html);
@@ -26,6 +33,7 @@ export async function buildLetterStudioPdfFromHtml(html: string) {
   const font = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
   const italic = await pdf.embedFont(StandardFonts.HelveticaOblique);
+  const boldItalic = await pdf.embedFont(StandardFonts.HelveticaBoldOblique);
   const sections = extractSections(html);
 
   for (const section of sections) {
@@ -36,6 +44,7 @@ export async function buildLetterStudioPdfFromHtml(html: string) {
       font,
       bold,
       italic,
+      boldItalic,
       y: Number(section.attrs["data-top"] ?? 790),
     };
     await renderSection(context, section.html);
@@ -98,19 +107,121 @@ function drawParagraph(context: RenderContext, html: string, attrs: Record<strin
 
   const className = attrs.class ?? "";
   const align = className.includes("right") ? "right" : className.includes("center") ? "center" : "left";
-  const useBold = className.includes("bold");
-  const useItalic = html.includes("<em>");
-  const chunks = textFromHtml(html).split("\n");
-  for (const chunk of chunks) {
-    const raw = chunk.trim();
-    if (!raw) {
+  const forceBold = className.includes("bold");
+  // Each <br> starts a new hard line; words inside carry their own bold/italic/underline styling.
+  for (const hardLine of parseStyledLines(html)) {
+    if (!hardLine.length) {
       context.y -= LINE_HEIGHT;
       continue;
     }
-    const lines = wrapText(raw, useItalic ? context.italic : useBold ? context.bold : context.font, BODY_SIZE, TEXT_WIDTH);
-    for (const line of lines) drawSingleLine(context, line, align, useBold, useItalic);
+    for (const visualLine of wrapWords(context, hardLine, BODY_SIZE, TEXT_WIDTH)) {
+      drawWordLine(context, visualLine, align, forceBold);
+    }
   }
   context.y -= 8;
+}
+
+function fontFor(context: RenderContext, bold: boolean, italic: boolean) {
+  if (bold && italic) return context.boldItalic;
+  if (bold) return context.bold;
+  if (italic) return context.italic;
+  return context.font;
+}
+
+function runWidth(context: RenderContext, run: StyledRun, size: number) {
+  return fontFor(context, run.b, run.i).widthOfTextAtSize(run.text, size);
+}
+
+function wordWidth(context: RenderContext, word: Word, size: number) {
+  return word.reduce((sum, run) => sum + runWidth(context, run, size), 0);
+}
+
+// Parse a paragraph's inner HTML into hard lines (split on <br>) of space-delimited
+// words, tracking nested <b>/<strong>, <i>/<em> and <u> styling per character.
+function parseStyledLines(html: string): Word[][] {
+  const lines: Word[][] = [];
+  let words: Word[] = [];
+  let word: Word = [];
+  let bold = 0, italic = 0, underline = 0;
+
+  const flushWord = () => { if (word.length) { words.push(word); word = []; } };
+  const flushLine = () => { flushWord(); lines.push(words); words = []; };
+  const appendText = (text: string) => {
+    for (const ch of text) {
+      if (ch === " " || ch === "\t" || ch === "\n") { flushWord(); continue; }
+      const b = bold > 0, i = italic > 0, u = underline > 0;
+      const last = word[word.length - 1];
+      if (last && last.b === b && last.i === i && last.u === u) last.text += ch;
+      else word.push({ text: ch, b, i, u });
+    }
+  };
+
+  for (const match of html.matchAll(/<[^>]+>|[^<]+/g)) {
+    const token = match[0];
+    if (token[0] === "<") {
+      const closing = token.startsWith("</");
+      const tag = token.replace(/[<>/]/g, "").trim().split(/\s/)[0].toLowerCase();
+      if (tag === "br") { flushLine(); continue; }
+      const delta = closing ? -1 : 1;
+      if (tag === "b" || tag === "strong") bold = Math.max(0, bold + delta);
+      else if (tag === "i" || tag === "em") italic = Math.max(0, italic + delta);
+      else if (tag === "u") underline = Math.max(0, underline + delta);
+    } else {
+      appendText(decodeHtml(token));
+    }
+  }
+  flushLine();
+  return lines;
+}
+
+// Greedily wrap words into visual lines that fit within maxWidth.
+function wrapWords(context: RenderContext, words: Word[], size: number, maxWidth: number): Word[][] {
+  const spaceW = context.font.widthOfTextAtSize(" ", size);
+  const lines: Word[][] = [];
+  let line: Word[] = [];
+  let width = 0;
+  for (const word of words) {
+    const ww = wordWidth(context, word, size);
+    const add = line.length ? spaceW + ww : ww;
+    if (line.length && width + add > maxWidth) {
+      lines.push(line);
+      line = [word];
+      width = ww;
+    } else {
+      line.push(word);
+      width += add;
+    }
+  }
+  if (line.length) lines.push(line);
+  return lines.length ? lines : [[]];
+}
+
+function drawWordLine(context: RenderContext, words: Word[], align: "left" | "center" | "right", forceBold: boolean) {
+  const size = BODY_SIZE;
+  const spaceW = context.font.widthOfTextAtSize(" ", size);
+  const total = words.reduce((sum, word, index) => sum + wordWidth(context, word, size) + (index ? spaceW : 0), 0);
+  const y = context.y;
+  let x = align === "right" ? PAGE_WIDTH - RIGHT - total : align === "center" ? (PAGE_WIDTH - total) / 2 : LEFT;
+
+  words.forEach((word, wi) => {
+    if (wi) {
+      // Keep the underline continuous across a space when both neighbouring runs are underlined.
+      const prevUnderlined = words[wi - 1][words[wi - 1].length - 1]?.u;
+      const nextUnderlined = word[0]?.u;
+      if (prevUnderlined && nextUnderlined) {
+        context.page.drawLine({ start: { x, y: y - 2 }, end: { x: x + spaceW, y: y - 2 }, thickness: 0.6, color: INK });
+      }
+      x += spaceW;
+    }
+    for (const run of word) {
+      const font = fontFor(context, run.b || forceBold, run.i);
+      const w = font.widthOfTextAtSize(run.text, size);
+      context.page.drawText(run.text, { x, y, size, font, color: INK });
+      if (run.u) context.page.drawLine({ start: { x, y: y - 2 }, end: { x: x + w, y: y - 2 }, thickness: 0.6, color: INK });
+      x += w;
+    }
+  });
+  context.y -= LINE_HEIGHT;
 }
 
 function drawSingleLine(context: RenderContext, text: string, align: "left" | "center" | "right", bold = false, italic = false) {
@@ -131,7 +242,7 @@ function drawTable(context: RenderContext, html: string, attrs: Record<string, s
       let x = LEFT;
       const rowHeight = 23;
       row.forEach((cell, index) => {
-        context.page.drawText(cell.text, { x, y: context.y, size: BODY_SIZE, font: cell.header ? context.bold : context.font, color: rgb(0.12, 0.15, 0.18) });
+        context.page.drawText(cell.text, { x, y: context.y, size: BODY_SIZE, font: cell.header || cell.bold ? context.bold : context.font, color: rgb(0.12, 0.15, 0.18) });
         x += widths[index] ?? 120;
       });
       context.y -= rowHeight;
@@ -144,7 +255,7 @@ function drawTable(context: RenderContext, html: string, attrs: Record<string, s
   const tableX = LEFT;
   let y = context.y;
   for (const row of rows) {
-    const wrapped = row.map((cell, index) => wrapText(cell.text, cell.header ? context.bold : context.font, BODY_SIZE, (widths[index] ?? 120) - 10));
+    const wrapped = row.map((cell, index) => wrapText(cell.text, cell.header || cell.bold ? context.bold : context.font, BODY_SIZE, (widths[index] ?? 120) - 10));
     const rowHeight = Math.max(28, Math.max(...wrapped.map((lines) => lines.length)) * 13 + 10);
     let x = tableX;
     row.forEach((cell, index) => {
@@ -152,7 +263,7 @@ function drawTable(context: RenderContext, html: string, attrs: Record<string, s
       context.page.drawRectangle({ x, y: y - rowHeight + 4, width, height: rowHeight, borderColor: rgb(0.35, 0.35, 0.35), borderWidth: 0.6 });
       let textY = y - 10;
       for (const line of wrapped[index]) {
-        context.page.drawText(line, { x: x + 6, y: textY, size: BODY_SIZE, font: cell.header ? context.bold : context.font, color: rgb(0.12, 0.15, 0.18) });
+        context.page.drawText(line, { x: x + 6, y: textY, size: BODY_SIZE, font: cell.header || cell.bold ? context.bold : context.font, color: rgb(0.12, 0.15, 0.18) });
         textY -= 13;
       }
       x += width;
@@ -255,11 +366,15 @@ function drawCompass(page: PDFPage, font: PDFFont, cx: number, cy: number) {
 }
 
 function parseRows(html: string) {
-  const rows: Array<Array<{ text: string; header: boolean }>> = [];
+  const rows: Array<Array<{ text: string; header: boolean; bold: boolean }>> = [];
   for (const rowMatch of html.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)) {
-    const cells: Array<{ text: string; header: boolean }> = [];
+    const cells: Array<{ text: string; header: boolean; bold: boolean }> = [];
     for (const cellMatch of rowMatch[1].matchAll(/<(td|th)\b[^>]*>([\s\S]*?)<\/\1>/gi)) {
-      cells.push({ text: textFromHtml(cellMatch[2]).replace(/\n/g, " ").trim(), header: cellMatch[1].toLowerCase() === "th" });
+      cells.push({
+        text: textFromHtml(cellMatch[2]).replace(/\n/g, " ").trim(),
+        header: cellMatch[1].toLowerCase() === "th",
+        bold: /<(strong|b)\b/i.test(cellMatch[2]),
+      });
     }
     if (cells.length) rows.push(cells);
   }

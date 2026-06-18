@@ -16,11 +16,10 @@ export function ambeyAllotmentTemplate() {
 <tr><th>Total Sale Price</th><td><strong>{{plot.priceInrFormatted}}/-*</strong></td></tr>
 </table>
 <p>We would like to take this opportunity to thank you for the trust that you have reposed in <strong>“{{firm.name}}”</strong> and assure you of our best services at all times.</p>
-<p class="right">Warm Regards<br><strong>{{firm.name}}</strong><br>(Authorized Signatory)</p>
+<p class="center">Warm Regards<br><strong>{{firm.name}}</strong><br>(Authorized Signatory)</p>
 </section>
 
 <section data-ambey-page="2" data-top="660">
-<p><strong>Allotment No.: {{document.number}}</strong><span class="right-inline"><strong>Date………………...</strong></span></p>
 <h1><u>CERTIFICATE OF POSSESSION</u></h1>
 <p>Physical Possession of residential <u><strong>Plot No. {{plot.code}}</strong></u> situated in <strong>{{project.name}}, {{project.fullAddress}}</strong> duly approved by {{project.approvalAuthority}} measuring {{plot.areaSqyd}} Sqyds. approx. is handed over by <u><strong>{{firm.signatory.name}} {{firm.signatory.relation}}</strong></u>, one of the authorized partner / person of the promoters with valid title land under residential/ commercial zone to <u><strong>{{owner.nameWithRelation}} resident of {{owner.address}}</strong></u> as per the following details:-</p>
 <table class="plain side-table">
@@ -31,16 +30,16 @@ export function ambeyAllotmentTemplate() {
 <tr><td>SOUTH SIDE</td><td>: {{plot.southSize}}</td><td>{{plot.southAdjoining}}</td></tr>
 </table>
 <div class="site-plan-box">SITE PLAN (NOT TO SCALE)</div>
-<p class="right"><strong>For M/s. {{firm.nameUpper}}</strong><br>(Authorized Signatory)</p>
+<p class="center"><strong>For M/s. {{firm.nameUpper}}</strong><br>(Authorized Signatory)</p>
 </section>
 
 <section data-ambey-page="3" data-top="750">
 <p class="center">(Stamp Duty Rs. {{stamp.amount}} having E-Stamp No. {{stamp.estampNo}} dated {{stamp.date}})</p>
 <h1><u>SELF DECLARATION</u></h1>
 <p>I, <u><strong>{{owner.nameWithRelation}} resident of {{owner.address}}</strong></u>, allottee of Plot No. {{plot.code}}, measuring {{plot.areaSqyd}} Sqyds. in {{project.name}}, {{project.fullAddress}} and I undertake as under:</p>
-<p>(i) I am allottee of a plot situated in {{project.name}} Residential Colony at {{project.fullAddress}} is developed by {{firm.name}}, {{firm.address}};</p>
-<p>(ii) I undertake that if the colonizer ({{firm.name}}) change or increase the layout plan of the colony then I will not raise any objection, it will be on the sole discretion of the firm/colonizer to develop the colony.</p>
-<p>(iii) I further undertake that if the colonizer ({{firm.name}}) can increase / extend the area of the colony and provide approach road, water & sewage supply etc. from their approved colony named {{project.name}}, then I will not raise any objection.</p>
+<p>I am allottee of a plot situated in {{project.name}} Residential Colony at {{project.fullAddress}} is developed by {{firm.name}}, {{firm.address}};</p>
+<p>I undertake that if the colonizer ({{firm.name}}) change or increase the layout plan of the colony then I will not raise any objection, it will be on the sole discretion of the firm/colonizer to develop the colony.</p>
+<p>I further undertake that if the colonizer ({{firm.name}}) can increase / extend the area of the colony and provide approach road, water & sewage supply etc. from their approved colony named {{project.name}}, then I will not raise any objection.</p>
 <p class="right">Executant</p>
 <p><u><strong>Verification</strong></u></p>
 <p>Verified the contents of my undertaking are true and correct to the best of my knowledge and belief, nothing has been concealed or mis-stated therein.<br>Date:</p>
@@ -48,8 +47,23 @@ export function ambeyAllotmentTemplate() {
 <div class="photo-box bottom-left">Please affix<br>your<br>photograph<br>here</div>
 </section>
 
-<section data-ambey-page="4" data-top="760">
+<section data-ambey-page="4" data-top="700">
+<p class="center">(Stamp Duty Rs. {{stamp.amount}} having E-Stamp No. {{stamp.estampNo}} dated {{stamp.date}})</p>
+<h1><u>CONSENT IN FAVOUR OF {{firm.nameUpper}}, {{project.city}}</u></h1>
+<p>Subject : Consent for change / Revision / Addition in layout plan of {{project.name}} space having Hadbast No. 55, vide Jamabandi for the year 2019-20, of Village {{project.city}}-A, B, C & D, Tehsil & Distt. {{project.city}}.</p>
+<p>Dear Sir/Madam</p>
+<p>We, the undersigned allottee(s) of Plot No. __ in the project “<strong>{{project.name}}</strong>”, which is registered with Punjab RERA vide Registration No. <strong>{{rera.number}}</strong>, hereby state that the project was earlier approved as per Layout Plan No. <strong>TB/BARNALA/SA/24/01 Dated 09/12/2024</strong>. And License to Develop Colony No. <strong>BNL-UD-LDC-2025/344 Dated 13/03/2025</strong>.</p>
+<p>We have been informed by the promoter that the layout plan has been revised and approved vide Revised Layout Plan No. <strong>TB/BARNALA/SA/25/01</strong> <strong>Dated 11/11/2025</strong> and License to Develop Colony No. <strong>235/B</strong> <strong>Dated. 22/04/2026.</strong></p>
+<p>As per the revised layout:</p>
+<p>* Old Plot Number: ____<br>* New Plot Number: ____</p>
+<p>At the time of booking of <strong>Plot No.____ </strong>We were shown all documents of above-mentioned Residential Colony like Layout plan, etc. As we are aware that said layout plan is always subject to certain practical changes on site, which are required to be amended or revised for the exact measurements of the plots and for the betterment of the colony. As such by virtue of this letter, I/We do hereby accord and grant our unconditional consent for changes/revision or amendment in the layout plan of the Residential colony. Moreover, if the developer extends the expansion of existing Colony, the same shall be deemed to have been done with my/our consent. Hence, I/We shall not dispute the said changes/revision /amendment/addition of the layout plan of the Residential colony at any stage and grant unconditional consent regarding for any changes/revision /amendment/addition of the commercial colony.</p>
+<p>Thanking you and assuring you all the assistance.</p>
+<p class="right"><strong>(Allottee/ Allottees)</strong></p>
+</section>
+
+<section data-ambey-page="5" data-top="790">
 <h2><u>{{firm.nameUpper}}, {{firm.address}}</u><br>PLOT BUYERS' AGREEMENT {{project.nameUpper}}</h2>
+<p><em><u>This residential Housing Project has been approved by issuing the License to Develop Colony by The Competent Authority cum Additional Deputy Commissioner (General), {{project.city}}, vide License No. BNL-UDC-2025/344 dated 13.03.2025 and also approved by issuing the License to Develop Colony by Municipal Corporation, {{project.city}}, vide License No. 235/B dated 22.04.2026. Further said colony has been approved by Punjab Real Estate Regulatory Authority (RERA) vide Registration No. PBREAR-BNL06-PR1384-062026 dated 11.06.2026.</u></em></p>
 <p class="center">(Stamp Duty Rs. {{stamp.amount}} having E-Stamp ___________________ dated {{ownership.effectiveDateDots}})</p>
 <p>THIS AGREEMENT made at {{agreement.place}} on this {{ownership.effectiveDayOrdinal}} day of {{ownership.effectiveMonth}}, {{ownership.effectiveYear}}.</p>
 <p class="center">BETWEEN</p>
@@ -61,10 +75,10 @@ export function ambeyAllotmentTemplate() {
 <p><em>(hereinafter referred to as the *Allottee' which expression shall, unless excluded by or repugnant to the subject or context be deemed to include his/their heirs, executors, administrators, legal representatives, nominees, and assigns of the Other Part.</em></p>
 <p><strong>AND WHEREAS</strong> M/S. {{firm.nameUpper}}, entered into arrangements / collaborations with the Land Owners to develop, market and sell Plots in the said Residential Housing Project under the Brand Name "{{project.name}}" in the revenue estate of {{project.revenueEstate}} situated on {{project.fullAddress}} being developed on the aforesaid land (hereinafter referred to as then "Said Colony').</p>
 <p><strong>AND WHEREAS</strong> The Firm by virtue of the said sale by {{firm.nameUpper}} is entitled to and is competent to construct, develop, market and sell plots in the said colony, receive monies, give receipts, execute conveyance, other documents etc. as may be necessary and expedient to give effect to the aforesaid purpose, for the purpose of construction and sale of plots.</p>
-<p><strong>AND WHEREAS</strong> the Said Colony is proposed to be set up in accordance with the terms and conditions of the said licenses and layout plan presently approved by competent authority and as may be approved in future by the competent authority.</p>
 </section>
 
-<section data-ambey-page="5" data-top="790">
+<section data-ambey-page="6" data-top="790">
+<p><strong>AND WHEREAS</strong> the Said Colony is proposed to be set up in accordance with the terms and conditions of the said licenses and layout plan presently approved by competent authority and as may be approved in future by the competent authority.</p>
 <h2>ALLOTTEE’S REPRESENTATIONS</h2>
 <p><strong>AND WHEREAS</strong> the Allottee has applied for purchase and the firm has agreed to sell to the Allottee Plot bearing no. {{plot.code}} and measuring {{plot.areaSqyd}} (Sq yds. approx.) in the Said Colony and on the terms and conditions appearing hereinafter.</p>
 <p><strong>AND WHEREAS</strong> the Allottee hereby confirm(s) and represent(s) that he/they is/are executing this Agreement with the full knowledge that the demarcation and zoning plans for the Said Plot/Said Colony may further be changed and substituted by other layout plan (s) as and when sanctioned / approved by the Competent Authority in which event the number of the Said Plot, its location, size as provisionally allotted to the Allottee may change and be substituted by a new number, location, size etc.; to which the Allottee has/have confirmed that he/they shall have no objection having been informed of this eventuality. The Allottee also agrees to abide by the terms and conditions of this Agreement including those relating to payment of Total Price, Govt. Charges including other charges and other amounts including delayed interest, taxes, etc. as laid down herein.</p>
@@ -75,7 +89,7 @@ export function ambeyAllotmentTemplate() {
 <p><strong>DETAILS OF PRICING:</strong><br>Plot No : {{plot.code}}<br>Plot Area : {{plot.areaSqyd}} Sq. Yds. approx.<br>Total BSP : {{plot.priceInrFormatted}}/-<br>(Rupees {{plot.priceInrWords}} Only)</p>
 </section>
 
-<section data-ambey-page="6" data-top="790">
+<section data-ambey-page="7" data-top="790">
 <p><strong>DETAILS OF PAYMENTS RECEIVED:</strong></p>
 <table class="payments">
 <tr><th>Cheque No./<br>RTGS/NEFT</th><th>Date of Cheque</th><th>Amount</th><th>Drawn on Bank</th></tr>
@@ -93,7 +107,7 @@ export function ambeyAllotmentTemplate() {
 <p>(b) The Firm has made clear to the Allottee that the Firm shall be carrying out extensive developmental/construction activities for many years in future in the entire area falling inside/outside the Said Colony in which Said Plot is located and that the Allottee on being aware of this fact by the Firm has confirmed that the Allottee shall not raise any objections or make any claims</p>
 </section>
 
-<section data-ambey-page="7" data-top="790">
+<section data-ambey-page="8" data-top="790">
 <p>or default in any payments as demanded by the Firm on account of Inconvenience, if any, which may be suffered by the Allottee due to such developmental/ Construction/ Extension or its incidental/related activities.</p>
 <p>(c) The allottee/vendee shall not transfer the said plot / site to any other person / persons, unless 100% dues are paid / cleared in respect of the said plot. Transfer of Plot on the basis of allotment letter shall be permitted subject to payment of Transfer Fee as prescribed by the Firm from time to time.</p>
 <p>(d) It is made clear by the Firm and agreed by the Allottee that all rights including the ownership thereof of land(s), facilities and amenities (other than those specifically earmarked as common areas and facilities for common use of the occupants within the Said Colony) shall vest solely with the Firm and the Firm shall have the sole and absolute authority to deal with the same in any manner including but not limited to creation of further rights in favour of any other party by way of sale, transfer, lease, collaboration, joint venture, operation and management or any other mode including transfer to any person, institution, trust, government, semi-government, any other authority, body and/or any local body(ies) which the Firm may deem fit in its sole discretion. It is made clear by the Firm to the Allottee that the Firm has not at any time made any commitment or charged any price from the Allottee for the ownership of any amenities/facilities which are specifically earmarked by the Firm for the Firm's ownership, though the Firm may permit the occupants of the Said Colony to use such amenities and facilities upon payment of applicable charges, fees, subscription charges, security deposit etc. as may be decided by the Firm/management of such amenities and facilities from time to time.</p>
@@ -103,7 +117,7 @@ export function ambeyAllotmentTemplate() {
 <p>(h) Any variation in the size and or the area of the said plot shall not vitiate the terms of allotment.</p>
 </section>
 
-<section data-ambey-page="8" data-top="790">
+<section data-ambey-page="9" data-top="790">
 <p>(i) The building on the said site / plot allotted to you shall be constructed in accordance with the plans which confirm to the building bye laws, zoning plans, frame controls & architectural controls, whichever applicable, provided the building is completed in accordance with the building plans duly sanctioned by the Municipal Corporation, {{project.city}} to the total satisfaction of the colonizer / Promoters of said colony.</p>
 <p>(j) The allottee/vendee shall get the building plan duly approved from M. C. {{project.city}} within three years w.e.f. the date of allotment letter/title deed and submit a copy of the sanctioned plan to the office of the Promoters for their records.</p>
 <p><strong>4. ZONING PLAN RESTRICTIONS</strong><br>It is abundantly made clear to the Allottee that in the zoning plan as may be approved by the Competent Authority(ies), there would be restrictions including but not limited to the ramp and front gate of the plot will be constructed as per the approved plan by the competent authority(ies). Further the Allottee specifically undertake(s) to strictly abide by all norms and conditions of the zoning plan/layout plan/building plan, notifications, rules, bye-laws and/or any other approvals granted by the competent authority(ies) in respect of the Said plot/Said Colony, as may be applicable from time to time. It is specifically made clear to the Allottee that the approval of the building plan(s), occupation certificate etc., shall be at the sole cost and responsibility of the Allottee and the Firm shall have no role in the same whatsoever.</p>
@@ -111,20 +125,20 @@ export function ambeyAllotmentTemplate() {
 <p><strong>6. ESSENCE OF THE AGREEMENT</strong><br>The payment on or before the due date, of Total Price and other amounts payable as per the payment plan, as accepted by the Allottee or as demanded by the Firm from time to time is the essence of this Agreement.</p>
 </section>
 
-<section data-ambey-page="9" data-top="790">
+<section data-ambey-page="10" data-top="790">
 <p><strong>7. LAYOUT PLAN CHANGES</strong><br>The Firm has informed the Allottee that the Said Colony is planned to be developed by a Firm in accordance with the layout plan sanctioned by the competent authority and as maybe changed from time to time by the competent authority. Any changes modifications amendments as may be made by the competent authority in the layout plan for the Said Colony in future, shall automatically supersede the present approved layout plan and become binding on the Firm and the Allottee. The Allottee hereby confirm(s) that the Allottee shall have no objection if the Firm makes suitable and necessary alterations in the layout plan, if found necessary. And such alterations may involve the change in the position/number/dimensions/size or change in the area of the Said Plot etc.</p>
 <p><strong>8. DELIVER OF POSSESSION DUE TO LEGISLATION, ORDERS, RULES, REGULATIONS OF THE GOVT.</strong><br>The Allottee agree(s) that, if as a result of any legislation, orders or rules or regulations made or issued by the Govt. and/or any other Authority or if Competent Authority(ies) refuses, delays withholds, denies the grant of necessary approvals for the Said Plot/Said Colony or if any matters, issues relating to such approvals, permissions, notices, notifications by the Competent Authority(ies) become subject matter of any suit/writ before a Competent Court or due to force majeure (clause 34) conditions, the firm after provisional and/or final allotment is unable to deliver possession of the Said Plot to the Allottee and the Firm if it decides, in its sole discretion, to abandon the development of the Said Colony, then in that event the Allottee hereby authorize(s) the Firm to refund the amounts received from the Allottee without any interest and the Allottee hereby confirm(s) that he/they shall not make any other claim on the Firm whatsoever.</p>
 <p><strong>9. MAINTENANCE AND UP KEEP OF THE SAID COLONY</strong><br>The firm may enter into a maintenance agreement in future for the upkeep of the said colony. The Allottee also agree(s) to enter into a maintenance agreement at the rate stipulated by the firm in the future with the Firm/its nominee agency or any Other body Residential Welfare Association (RWA) (hereinafter referred to as the 'Maintenance Agency) as may be appointed by the Firm from time to time for the maintenance and upkeep of the Said Colony until these are handed over to local body or any government agency or association. It is made clear to the Allottee that the Maintenance Agency shall render maintenance services only with respect to the common areas falling within the Said Colony but outside the Said Plot and these shall mainly relate to services in respect to the public roads, landscaping, sewerage, drainage,</p>
 </section>
 
-<section data-ambey-page="10" data-top="790">
+<section data-ambey-page="11" data-top="790">
 <p>garbage clearance, water, street lights, pavements, horticulture etc. The Allottee undertake(s) to pay the maintenance bills including water charges raised by the Maintenance Agency for maintaining various services/facilities as described above, raised on a pro rata basis from the date of the offer of possession by the Firm irrespective whether the Allottee has taken possession or is in occupation of the Said Plot or not, until the maintenance services are handed over to the government or any local body for maintenance.</p>
 <p><strong>10. NOMINATIONS</strong><br>Upon payment of monies and transfer charges as applicable from time to time, and subject to applicable laws and notifications or any directions/orders, etc. of any Government/or statutory authority as may be in force and upon receiving a written request from the Allottee, permit the Allottee to get the name of the Allottee/any of the Allottee's nominees'/transferees', substituted in the Allottee's place subject to such terms and conditions as the Firm may impose. The Allottee shall be solely responsible and liable for all legal, monetary or any other consequences that may arise from such nominations. It is specifically made clear to the Allottee that, as understood by the Firm, at present there are no restrictions imposed by the competent authority(ies) to restrict any nomination/ transfer he event of any imposition/transfer/ assignment of allotted Plots. However, in the event of any restrictions at any time after the date of this Agreement restricting the nomination/ transfer/ assignment of allotted Plot by any authority, the Firm will have to comply with the same and the Allottee has specifically noted the same.</p>
 <p><strong>11. LOAN FROM THE BANKS AND FINANCIAL INSTITUTIONS FOR EXECUTION OF SALE DEED</strong><br>In Case the Allottee wants to avail of a loan facility from financing bodies to facilitate the purchase of the said plot then:</p>
 <p>(a) It is clearly understood and so agreed by and between the parties hereto that all the provisions contained herein and the obligations arising any hereunder in respect of the said plot shall equally be applicable to and enforceable against any and all future Buyers/ Assignees of the said plot, as the said obligations go along with the said plot for all intents and purposes, subject to the provisions mentioned in clause.</p>
 </section>
 
-<section data-ambey-page="11" data-top="790">
+<section data-ambey-page="12" data-top="790">
 <p>(b) First allottee is bound to pay transfer fee of Rs, 5,100/- for first transfer to the firm. Second allottee is bound to pay transfer fee of Rs. 11,000/- to firm for second transfer and third allottee is bound pay the transfer fee of Rs. 21,000/- to firm for third transfer.</p>
 <p><strong>12. LAWS OF LNDIA</strong><br>The rights and obligations of the parties under or arising out of this Agreement shall be construed and enforced in accordance with the laws of India.</p>
 <p><strong>13. TRANSFER OF OWNERSHIP OF THE SAID COLONY</strong><br>The Allottee agrees that the Firm shall have the right to transfer ownership of the Said Colony in whole or in parts to any other entity such as any partnership firm, body corporate(s) whether incorporated or not, association or agency by way of sale/ disposal /or any other arrangement as may be decided by the Firm without any intimation, written or otherwise to the Allottee and the Allottee shall not raise any objection in this regard.</p>
@@ -132,12 +146,12 @@ export function ambeyAllotmentTemplate() {
 <p><strong>15. DISPUTE RESOLUTION BY ARBITRATION</strong><br>All or any disputes arising out or touching upon or in relation to the terms of this Agreement including the interpretation and validity of the terms thereof and the respective rights and obligations of the parties shall be settled amicably by mutual discussion failing which the same shall be settled through arbitration. The arbitration proceedings shall be governed by Arbitration and Conciliation Act, 1996 or any statutory amendments/modifications thereof for the time being in force. The arbitration proceedings shall be appointed be held at an appropriate location at {{project.city}} by a Sole Arbitrator who shall be appointed by the firm. The Allottee hereby confirms that the Allottee shall have no objection to such appointment by the firm and have any doubts about the impartiality of sole arbitrator, appointed by the firm.</p>
 </section>
 
-<section data-ambey-page="12" data-top="790">
+<section data-ambey-page="13" data-top="790">
 <p>IN WITNESS WHEREOF, the parties hereto have set and subscribed their respective hands at the places and on the day, month and year mentioned under their respective signatures</p>
 <p><strong>SIGNED AND DELIVERED BY THE WITH IN NAMED</strong><br>Allottee (including joint allottees)</p>
 <p>(1) NAME:________________                                                        SIGNATURE<br>(2) NAME:________________                                                        SIGNATURE</p>
 <p>At {{witness.place}} on {{ownership.effectiveDateDots}}</p>
-<p>In the presence of:<br><strong>WITNESSES:</strong><br>i) Name:________________________<br>    Address:_______________________<br>   Signature:______________________<br>ii) Name:________________________<br>   Address:_______________________<br>   Signature:______________________</p>
+<p>In the presence of:<br><strong>WITNESSES:</strong><br>i) Name:________________________<br>    Address:_______________________<br>    Contact: ______________________<br>   Signature:______________________<br>ii) Name:________________________<br>   Address:_______________________<br>   Contact: _______________________<br>   Signature:______________________</p>
 <p><strong>SIGNED AND DELIVERED BY THE WITHIN NAMED {{firm.signatory.name}} {{firm.signatory.relation}}</strong></p>
 <p>For and on behalf of Firm {{firm.name}} {{project.city}} at {{witness.place}} on {{ownership.effectiveDateDots}}.</p>
 </section>
