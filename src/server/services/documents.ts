@@ -225,6 +225,22 @@ export async function approveDocument(context: RequestContext, id: string, input
   return document;
 }
 
+export async function deleteDocument(context: RequestContext, id: string) {
+  const document = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  // Detach any ownership records that still point at this letter (plain String? field, no FK cascade).
+  await prisma.ownershipRecord.updateMany({ where: { tenantId: context.tenantId, documentId: id }, data: { documentId: null } });
+  // Remove revision history, then the document itself (hard delete — no deletedAt column).
+  await prisma.generatedDocumentRevision.deleteMany({ where: { tenantId: context.tenantId, documentId: id } });
+  await prisma.generatedDocument.delete({ where: { id } });
+  await writeAuditEvent(context, { action: AuditAction.DELETE, entityType: "GeneratedDocument", entityId: id, before: document });
+  await createNotification(context, {
+    title: "Document deleted",
+    body: `${document.number ?? document.type} was deleted.`,
+    data: { documentId: id, status: "DELETED" },
+  });
+  return { id };
+}
+
 async function linkDocumentToLatestOwnershipRecord(context: RequestContext, document: GeneratedDocument) {
   if (document.recordType !== "Plot") return;
   const lower = document.type.toLowerCase();
@@ -468,7 +484,7 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "registry.date": registry?.registryDate?.toLocaleDateString("en-IN") ?? "",
     "today": new Date().toLocaleDateString("en-IN"),
     "todayDots": formatDateDots(new Date()),
-    "rera.number": "",
+    "rera.number": plot.project.reraNumber ?? "",
     "stamp.amount": "50/-",
     "stamp.estampNo": "",
     "stamp.date": formatDateDots(new Date()),

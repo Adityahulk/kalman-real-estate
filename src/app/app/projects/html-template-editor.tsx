@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ClipboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bold, Check, ChevronDown, ChevronUp, Italic, Loader2, Plus, Save, Trash2, Underline, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { requestJson } from "@/lib/api-client";
 import { letterSystemFields } from "@/lib/letter-system-fields";
+import { sanitizePastedHtml } from "@/lib/sanitize-pasted-html";
 
 type Template = {
   id: string;
@@ -380,6 +381,22 @@ export function HtmlTemplateEditor({
     globalThis.document.execCommand("insertText", false, `{{${value}}}`);
   }
 
+  function handlePaste(event: ClipboardEvent<HTMLDivElement>) {
+    const html = event.clipboardData.getData("text/html");
+    const text = event.clipboardData.getData("text/plain");
+    event.preventDefault();
+    if (html) {
+      const clean = sanitizePastedHtml(html);
+      if (clean) {
+        globalThis.document.execCommand("insertHTML", false, clean);
+        prepareEditorSurface();
+        return;
+      }
+    }
+    if (text) globalThis.document.execCommand("insertText", false, text);
+    prepareEditorSurface();
+  }
+
   function prepareEditorSurface() {
     const root = editorRef.current;
     if (!root) return;
@@ -514,13 +531,13 @@ export function HtmlTemplateEditor({
 
         {/* Toolbar */}
         <div className="mb-2 flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
-          <button onClick={() => format("bold")} className="rounded p-1.5 text-slate-600 hover:bg-slate-200" title="Bold">
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => format("bold")} className="rounded p-1.5 text-slate-600 hover:bg-slate-200" title="Bold">
             <Bold className="h-4 w-4" />
           </button>
-          <button onClick={() => format("italic")} className="rounded p-1.5 text-slate-600 hover:bg-slate-200" title="Italic">
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => format("italic")} className="rounded p-1.5 text-slate-600 hover:bg-slate-200" title="Italic">
             <Italic className="h-4 w-4" />
           </button>
-          <button onClick={() => format("underline")} className="rounded p-1.5 text-slate-600 hover:bg-slate-200" title="Underline">
+          <button onMouseDown={(e) => e.preventDefault()} onClick={() => format("underline")} className="rounded p-1.5 text-slate-600 hover:bg-slate-200" title="Underline">
             <Underline className="h-4 w-4" />
           </button>
         </div>
@@ -535,6 +552,7 @@ export function HtmlTemplateEditor({
             className="letter-paper-editor"
             style={{ minHeight: "600px" }}
             onInput={prepareEditorSurface}
+            onPaste={handlePaste}
           />
         </section>
         <p className="mt-2 text-xs text-slate-400">
@@ -630,6 +648,7 @@ export function HtmlTemplateEditor({
                         {fields.map((field) => (
                           <button
                             key={field.value}
+                            onMouseDown={(e) => e.preventDefault()}
                             onClick={() => insertField(field.value)}
                             className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition hover:shadow-sm active:scale-95 ${color.bg} ${color.text} ${color.ring}`}
                             title={`Inserts {{${field.value}}}`}

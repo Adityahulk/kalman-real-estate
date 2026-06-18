@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { ClipboardEvent, FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, ArrowLeft, Bold, CheckCircle2, Download, Eye, FileText, Italic, Loader2, Plus, Save, Send, Underline, Wand2, X } from "lucide-react";
+import { AlertCircle, ArrowLeft, Bold, CheckCircle2, Download, Eye, FileText, Italic, Loader2, Plus, Save, Send, Trash2, Underline, Wand2, X } from "lucide-react";
+import { sanitizePastedHtml } from "@/lib/sanitize-pasted-html";
 
 type ProjectInfo = {
   id: string;
@@ -902,6 +903,7 @@ export function LetterStudioEditor({
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [loading, setLoading] = useState<"save" | "render" | "">("");
   const [approvalLoading, setApprovalLoading] = useState<"APPROVED" | "ISSUED" | "REJECTED" | "">("");
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [view, setView] = useState<"edit" | "preview">(letter.fileAssetId ? "preview" : "edit");
   const [draftHtml, setDraftHtml] = useState(letter.editableHtml ?? "");
@@ -1003,9 +1005,25 @@ export function LetterStudioEditor({
     router.refresh();
   }
 
+  async function removeDocument() {
+    if (!globalThis.confirm("Delete this rejected letter permanently? This cannot be undone.")) return;
+    setDeleteLoading(true);
+    setMessage(null);
+    const response = await fetch(`/api/v1/documents/${letter.id}`, { method: "DELETE" });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      setDeleteLoading(false);
+      setMessage({ kind: "error", text: body.error ?? "Delete failed" });
+      return;
+    }
+    if (backHref) router.push(backHref);
+    else router.refresh();
+  }
+
   const groupedMissing = groupMissingVariables(missingVariables);
   const documentTitle = letter.number ?? letter.type.replaceAll("_", " ");
   const canIssue = Boolean(fileAssetId);
+  const isRejected = status === "REJECTED";
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-100">
@@ -1044,13 +1062,13 @@ export function LetterStudioEditor({
                   PDF Preview
                 </button>
               </div>
-              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("bold")} disabled={view !== "edit"}>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" onMouseDown={(e) => e.preventDefault()} onClick={() => format("bold")} disabled={view !== "edit"}>
                 <Bold size={14} />
               </button>
-              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("italic")} disabled={view !== "edit"}>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" onMouseDown={(e) => e.preventDefault()} onClick={() => format("italic")} disabled={view !== "edit"}>
                 <Italic size={14} />
               </button>
-              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={() => format("underline")} disabled={view !== "edit"}>
+              <button type="button" className="btn-outline h-9 px-3 text-xs" onMouseDown={(e) => e.preventDefault()} onClick={() => format("underline")} disabled={view !== "edit"}>
                 <Underline size={14} />
               </button>
               <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={saveDraft} disabled={Boolean(loading)}>
@@ -1078,17 +1096,26 @@ export function LetterStudioEditor({
                   Download
                 </button>
               )}
-              <button type="button" className="btn-outline h-9 px-3 text-xs" disabled={!canIssue || Boolean(approvalLoading)} onClick={() => decide("APPROVED")}>
-                {approvalLoading === "APPROVED" ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />}
-                Approve
-              </button>
-              <button type="button" className="btn-outline h-9 px-3 text-xs" disabled={!canIssue || Boolean(approvalLoading)} onClick={() => decide("ISSUED")}>
-                Issue
-              </button>
-              <button type="button" className="btn-outline h-9 px-3 text-xs" disabled={Boolean(approvalLoading)} onClick={() => decide("REJECTED")}>
-                {approvalLoading === "REJECTED" ? <Loader2 className="animate-spin" size={14} /> : <X size={14} />}
-                Reject
-              </button>
+              {isRejected ? (
+                <button type="button" className="btn-outline h-9 border-rose-300 px-3 text-xs text-rose-600 hover:bg-rose-50" disabled={deleteLoading} onClick={removeDocument}>
+                  {deleteLoading ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />}
+                  Delete
+                </button>
+              ) : (
+                <>
+                  <button type="button" className="btn-outline h-9 px-3 text-xs" disabled={!canIssue || Boolean(approvalLoading)} onClick={() => decide("APPROVED")}>
+                    {approvalLoading === "APPROVED" ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />}
+                    Approve
+                  </button>
+                  <button type="button" className="btn-outline h-9 px-3 text-xs" disabled={!canIssue || Boolean(approvalLoading)} onClick={() => decide("ISSUED")}>
+                    Issue
+                  </button>
+                  <button type="button" className="btn-outline h-9 px-3 text-xs" disabled={Boolean(approvalLoading)} onClick={() => decide("REJECTED")}>
+                    {approvalLoading === "REJECTED" ? <Loader2 className="animate-spin" size={14} /> : <X size={14} />}
+                    Reject
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
@@ -1165,6 +1192,22 @@ function LetterDraftCanvas({
     normalizeEditableTemplateFields(editorRef.current);
   }, [draftHtml, editorRef]);
 
+  function handlePaste(event: ClipboardEvent<HTMLDivElement>) {
+    const html = event.clipboardData.getData("text/html");
+    const text = event.clipboardData.getData("text/plain");
+    event.preventDefault();
+    if (html) {
+      const clean = sanitizePastedHtml(html);
+      if (clean) {
+        globalThis.document.execCommand("insertHTML", false, clean);
+        onInput();
+        return;
+      }
+    }
+    if (text) globalThis.document.execCommand("insertText", false, text);
+    onInput();
+  }
+
   return (
     <section className="rounded-2xl border border-slate-200 bg-slate-200/70 p-3 shadow-inner md:p-6">
       <div
@@ -1174,6 +1217,7 @@ function LetterDraftCanvas({
         suppressHydrationWarning
         className="letter-paper-editor"
         onInput={onInput}
+        onPaste={handlePaste}
       />
     </section>
   );
