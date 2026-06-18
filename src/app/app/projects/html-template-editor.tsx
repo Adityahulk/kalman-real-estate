@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bold, Check, ChevronDown, ChevronUp, Italic, Loader2, Plus, Save, Trash2, Underline, X } from "lucide-react";
 import { useRouter } from "next/navigation";
+import { requestJson } from "@/lib/api-client";
 import { letterSystemFields } from "@/lib/letter-system-fields";
 
 type Template = {
@@ -10,6 +11,7 @@ type Template = {
   name: string;
   type: string;
   body: string;
+  variables?: unknown;
   active: boolean;
   createdAt: string;
 };
@@ -31,6 +33,7 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string; ring: string }
   Project:  { bg: "bg-emerald-50", text: "text-emerald-700", ring: "ring-emerald-200" },
   Plot:     { bg: "bg-orange-50",  text: "text-orange-700",  ring: "ring-orange-200" },
   Payment:  { bg: "bg-purple-50",  text: "text-purple-700",  ring: "ring-purple-200" },
+  Files:    { bg: "bg-cyan-50",    text: "text-cyan-700",    ring: "ring-cyan-200" },
   Buyer:    { bg: "bg-rose-50",    text: "text-rose-700",    ring: "ring-rose-200" },
   Document: { bg: "bg-slate-100",  text: "text-slate-700",   ring: "ring-slate-300" },
   Extra:    { bg: "bg-teal-50",    text: "text-teal-700",    ring: "ring-teal-200" },
@@ -63,6 +66,12 @@ const AUTOFILL_OPTIONS = [
     { label: "Firm address", value: "firm.address" },
     { label: "Firm PAN", value: "tenant.pan" },
   ]},
+  { group: "Files", items: [
+    { label: "Allottee documents", value: "files.allotteeDocuments" },
+    { label: "Payment files", value: "files.paymentDocuments" },
+    { label: "Additional field files", value: "files.additionalFields" },
+    { label: "All supporting documents", value: "files.allSupportingDocuments" },
+  ]},
   { group: "Dates & Others", items: [
     { label: "Allotment date", value: "ownership.effectiveDate" },
     { label: "Today's date", value: "today" },
@@ -91,6 +100,99 @@ function groupedFields(categories: FieldCategory[]) {
   return groups;
 }
 
+function preferredFieldGroups(groups: Record<string, Array<{ label: string; value: string }>>) {
+  const order = ["Firm", "Project", "Payment", "Files", "Plot", "Buyer", "Document", "Extra"];
+  const entries = Object.entries(groups);
+  return entries.sort(([a], [b]) => {
+    const aIndex = order.indexOf(a);
+    const bIndex = order.indexOf(b);
+    return (aIndex === -1 ? order.length : aIndex) - (bIndex === -1 ? order.length : bIndex);
+  });
+}
+
+function ensurePagedDocument(root: HTMLElement) {
+  const directPages = root.querySelectorAll("section[data-ambey-page], section[data-letter-page]");
+  if (!directPages.length) {
+    const existingHtml = root.innerHTML.trim() || "<p><br></p>";
+    root.innerHTML = `<div data-letter-template="custom-template"><section data-letter-page="1">${existingHtml}</section></div>`;
+  }
+  renumberPages(root);
+}
+
+function renumberPages(root: HTMLElement) {
+  const pages = [...root.querySelectorAll<HTMLElement>("section[data-ambey-page], section[data-letter-page]")];
+  pages.forEach((page, index) => {
+    if (page.hasAttribute("data-ambey-page")) page.setAttribute("data-ambey-page", String(index + 1));
+    else page.setAttribute("data-letter-page", String(index + 1));
+  });
+}
+
+function cleanEditorHtml(root: HTMLElement) {
+  const clone = root.cloneNode(true) as HTMLElement;
+  clone.querySelectorAll("[data-editor-page-controls]").forEach((node) => node.remove());
+  return clone.innerHTML;
+}
+
+function templateFieldTypeMap(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {} as Record<string, "TEXT" | "FILE">;
+  const rawFields = (value as Record<string, unknown>).fields;
+  const fields: unknown[] = Array.isArray(rawFields) ? rawFields : [];
+  const map: Record<string, "TEXT" | "FILE"> = {};
+  for (const item of fields) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const field = item as Record<string, unknown>;
+    const key = typeof field.mapping === "string" && field.mapping
+      ? field.mapping
+      : typeof field.key === "string" && field.key
+        ? `manual.${field.key}`
+        : null;
+    const inputType = field.inputType === "FILE" ? "FILE" : "TEXT";
+    if (key) map[key] = inputType;
+  }
+  return map;
+}
+
+function templateVariablesFromBody(
+  body: string,
+  categories: FieldCategory[],
+  fieldTypes: Record<string, "TEXT" | "FILE">,
+) {
+  const matches = [...body.matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g)];
+  const seen = new Set<string>();
+  const availableFields = [
+    ...letterSystemFields.map((field) => ({ id: field.value, label: field.label, mapping: field.value })),
+    ...categories.flatMap((category) => category.fields),
+  ];
+  const byMapping = new Map(availableFields.filter((field) => field.mapping).map((field) => [field.mapping as string, field]));
+
+  return {
+    fields: matches.flatMap((match) => {
+      const placeholder = match[1];
+      if (!placeholder || seen.has(placeholder)) return [];
+      seen.add(placeholder);
+      const manual = placeholder.startsWith("manual.");
+      const key = manual ? placeholder.slice("manual.".length) : placeholder;
+      const field = byMapping.get(placeholder);
+      return [{
+        id: field?.id ?? placeholder,
+        label: field?.label ?? humanizeTemplateKey(key),
+        sourceText: match[0],
+        key,
+        mapping: manual ? null : placeholder,
+        inputType: fieldTypes[placeholder] ?? "TEXT",
+      }];
+    }),
+  };
+}
+
+function humanizeTemplateKey(value: string) {
+  return value
+    .split(".")
+    .pop()
+    ?.replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase()) ?? value;
+}
+
 export function HtmlTemplateEditor({
   projectId,
   templates: initialTemplates,
@@ -109,10 +211,19 @@ export function HtmlTemplateEditor({
   const [type, setType] = useState("allotment_letter");
   const [loading, setLoading] = useState<"save" | "activate" | "delete" | "load" | "">("");
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
-  const [fieldsOpen, setFieldsOpen] = useState(true);
-  const [addFieldOpen, setAddFieldOpen] = useState(false);
   const [initialized, setInitialized] = useState(false);
+  const [fieldTypeOverrides, setFieldTypeOverrides] = useState<Record<string, "TEXT" | "FILE">>({});
   const groups = groupedFields(categories);
+  const orderedGroups = useMemo(() => preferredFieldGroups(groups), [groups]);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
+    Firm: true,
+    Project: true,
+    Payment: true,
+    Files: true,
+    Plot: true,
+    Buyer: true,
+    Document: true,
+  });
 
   async function fetchDefaultBody(letterType: string): Promise<string | null> {
     try {
@@ -134,7 +245,11 @@ export function HtmlTemplateEditor({
       setSelectedId(active.id);
       setName(active.name);
       setType(active.type);
-      if (editorRef.current) editorRef.current.innerHTML = active.body;
+      setFieldTypeOverrides(templateFieldTypeMap(active.variables));
+      if (editorRef.current) {
+        editorRef.current.innerHTML = active.body;
+        prepareEditorSurface();
+      }
     } else {
       const loadType = active?.type ?? "allotment_letter";
       setType(loadType);
@@ -143,7 +258,10 @@ export function HtmlTemplateEditor({
         setName(active.name);
       }
       fetchDefaultBody(loadType).then((body) => {
-        if (body && editorRef.current) editorRef.current.innerHTML = body;
+        if (body && editorRef.current) {
+          editorRef.current.innerHTML = body;
+          prepareEditorSurface();
+        }
       });
     }
   }, [initialized, initialTemplates, projectId]);
@@ -153,34 +271,48 @@ export function HtmlTemplateEditor({
     setName(template.name);
     setType(template.type);
     setMessage(null);
+    setFieldTypeOverrides(templateFieldTypeMap(template.variables));
     if (isRealBody(template.body)) {
-      if (editorRef.current) editorRef.current.innerHTML = template.body;
+      if (editorRef.current) {
+        editorRef.current.innerHTML = template.body;
+        prepareEditorSurface();
+      }
     } else {
       fetchDefaultBody(template.type).then((body) => {
-        if (body && editorRef.current) editorRef.current.innerHTML = body;
+        if (body && editorRef.current) {
+          editorRef.current.innerHTML = body;
+          prepareEditorSurface();
+        }
       });
     }
-  }, [projectId]);
+  }, []);
 
   function newTemplate() {
     setSelectedId(null);
     setName("Allotment Letter");
     setType("allotment_letter");
     setMessage(null);
+    setFieldTypeOverrides({});
     fetchDefaultBody("allotment_letter").then((body) => {
-      if (body && editorRef.current) editorRef.current.innerHTML = body;
+      if (body && editorRef.current) {
+        editorRef.current.innerHTML = body;
+        prepareEditorSurface();
+      }
     });
   }
 
   async function loadDefault() {
     setLoading("load");
     const body = await fetchDefaultBody(type);
-    if (body && editorRef.current) editorRef.current.innerHTML = body;
+    if (body && editorRef.current) {
+      editorRef.current.innerHTML = body;
+      prepareEditorSurface();
+    }
     setLoading("");
   }
 
   async function save() {
-    const body = editorRef.current?.innerHTML ?? "";
+    const body = editorRef.current ? cleanEditorHtml(editorRef.current) : "";
     if (!body.trim()) {
       setMessage({ kind: "error", text: "Template body is empty." });
       return;
@@ -190,7 +322,7 @@ export function HtmlTemplateEditor({
     const res = await fetch(`/api/v1/projects/${projectId}/letter-templates`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: name.trim(), type, body }),
+      body: JSON.stringify({ name: name.trim(), type, body, variables: templateVariablesFromBody(body, categories, fieldTypeOverrides) }),
     });
     const json = await res.json();
     setLoading("");
@@ -248,6 +380,75 @@ export function HtmlTemplateEditor({
     globalThis.document.execCommand("insertText", false, `{{${value}}}`);
   }
 
+  function prepareEditorSurface() {
+    const root = editorRef.current;
+    if (!root) return;
+    ensurePagedDocument(root);
+    injectPageControls(root);
+  }
+
+  function injectPageControls(root: HTMLElement) {
+    root.querySelectorAll("[data-editor-page-controls]").forEach((node) => node.remove());
+    const pages = [...root.querySelectorAll<HTMLElement>("section[data-ambey-page], section[data-letter-page]")];
+    pages.forEach((page, index) => {
+      const controls = globalThis.document.createElement("div");
+      controls.setAttribute("data-editor-page-controls", "true");
+      controls.setAttribute("contenteditable", "false");
+      controls.className = "mb-3 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-sm";
+
+      const title = globalThis.document.createElement("span");
+      title.className = "font-medium text-slate-700";
+      title.textContent = `Page ${index + 1}`;
+      controls.appendChild(title);
+
+      const actions = globalThis.document.createElement("div");
+      actions.className = "flex items-center gap-2";
+
+      const beforeButton = globalThis.document.createElement("button");
+      beforeButton.type = "button";
+      beforeButton.className = "rounded-md border border-slate-200 px-2 py-1 hover:bg-slate-50";
+      beforeButton.textContent = "Add page before";
+      beforeButton.addEventListener("click", () => insertPage(index, "before"));
+
+      const afterButton = globalThis.document.createElement("button");
+      afterButton.type = "button";
+      afterButton.className = "rounded-md border border-slate-200 px-2 py-1 hover:bg-slate-50";
+      afterButton.textContent = "Add page after";
+      afterButton.addEventListener("click", () => insertPage(index, "after"));
+
+      actions.appendChild(beforeButton);
+      actions.appendChild(afterButton);
+      controls.appendChild(actions);
+      page.parentElement?.insertBefore(controls, page);
+    });
+  }
+
+  function insertPage(pageIndex: number, position: "before" | "after") {
+    const root = editorRef.current;
+    if (!root) return;
+    ensurePagedDocument(root);
+    const pages = [...root.querySelectorAll<HTMLElement>("section[data-ambey-page], section[data-letter-page]")];
+    const target = pages[pageIndex];
+    if (!target || !target.parentElement) return;
+    const page = globalThis.document.createElement("section");
+    if (target.hasAttribute("data-ambey-page")) page.setAttribute("data-ambey-page", "0");
+    else page.setAttribute("data-letter-page", "0");
+    page.innerHTML = "<p><br></p>";
+    if (position === "before") target.parentElement.insertBefore(page, target);
+    else target.parentElement.insertBefore(page, target.nextSibling);
+    renumberPages(root);
+    injectPageControls(root);
+    const paragraph = page.querySelector("p");
+    if (paragraph) {
+      const range = globalThis.document.createRange();
+      range.selectNodeContents(paragraph);
+      range.collapse(true);
+      const selection = globalThis.window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }
+  }
+
   async function refreshCategories() {
     try {
       const res = await fetch("/api/v1/settings/letter-fields");
@@ -263,57 +464,13 @@ export function HtmlTemplateEditor({
     } catch {}
   }
 
-  return (
-    <div className="flex flex-col gap-6 lg:flex-row">
-      {/* Template list sidebar */}
-      <div className="w-full shrink-0 lg:w-72">
-        <button
-          onClick={newTemplate}
-          className="mb-3 flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 py-2.5 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-800"
-        >
-          <Plus className="h-4 w-4" /> New template
-        </button>
-        <div className="space-y-2">
-          {templates.map((t) => (
-            <div
-              key={t.id}
-              onClick={() => selectTemplate(t)}
-              className={`cursor-pointer rounded-lg border p-3 text-sm transition ${
-                selectedId === t.id
-                  ? "border-blue-400 bg-blue-50 ring-1 ring-blue-200"
-                  : "border-slate-200 bg-white hover:border-slate-300"
-              }`}
-            >
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-slate-800 truncate">{t.name}</span>
-                <div className="flex items-center gap-1.5">
-                  {t.active && (
-                    <span className="inline-flex items-center gap-0.5 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700">
-                      <Check className="h-3 w-3" /> Active
-                    </span>
-                  )}
-                  <button
-                    onClick={(e) => { e.stopPropagation(); deleteTemplate(t.id); }}
-                    className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
-                    title="Delete"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-              <div className="mt-1 text-xs text-slate-500">
-                {LETTER_TYPES.find((lt) => lt.value === t.type)?.label ?? t.type}
-              </div>
-            </div>
-          ))}
-          {templates.length === 0 && (
-            <p className="text-center text-xs text-slate-400 py-4">No templates yet. Create one or load a default.</p>
-          )}
-        </div>
-      </div>
+  useEffect(() => {
+    prepareEditorSurface();
+  }, [templates]);
 
-      {/* Editor area */}
-      <div className="flex-1 min-w-0">
+  return (
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+      <div className="min-w-0">
         {/* Name + type row */}
         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end">
           <div className="flex-1">
@@ -338,6 +495,14 @@ export function HtmlTemplateEditor({
             </select>
           </div>
           <button
+            onClick={save}
+            disabled={loading === "save"}
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
+          >
+            {loading === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Save template
+          </button>
+          <button
             onClick={loadDefault}
             disabled={loading === "load"}
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
@@ -360,64 +525,6 @@ export function HtmlTemplateEditor({
           </button>
         </div>
 
-        {/* Field picker panel */}
-        <div className="mb-3 rounded-lg border border-slate-200 bg-white">
-          <button
-            onClick={() => setFieldsOpen((v) => !v)}
-            className="flex w-full items-center justify-between px-4 py-2.5 text-left"
-          >
-            <span className="text-sm font-semibold text-slate-700">
-              Insert Fields
-              <span className="ml-2 font-normal text-slate-400">Click any field below to add it to your letter</span>
-            </span>
-            {fieldsOpen ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
-          </button>
-          {fieldsOpen && (
-            <div className="border-t border-slate-100 px-4 pb-4 pt-3">
-              {Object.entries(groups).map(([category, fields]) => {
-                const color = CATEGORY_COLORS[category] ?? DEFAULT_COLOR;
-                return (
-                  <div key={category} className="mb-3 last:mb-0">
-                    <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">{category}</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {fields.map((field) => (
-                        <button
-                          key={field.value}
-                          onClick={() => insertField(field.value)}
-                          className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition hover:shadow-sm active:scale-95 ${color.bg} ${color.text} ${color.ring}`}
-                          title={`Inserts {{${field.value}}} — auto-fills with ${field.label.toLowerCase()}`}
-                        >
-                          {field.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-              <div className="mt-3 border-t border-slate-100 pt-3">
-                {addFieldOpen ? (
-                  <AddCustomFieldInline
-                    categories={categories}
-                    onCreated={(mapping) => {
-                      refreshCategories();
-                      setAddFieldOpen(false);
-                      if (mapping) insertField(mapping);
-                    }}
-                    onClose={() => setAddFieldOpen(false)}
-                  />
-                ) : (
-                  <button
-                    onClick={() => setAddFieldOpen(true)}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-slate-300 px-3 py-1 text-xs font-medium text-slate-500 transition hover:border-slate-400 hover:text-slate-700"
-                  >
-                    <Plus className="h-3 w-3" /> Add your own field
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
         {/* Editor */}
         <section className="rounded-2xl border border-slate-200 bg-slate-200/70 p-3 shadow-inner md:p-6">
           <div
@@ -427,22 +534,14 @@ export function HtmlTemplateEditor({
             suppressHydrationWarning
             className="letter-paper-editor"
             style={{ minHeight: "600px" }}
+            onInput={prepareEditorSurface}
           />
         </section>
         <p className="mt-2 text-xs text-slate-400">
           Text like <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px]">{`{{buyer name}}`}</code> will be replaced automatically with actual details when generating the letter.
         </p>
 
-        {/* Actions */}
         <div className="mt-4 flex flex-wrap items-center gap-3">
-          <button
-            onClick={save}
-            disabled={loading === "save"}
-            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:opacity-50"
-          >
-            {loading === "save" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            Save template
-          </button>
           {selectedId && !templates.find((t) => t.id === selectedId)?.active && (
             <button
               onClick={() => activate(selectedId)}
@@ -453,13 +552,100 @@ export function HtmlTemplateEditor({
               Activate
             </button>
           )}
-          {message && (
-            <span className={`text-sm ${message.kind === "success" ? "text-green-600" : "text-red-600"}`}>
-              {message.text}
-            </span>
-          )}
+          {message ? <span className={`text-sm ${message.kind === "success" ? "text-green-600" : "text-red-600"}`}>{message.text}</span> : null}
         </div>
       </div>
+
+      <aside className="space-y-4">
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <button
+            onClick={newTemplate}
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 py-2.5 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-800"
+          >
+            <Plus className="h-4 w-4" /> New template
+          </button>
+          <div className="mt-3 space-y-2">
+            {templates.map((t) => (
+              <div
+                key={t.id}
+                onClick={() => selectTemplate(t)}
+                className={`cursor-pointer rounded-lg border p-3 text-sm transition ${
+                  selectedId === t.id
+                    ? "border-blue-400 bg-blue-50 ring-1 ring-blue-200"
+                    : "border-slate-200 bg-white hover:border-slate-300"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <span className="truncate font-medium text-slate-800">{t.name}</span>
+                  <div className="flex items-center gap-1.5">
+                    {t.active ? <span className="inline-flex items-center gap-0.5 rounded-full bg-green-100 px-2 py-0.5 text-[10px] font-semibold text-green-700"><Check className="h-3 w-3" /> Active</span> : null}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); deleteTemplate(t.id); }}
+                      className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </div>
+                <div className="mt-1 text-xs text-slate-500">{LETTER_TYPES.find((lt) => lt.value === t.type)?.label ?? t.type}</div>
+              </div>
+            ))}
+            {templates.length === 0 ? <p className="py-4 text-center text-xs text-slate-400">No templates yet. Create one or load a default.</p> : null}
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="mb-3 text-sm font-semibold text-slate-700">Create a new field</div>
+          <AddCustomFieldInline
+            categories={categories}
+            onCreated={({ mapping, inputType }) => {
+              setFieldTypeOverrides((current) => ({ ...current, [mapping]: inputType }));
+              refreshCategories();
+              if (mapping) insertField(mapping);
+            }}
+            onClose={() => undefined}
+            hideClose
+          />
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="mb-3 text-sm font-semibold text-slate-700">Insert fields</div>
+          <div className="space-y-2">
+            {orderedGroups.map(([category, fields]) => {
+              const color = CATEGORY_COLORS[category] ?? DEFAULT_COLOR;
+              const isOpen = openGroups[category] ?? false;
+              return (
+                <div key={category} className="rounded-lg border border-slate-200">
+                  <button
+                    onClick={() => setOpenGroups((prev) => ({ ...prev, [category]: !isOpen }))}
+                    className="flex w-full items-center justify-between px-3 py-2 text-left"
+                  >
+                    <span className="text-sm font-medium text-slate-800">{category}</span>
+                    {isOpen ? <ChevronUp className="h-4 w-4 text-slate-400" /> : <ChevronDown className="h-4 w-4 text-slate-400" />}
+                  </button>
+                  {isOpen ? (
+                    <div className="border-t border-slate-100 px-3 py-3">
+                      <div className="flex flex-wrap gap-1.5">
+                        {fields.map((field) => (
+                          <button
+                            key={field.value}
+                            onClick={() => insertField(field.value)}
+                            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ring-1 ring-inset transition hover:shadow-sm active:scale-95 ${color.bg} ${color.text} ${color.ring}`}
+                            title={`Inserts {{${field.value}}}`}
+                          >
+                            {field.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </aside>
     </div>
   );
 }
@@ -468,13 +654,16 @@ function AddCustomFieldInline({
   categories,
   onCreated,
   onClose,
+  hideClose = false,
 }: {
   categories: FieldCategory[];
-  onCreated: (mapping: string | null) => void;
+  onCreated: (result: { mapping: string; inputType: "TEXT" | "FILE" }) => void;
   onClose: () => void;
+  hideClose?: boolean;
 }) {
   const [label, setLabel] = useState("");
   const [autofill, setAutofill] = useState("");
+  const [inputType, setInputType] = useState<"TEXT" | "FILE">("TEXT");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -482,52 +671,62 @@ function AddCustomFieldInline({
 
   async function handleCreate() {
     if (!label.trim()) { setError("Please enter a name for this field."); return; }
-    if (!customCategory) { setError("No category available."); return; }
     setSaving(true);
     setError("");
     try {
       const fieldMapping = autofill || `manual.${label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_")}`;
-      const res = await fetch("/api/v1/settings/letter-fields", {
+      const category = customCategory ?? await requestJson<{ id: string; name: string }>("/api/v1/settings/letter-fields?kind=category", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ categoryId: customCategory.id, label: label.trim(), mapping: fieldMapping }),
+        body: JSON.stringify({ name: "Extra" }),
       });
-      const json = await res.json();
-      if (!res.ok) { setError(json.error ?? json.data?.error ?? "Could not create field."); setSaving(false); return; }
-      onCreated(fieldMapping);
-    } catch {
-      setError("Something went wrong. Please try again.");
+      await requestJson("/api/v1/settings/letter-fields", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ categoryId: category.id, label: label.trim(), mapping: fieldMapping }),
+      });
+      setLabel("");
+      setAutofill("");
+      setInputType("TEXT");
+      setSaving(false);
+      onCreated({ mapping: fieldMapping, inputType });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Something went wrong. Please try again.");
       setSaving(false);
     }
   }
 
   return (
-    <div className="rounded-lg border border-blue-100 bg-blue-50/40 p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-xs font-semibold text-slate-700">Create a new field</span>
-        <button onClick={onClose} className="rounded p-0.5 text-slate-400 hover:text-slate-600">
-          <X className="h-3.5 w-3.5" />
-        </button>
-      </div>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-        <div className="flex-1">
-          <label className="mb-0.5 block text-[11px] text-slate-500">Field name</label>
+    <div className="rounded-xl border border-blue-100 bg-blue-50/40 p-4">
+      {!hideClose ? (
+        <div className="mb-3 flex justify-end">
+          <button onClick={onClose} className="rounded p-0.5 text-slate-400 hover:text-slate-600"><X className="h-3.5 w-3.5" /></button>
+        </div>
+      ) : null}
+
+      <div className="space-y-3">
+        <div className="grid gap-2 sm:grid-cols-[92px_minmax(0,1fr)] sm:items-center">
+          <label className="text-xs font-medium text-slate-600">Field name</label>
           <input
             type="text"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             placeholder="e.g. Witness Name, Stamp Number"
-            className="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
             onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); }}
             autoFocus
           />
         </div>
-        <div className="flex-1">
-          <label className="mb-0.5 block text-[11px] text-slate-500">Auto-fill from <span className="text-slate-400">(or leave for manual entry)</span></label>
+
+        <div className="grid gap-2 sm:grid-cols-[92px_minmax(0,1fr)] sm:items-center">
+          <div className="text-xs font-medium leading-5 text-slate-600">
+            <div>Auto-fill from</div>
+            <div className="text-slate-400">(or leave for manual entry)</div>
+          </div>
           <select
             value={autofill}
             onChange={(e) => setAutofill(e.target.value)}
-            className="w-full rounded-md border border-slate-300 px-2.5 py-1.5 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
           >
             <option value="">I&apos;ll fill this myself each time</option>
             {AUTOFILL_OPTIONS.map((group) => (
@@ -539,10 +738,23 @@ function AddCustomFieldInline({
             ))}
           </select>
         </div>
+
+        <div className="grid gap-2 sm:grid-cols-[92px_minmax(0,1fr)] sm:items-center">
+          <label className="text-xs font-medium text-slate-600">Field type</label>
+          <select
+            value={inputType}
+            onChange={(e) => setInputType(e.target.value === "FILE" ? "FILE" : "TEXT")}
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-200"
+          >
+            <option value="TEXT">Text</option>
+            <option value="FILE">Upload file</option>
+          </select>
+        </div>
+
         <button
           onClick={handleCreate}
           disabled={saving}
-          className="inline-flex items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
         >
           {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
           Add

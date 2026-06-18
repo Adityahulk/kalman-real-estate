@@ -34,11 +34,13 @@ type ShellUser = {
   email: string;
   role: string;
   tenantName: string;
+  tenantLogoDataUrl: string | null;
 };
 
 type ShellFirm = {
   id: string;
   name: string;
+  logoDataUrl?: string | null;
 };
 
 const moduleNav = [
@@ -166,8 +168,12 @@ export function AppShell({
         } ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
       >
         <div className="flex h-16 items-center gap-3 border-b border-slate-200 px-4">
-          <Link href="/app" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-navy-200 bg-navy-100 text-navy-900">
-            <Building2 size={19} />
+          <Link href="/app" className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-navy-200 bg-navy-100 text-navy-900">
+            {user.tenantLogoDataUrl ? (
+              <img className="h-full w-full object-contain" src={user.tenantLogoDataUrl} alt={`${user.tenantName} logo`} />
+            ) : (
+              <Building2 size={19} />
+            )}
           </Link>
           {!collapsed ? (
             <div className="min-w-0">
@@ -276,7 +282,10 @@ export function AppShell({
                       type="button"
                       onClick={() => void switchFirm(firm.id)}
                     >
-                      <span className="truncate">{firm.name}</span>
+                      <span className="flex min-w-0 items-center gap-2">
+                        {firm.logoDataUrl ? <img className="h-6 w-6 shrink-0 rounded-md border border-slate-200 object-contain bg-white" src={firm.logoDataUrl} alt="" /> : <Building2 size={15} className="shrink-0 text-slate-400" />}
+                        <span className="truncate">{firm.name}</span>
+                      </span>
                       {switchingFirmId === firm.id ? <span className="text-xs text-slate-500">Opening...</span> : null}
                     </button>
                   ))}

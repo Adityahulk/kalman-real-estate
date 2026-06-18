@@ -4,11 +4,13 @@ import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
 import { ambeyAllotmentTemplate, transferLetterTemplate, registryStatusLetterTemplate } from "./letter-templates";
+import { letterSystemFields } from "@/lib/letter-system-fields";
 
 export const saveProjectLetterTemplateSchema = z.object({
   name: z.string().min(2).max(120),
   type: z.enum(["allotment_letter", "transfer_letter", "registry_status_letter"]).default("allotment_letter"),
   body: z.string().min(20).optional(),
+  variables: z.unknown().optional(),
 });
 
 export function defaultLetterBody(type: string): string {
@@ -20,6 +22,11 @@ export function defaultLetterBody(type: string): string {
 export async function saveProjectLetterTemplate(context: RequestContext, projectId: string, input: z.infer<typeof saveProjectLetterTemplateSchema>) {
   await prisma.project.findFirstOrThrow({ where: { id: projectId, tenantId: context.tenantId } });
   const body = input.body?.trim() || defaultLetterBody(input.type);
+  const fieldDefinitions = await prisma.letterFieldDefinition.findMany({
+    where: { category: { tenantId: context.tenantId } },
+    select: { id: true, label: true, mapping: true },
+  });
+  const variables = input.variables ?? { fields: extractTemplateFieldsFromBody(body, fieldDefinitions) };
   await prisma.documentTemplate.updateMany({
     where: { tenantId: context.tenantId, projectId, type: input.type, active: true },
     data: { active: false },
@@ -31,6 +38,7 @@ export async function saveProjectLetterTemplate(context: RequestContext, project
       name: input.name,
       type: input.type,
       body,
+      variables: variables as Prisma.InputJsonValue,
       active: true,
     },
   });
@@ -51,12 +59,54 @@ const templateFieldSchema = z.object({
   sourceText: z.string().min(1).max(500).optional(),
   key: z.string().min(1).max(100),
   mapping: z.string().max(120).nullable(),
+  inputType: z.enum(["TEXT", "FILE"]).default("TEXT"),
 });
 
 export function templateFields(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
   const result = z.array(templateFieldSchema).safeParse((value as Record<string, unknown>).fields);
   return result.success ? result.data : [];
+}
+
+export function extractTemplateFieldsFromBody(
+  body: string | null | undefined,
+  availableFields: Array<{ id: string; label: string; mapping: string | null }> = [],
+) {
+  if (!body) return [];
+  const matches = [...body.matchAll(/\{\{\s*([\w.-]+)\s*\}\}/g)];
+  const seen = new Set<string>();
+  const definitionsByMapping = new Map(
+    availableFields
+      .filter((field) => field.mapping)
+      .map((field) => [field.mapping as string, field]),
+  );
+
+  return matches.flatMap((match) => {
+    const placeholder = match[1];
+    if (!placeholder || seen.has(placeholder)) return [];
+    seen.add(placeholder);
+
+    const systemField = letterSystemFields.find((field) => field.value === placeholder);
+    const definedField = definitionsByMapping.get(placeholder);
+    const manual = placeholder.startsWith("manual.");
+    const key = manual ? placeholder.slice("manual.".length) : placeholder;
+    return [{
+      id: definedField?.id ?? placeholder,
+      label: definedField?.label ?? systemField?.label ?? humanizeTemplateKey(key),
+      sourceText: match[0],
+      key,
+      mapping: manual ? null : placeholder,
+      inputType: "TEXT" as const,
+    }];
+  });
+}
+
+function humanizeTemplateKey(value: string) {
+  return value
+    .split(".")
+    .pop()
+    ?.replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase()) ?? value;
 }
 
 export async function activateTemplate(context: RequestContext, projectId: string, templateId: string) {

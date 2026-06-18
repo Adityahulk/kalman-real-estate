@@ -68,13 +68,22 @@ export function ManualPlotForm({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const trimmedCode = code.trim();
+    if (!trimmedCode) {
+      setMessage("Plot code is required.");
+      return;
+    }
+    if (areaSqYards.trim() && Number.isNaN(Number(areaSqYards))) {
+      setMessage("Plot area must be a valid number.");
+      return;
+    }
     setLoading(true);
     setMessage("");
     const response = await fetch(plot?.id ? `/api/v1/plots/${plot.id}` : `/api/v1/projects/${projectId}/plots`, {
       method: plot?.id ? "PATCH" : "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        code,
+        code: trimmedCode,
         areaSqYards: areaSqYards ? Number(areaSqYards) : undefined,
         primeLocation: primeLocation || undefined,
         allottedBy: allottedBy || undefined,
@@ -85,10 +94,10 @@ export function ManualPlotForm({
     const body = await response.json();
     setLoading(false);
     if (!response.ok) {
-      setMessage(body.error ?? "Plot creation failed");
+      setMessage(describeApiError(body, plot?.id ? "Could not save plot details." : "Could not create plot."));
       return;
     }
-    const savedCode = body.data.plot?.code ?? body.data.code ?? code;
+    const savedCode = body.data.plot?.code ?? body.data.code ?? trimmedCode;
     router.push(plot?.id ? `/app/projects/${projectId}/plots/${plot.id}` : `/app/projects/${projectId}/ownership?created=${encodeURIComponent(savedCode)}`);
   }
 
@@ -177,6 +186,15 @@ function boundaryText(boundaries: unknown, key: string) {
   if (!boundaries || typeof boundaries !== "object" || Array.isArray(boundaries)) return "";
   const value = (boundaries as Record<string, unknown>)[key];
   return typeof value === "string" ? value : "";
+}
+
+function describeApiError(body: unknown, fallback: string) {
+  if (!body || typeof body !== "object") return fallback;
+  const payload = body as { error?: unknown; issues?: Array<{ path?: string; message?: string }> };
+  if (typeof payload.error === "string" && payload.error.trim()) return payload.error;
+  const [firstIssue] = Array.isArray(payload.issues) ? payload.issues : [];
+  if (firstIssue?.message) return firstIssue.path ? `${firstIssue.path}: ${firstIssue.message}` : firstIssue.message;
+  return fallback;
 }
 
 export function ManualSiteAssetForm({ projectId }: { projectId: string }) {

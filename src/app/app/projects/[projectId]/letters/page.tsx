@@ -16,7 +16,7 @@ export default async function ProjectLettersPage({ params }: { params: { project
     prisma.documentTemplate.findMany({
       where: { tenantId: session.tenantId, projectId: project.id },
       orderBy: { createdAt: "desc" },
-      select: { id: true, name: true, type: true, body: true, active: true, createdAt: true },
+      select: { id: true, name: true, type: true, body: true, variables: true, active: true, createdAt: true },
     }),
     listLetterFieldSettings(session.tenantId),
   ]);
@@ -37,6 +37,7 @@ export default async function ProjectLettersPage({ params }: { params: { project
           name: t.name,
           type: t.type,
           body: t.body,
+          variables: t.variables,
           active: t.active,
           createdAt: t.createdAt.toISOString(),
         }))}

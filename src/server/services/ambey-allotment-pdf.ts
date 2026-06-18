@@ -1,6 +1,7 @@
 import { PDFDocument, PDFFont, PDFPage, StandardFonts, rgb } from "pdf-lib";
 
 type RenderContext = {
+  pdf: PDFDocument;
   page: PDFPage;
   font: PDFFont;
   bold: PDFFont;
@@ -30,13 +31,14 @@ export async function buildLetterStudioPdfFromHtml(html: string) {
   for (const section of sections) {
     const page = pdf.addPage([PAGE_WIDTH, PAGE_HEIGHT]);
     const context: RenderContext = {
+      pdf,
       page,
       font,
       bold,
       italic,
       y: Number(section.attrs["data-top"] ?? 790),
     };
-    renderSection(context, section.html);
+    await renderSection(context, section.html);
   }
 
   return Buffer.from(await pdf.save());
@@ -51,7 +53,7 @@ function extractSections(html: string) {
   return sections.length ? sections : [{ attrs: { "data-top": "790" }, html }];
 }
 
-function renderSection(context: RenderContext, html: string) {
+async function renderSection(context: RenderContext, html: string) {
   const blockPattern = /<(h1|h2|p|table|div)\b([^>]*)>([\s\S]*?)<\/\1>/gi;
   for (const match of html.matchAll(blockPattern)) {
     const tag = match[1].toLowerCase();
@@ -64,7 +66,7 @@ function renderSection(context: RenderContext, html: string) {
     } else if (tag === "table") {
       drawTable(context, body, attrs);
     } else if (tag === "div") {
-      drawSpecialBox(context, body, attrs);
+      await drawSpecialBox(context, body, attrs);
     }
   }
 }
@@ -160,8 +162,12 @@ function drawTable(context: RenderContext, html: string, attrs: Record<string, s
   context.y = y - 18;
 }
 
-function drawSpecialBox(context: RenderContext, html: string, attrs: Record<string, string>) {
+async function drawSpecialBox(context: RenderContext, html: string, attrs: Record<string, string>) {
   const className = attrs.class ?? "";
+  if (className.includes("attachment-block")) {
+    await drawAttachmentBlock(context, html);
+    return;
+  }
   if (className.includes("site-plan-box")) {
     const x = 365;
     const y = 330;
@@ -193,6 +199,48 @@ function drawSpecialBox(context: RenderContext, html: string, attrs: Record<stri
       textY -= 12;
     }
   }
+}
+
+async function drawAttachmentBlock(context: RenderContext, html: string) {
+  const srcMatch = html.match(/<img\b[^>]*src=["']([^"']+)["']/i);
+  const altMatch = html.match(/<img\b[^>]*alt=["']([^"']+)["']/i);
+  const label = altMatch?.[1] ?? "Supporting document";
+  if (!srcMatch) {
+    const box = { x: LEFT, y: Math.max(110, context.y - 120), width: TEXT_WIDTH, height: 88 };
+    context.page.drawRectangle({ ...box, borderWidth: 0.8, borderColor: rgb(0.72, 0.72, 0.72) });
+    context.page.drawText(label, { x: LEFT + 12, y: box.y + box.height - 28, size: BODY_SIZE, font: context.bold, color: rgb(0.12, 0.15, 0.18) });
+    context.y = box.y - 16;
+    return;
+  }
+
+  const imageBytes = decodeDataUrl(srcMatch[1]);
+  if (!imageBytes) {
+    const box = { x: LEFT, y: Math.max(110, context.y - 120), width: TEXT_WIDTH, height: 88 };
+    context.page.drawRectangle({ ...box, borderWidth: 0.8, borderColor: rgb(0.72, 0.72, 0.72) });
+    context.page.drawText(label, { x: LEFT + 12, y: box.y + box.height - 28, size: BODY_SIZE, font: context.bold, color: rgb(0.12, 0.15, 0.18) });
+    context.y = box.y - 16;
+    return;
+  }
+
+  const image = imageBytes.mimeType === "image/png"
+    ? await context.pdf.embedPng(imageBytes.bytes)
+    : await context.pdf.embedJpg(imageBytes.bytes);
+  const maxWidth = TEXT_WIDTH - 24;
+  const maxHeight = Math.min(260, Math.max(100, context.y - 140));
+  const scale = Math.min(maxWidth / image.width, maxHeight / image.height, 1);
+  const width = image.width * scale;
+  const height = image.height * scale;
+  const boxHeight = height + 40;
+  const box = { x: LEFT, y: Math.max(110, context.y - boxHeight - 12), width: TEXT_WIDTH, height: boxHeight };
+  context.page.drawRectangle({ ...box, borderWidth: 0.8, borderColor: rgb(0.72, 0.72, 0.72) });
+  context.page.drawText(label, { x: LEFT + 12, y: box.y + box.height - 24, size: BODY_SIZE, font: context.bold, color: rgb(0.12, 0.15, 0.18) });
+  context.page.drawImage(image, {
+    x: box.x + (box.width - width) / 2,
+    y: box.y + 12,
+    width,
+    height,
+  });
+  context.y = box.y - 16;
 }
 
 function drawCompass(page: PDFPage, font: PDFFont, cx: number, cy: number) {
@@ -261,4 +309,13 @@ function decodeHtml(text: string) {
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'");
+}
+
+function decodeDataUrl(value: string) {
+  const match = value.match(/^data:(image\/(?:png|jpeg));base64,(.+)$/i);
+  if (!match) return null;
+  return {
+    mimeType: match[1].toLowerCase(),
+    bytes: Buffer.from(match[2], "base64"),
+  };
 }

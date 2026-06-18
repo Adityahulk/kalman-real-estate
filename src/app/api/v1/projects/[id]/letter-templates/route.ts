@@ -9,7 +9,7 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const templates = await prisma.documentTemplate.findMany({
       where: { tenantId: context.tenantId, projectId: params.id },
       orderBy: { createdAt: "desc" },
-      select: { id: true, name: true, type: true, body: true, active: true, createdAt: true },
+      select: { id: true, name: true, type: true, body: true, variables: true, active: true, createdAt: true },
     });
     return ok(templates);
   } catch (error) {

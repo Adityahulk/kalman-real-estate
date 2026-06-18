@@ -3,6 +3,7 @@ import { z } from "zod";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
+import { sortByPlotCode } from "@/lib/plot-code-sort";
 
 export const createProjectSchema = z.object({
   name: z.string().min(2),
@@ -236,11 +237,11 @@ export async function getProjectReportCsv(context: RequestContext, projectId: st
       },
       registryRecords: { orderBy: { createdAt: "desc" }, take: 1 },
     },
-    orderBy: { code: "asc" },
   });
+  const sortedPlots = sortByPlotCode(plots);
   const documentCounts = await prisma.fileAsset.groupBy({
     by: ["ownerId"],
-    where: { tenantId: context.tenantId, ownerType: "Plot", ownerId: { in: plots.map((plot) => plot.id) }, deletedAt: null },
+    where: { tenantId: context.tenantId, ownerType: "Plot", ownerId: { in: sortedPlots.map((plot) => plot.id) }, deletedAt: null },
     _count: true,
   });
   const documentCountByPlot = new Map(documentCounts.map((item) => [item.ownerId, item._count]));
@@ -250,7 +251,7 @@ export async function getProjectReportCsv(context: RequestContext, projectId: st
     ["City", project.city],
     [],
     ["Plot Number", "Date of Allotment", "Owner Name / Company Status", "Registry Status", "Document Count", "Value INR"],
-    ...plots.map((plot) => {
+    ...sortedPlots.map((plot) => {
       const allotment = plot.ownershipRecords.find((record) => record.kind === "ALLOTMENT");
       const latestOwnership = [...plot.ownershipRecords].reverse()[0];
       return [

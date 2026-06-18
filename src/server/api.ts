@@ -3,7 +3,7 @@ import { Prisma, Role } from "@prisma/client";
 import { z } from "zod";
 import { assertPermission, Permission } from "./rbac";
 import { verifySessionToken } from "./session";
-import { logServerError, namedErrorStatus, prismaStatus } from "./logger";
+import { formatValidationError, logServerError, namedErrorStatus, normalizeZodIssues, prismaStatus } from "./logger";
 
 export type RequestContext = {
   tenantId: string;
@@ -50,7 +50,11 @@ export async function getRequestContext(request: NextRequest, permission?: Permi
 }
 
 export async function parseJson<T extends z.ZodTypeAny>(request: NextRequest, schema: T): Promise<z.output<T>> {
-  const body = await request.json().catch(() => ({}));
+  const body = await request.json().catch(() => {
+    const error = new Error("Request body must be valid JSON.");
+    error.name = "BadRequestError";
+    throw error;
+  });
   return schema.parse(body);
 }
 
@@ -62,11 +66,14 @@ export function created<T>(data: T) {
   return ok(data, { status: 201 });
 }
 
-export function apiError(error: unknown) {
+export function apiError(error: unknown, context: Record<string, unknown> = {}) {
   if (isNextDynamicServerError(error)) throw error;
-  logServerError(error);
+  logServerError(error, context);
   if (error instanceof z.ZodError) {
-    return NextResponse.json({ ok: false, error: "Invalid request", issues: error.issues }, { status: 400 });
+    return NextResponse.json(
+      { ok: false, error: formatValidationError(error), issues: normalizeZodIssues(error) },
+      { status: 400 },
+    );
   }
 
   if (error instanceof Prisma.PrismaClientKnownRequestError) {

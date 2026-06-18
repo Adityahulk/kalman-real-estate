@@ -29,6 +29,31 @@ export async function createOwner(context: RequestContext, input: z.infer<typeof
   return owner;
 }
 
+export async function updateOwner(context: RequestContext, ownerId: string, input: z.infer<typeof ownerSchema>) {
+  const before = await prisma.owner.findFirstOrThrow({
+    where: { id: ownerId, tenantId: context.tenantId },
+  });
+  const owner = await prisma.owner.update({
+    where: { id: ownerId },
+    data: {
+      type: input.type,
+      name: input.name,
+      email: input.email,
+      phone: input.phone,
+      address: input.address,
+      kyc: input.kyc as Prisma.InputJsonValue,
+    },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.UPDATE,
+    entityType: "Owner",
+    entityId: owner.id,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: owner as unknown as Prisma.InputJsonValue,
+  });
+  return owner;
+}
+
 export const allotPlotSchema = z.object({
   ownerId: z.string(),
   amountInr: z.number().nonnegative().optional(),

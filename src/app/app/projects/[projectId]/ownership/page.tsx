@@ -4,6 +4,7 @@ import { PlotStatus } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
 import { BackButton } from "@/components/back-button";
+import { sortByPlotCode } from "@/lib/plot-code-sort";
 import { OwnershipPlotRow } from "./ownership-plot-row";
 
 export const dynamic = "force-dynamic";
@@ -72,7 +73,6 @@ export default async function ProjectOwnershipPage({
       currentOwner: true,
       checklistItems: { select: { progressPct: true } },
     },
-    orderBy: { code: "asc" },
   });
 
   const statusCounts = allProjectPlots.reduce<Record<string, number>>((counts, plot) => {
@@ -87,7 +87,7 @@ export default async function ProjectOwnershipPage({
   for (const letter of generatedLetters) {
     if (!letterByPlot.has(letter.recordId)) letterByPlot.set(letter.recordId, letter);
   }
-  const filteredPlots = plots;
+  const filteredPlots = sortByPlotCode(plots);
 
   return (
     <main className="min-h-[calc(100vh-4rem)] px-4 py-6 lg:px-8">

@@ -13,7 +13,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       where: { id: session.id },
       select: { name: true, email: true },
     }),
-    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true } }),
+    prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true, logoDataUrl: true } }),
     prisma.project.findMany({
       where: { tenantId: session.tenantId },
       orderBy: { updatedAt: "desc" },
@@ -21,7 +21,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     }),
     prisma.userFirmMembership.findMany({
       where: { userId: session.id },
-      include: { tenant: { select: { id: true, name: true } } },
+      include: { tenant: { select: { id: true, name: true, logoDataUrl: true } } },
       orderBy: { createdAt: "asc" },
     }),
   ]);
@@ -33,6 +33,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         email: user?.email ?? session.email,
         role: session.role,
         tenantName: tenant?.name ?? "Builder Workspace",
+        tenantLogoDataUrl: tenant?.logoDataUrl ?? null,
       }}
       projects={projects}
       firms={memberships.map((membership) => membership.tenant)}

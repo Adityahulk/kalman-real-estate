@@ -4,6 +4,7 @@ import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
 import { enqueueDocumentGeneration } from "../jobs";
+import { getObjectResilient } from "../storage";
 import { generatedDocumentStorageKey, putGeneratedObject } from "../storage";
 import { createGeneratedFileAsset } from "./files";
 import { buildGeneratedDocumentPdf, buildGeneratedDocumentPdfFromHtml } from "./document-pdf";
@@ -97,7 +98,8 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
     ?? await prisma.documentTemplate.findFirst({ where: { tenantId: context.tenantId, projectId: null, type: input.type, active: true }, orderBy: { createdAt: "desc" } });
   const hasRealBody = template?.body && template.body.length > 100 && !template.body.includes("data-pdf-layout-template") && !template.body.includes("data-exact-pdf-draft");
   const templateBody = hasRealBody ? template.body : defaultLetterBody(input.type);
-  const { html, missingVariables } = renderTemplate(templateBody, snapshot.variables);
+  const { html, missingVariables, usedFileVariables } = renderTemplate(templateBody, snapshot.variables, snapshot.fileVariables);
+  const draftHtml = usedFileVariables ? html : appendSupportingDocumentPages(html, snapshot.supportingDocumentPages);
 
   const document = await prisma.generatedDocument.create({
     data: {
@@ -111,7 +113,7 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
         templateBody,
         missingVariables,
       } as Prisma.InputJsonValue,
-      editableHtml: html,
+      editableHtml: draftHtml,
       status: DocumentStatus.DRAFT,
       number: documentNumber,
       createdById: context.userId,
@@ -354,7 +356,39 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
   const extraDetails = jsonRecord(ownership?.extraDetails);
   const pricing = jsonRecord(extraDetails.pricing);
   const payments = Array.isArray(extraDetails.payments) ? extraDetails.payments.map(jsonRecord) : [];
+  const allottee = jsonRecord(extraDetails.allottee);
+  const additionalFields = Array.isArray(extraDetails.additionalFields) ? extraDetails.additionalFields.map(jsonRecord) : [];
   const customLetterFields = jsonRecord(extraDetails.customLetterFields);
+  const customLetterFiles = jsonRecord(extraDetails.customLetterFiles);
+  const allotteeFileNames = collectNestedFileNames(
+    Array.isArray(allottee.documents) ? allottee.documents.map(jsonRecord) : [],
+    "files",
+  );
+  const paymentFileNames = collectNestedFileNames(payments, "files");
+  const additionalFieldFileNames = collectNestedFileNames(
+    additionalFields.filter((field) => field.inputType === "FILE"),
+    "files",
+  );
+  const allotteeDocumentFiles = collectNestedFiles(
+    Array.isArray(allottee.documents) ? allottee.documents.map(jsonRecord) : [],
+    "files",
+  );
+  const paymentFiles = collectNestedFiles(payments, "files");
+  const additionalFieldFiles = collectNestedFiles(
+    additionalFields.filter((field) => field.inputType === "FILE"),
+    "files",
+  );
+  const fileVariables: Record<string, string> = {
+    "files.allotteeDocuments": await buildInlineFileMarkup(context.tenantId, allotteeDocumentFiles),
+    "files.paymentDocuments": await buildInlineFileMarkup(context.tenantId, paymentFiles),
+    "files.additionalFields": await buildInlineFileMarkup(context.tenantId, additionalFieldFiles),
+    "files.allSupportingDocuments": await buildInlineFileMarkup(context.tenantId, [...allotteeDocumentFiles, ...paymentFiles, ...additionalFieldFiles]),
+  };
+  for (const [key, value] of Object.entries(customLetterFiles)) {
+    const files = Array.isArray(value) ? value.map(jsonRecord) : [];
+    fileVariables[`manual.${key}`] = await buildInlineFileMarkup(context.tenantId, files);
+  }
+  const supportingDocumentPages = await buildSupportingDocumentPages(context.tenantId, plot.id, plot.currentOwnerId, extraDetails);
   const variables: Record<string, string> = {
     "tenant.name": tenant.name,
     "tenant.address": tenant.region ?? "",
@@ -423,6 +457,10 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "payment.perUnitPrice": pricing.perUnitPrice ? String(pricing.perUnitPrice) : "",
     "payment.modes": payments.map((payment) => String(payment.mode ?? "")).filter(Boolean).join(", "),
     "payment.entries": payments.map((payment) => [payment.mode, payment.amount ? `INR ${payment.amount}` : "", payment.reference].filter(Boolean).join(" - ")).join("; "),
+    "files.allotteeDocuments": allotteeFileNames.join(", "),
+    "files.paymentDocuments": paymentFileNames.join(", "),
+    "files.additionalFields": additionalFieldFileNames.join(", "),
+    "files.allSupportingDocuments": [...allotteeFileNames, ...paymentFileNames, ...additionalFieldFileNames].join(", "),
     "extra.eStampNumber": stringFromKyc(extraDetails, ["eStampNumber"]),
     "extra.witnessDetails": stringFromKyc(extraDetails, ["witnessDetails"]),
     "registry.status": registry?.status ?? "Not started",
@@ -439,20 +477,103 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "witness.place": plot.project.city || "Barnala",
   };
   for (const [key, value] of Object.entries(customLetterFields)) variables[`manual.${key}`] = typeof value === "string" ? value : String(value ?? "");
+  for (const [key, value] of Object.entries(customLetterFiles)) {
+    if (variables[`manual.${key}`]) continue;
+    const files = Array.isArray(value) ? value.map(jsonRecord) : [];
+    variables[`manual.${key}`] = files.map((file) => String(file.fileName ?? "")).filter(Boolean).join(", ");
+  }
 
   return {
     variables,
+    fileVariables,
     plotId: plot.id,
     projectId: plot.projectId,
     ownerId: plot.currentOwnerId,
     ownershipRecordId: ownership?.id ?? null,
     registryRecordId: registry?.id ?? null,
+    supportingDocumentPages,
   };
 }
 
-function renderTemplate(template: string, variables: Record<string, string>) {
+async function buildSupportingDocumentPages(tenantId: string, plotId: string, ownerId: string | null, extraDetails: Record<string, unknown>) {
+  const fileIds = await collectSupportingFileIds(tenantId, plotId, ownerId, extraDetails);
+  if (!fileIds.length) return [];
+  const files = await prisma.fileAsset.findMany({
+    where: { tenantId, id: { in: fileIds }, deletedAt: null },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const pages: string[] = [];
+  for (const file of files) {
+    if (!file.mimeType.startsWith("image/")) continue;
+    try {
+      const bytes = await getObjectResilient(file.storageKey);
+      const dataUri = `data:${file.mimeType};base64,${bytes.toString("base64")}`;
+      pages.push(
+        `<section data-letter-page="0"><h2>Supporting document</h2><p class="center muted">${escapeHtml(file.fileName)}</p><div class="attachment-block"><img src="${dataUri}" alt="${escapeHtml(file.fileName)}" /></div></section>`,
+      );
+    } catch {
+      pages.push(
+        `<section data-letter-page="0"><h2>Supporting document</h2><p class="center muted">${escapeHtml(file.fileName)}</p><p class="center muted">This image could not be loaded for preview.</p></section>`,
+      );
+    }
+  }
+  return pages;
+}
+
+async function collectSupportingFileIds(tenantId: string, plotId: string, ownerId: string | null, extraDetails: Record<string, unknown>) {
+  const ids = new Set<string>();
+  const allottee = jsonRecord(extraDetails.allottee);
+  const documents = Array.isArray(allottee.documents) ? allottee.documents.map(jsonRecord) : [];
+  for (const document of documents) {
+    const files = Array.isArray(document.files) ? document.files.map(jsonRecord) : [];
+    for (const file of files) if (typeof file.id === "string") ids.add(file.id);
+  }
+  const payments = Array.isArray(extraDetails.payments) ? extraDetails.payments.map(jsonRecord) : [];
+  for (const payment of payments) {
+    const files = Array.isArray(payment.files) ? payment.files.map(jsonRecord) : [];
+    for (const file of files) if (typeof file.id === "string") ids.add(file.id);
+  }
+  const customLetterFiles = jsonRecord(extraDetails.customLetterFiles);
+  for (const value of Object.values(customLetterFiles)) {
+    const files = Array.isArray(value) ? value.map(jsonRecord) : [];
+    for (const file of files) if (typeof file.id === "string") ids.add(file.id);
+  }
+  const additionalFields = Array.isArray(extraDetails.additionalFields) ? extraDetails.additionalFields.map(jsonRecord) : [];
+  for (const field of additionalFields) {
+    if (field.inputType !== "FILE") continue;
+    const files = Array.isArray(field.files) ? field.files.map(jsonRecord) : [];
+    for (const file of files) if (typeof file.id === "string") ids.add(file.id);
+  }
+  const fallbackFiles = await prisma.fileAsset.findMany({
+    where: {
+      tenantId,
+      deletedAt: null,
+      OR: [
+        { ownerType: "Plot", ownerId: plotId, categoryKey: "allotment-payment" },
+        { ownerType: "Plot", ownerId: plotId, categoryKey: "allotment-extra" },
+        ...(ownerId ? [{ ownerType: "Owner", ownerId, categoryKey: "allottee-kyc" }] : []),
+      ],
+    },
+    select: { id: true },
+  });
+  for (const file of fallbackFiles) ids.add(file.id);
+  return [...ids];
+}
+
+function appendSupportingDocumentPages(html: string, pages: string[]) {
+  if (!pages.length) return html;
+  return `${html}${pages.join("")}`;
+}
+
+function renderTemplate(template: string, variables: Record<string, string>, fileVariables: Record<string, string> = {}) {
   const missingVariables: string[] = [];
+  let usedFileVariables = false;
   const replaceVariable = (_match: string, key: string) => {
+    if (key in fileVariables) {
+      usedFileVariables = true;
+      return fileVariables[key] || "";
+    }
     const value = variables[key] ?? "";
     if (!value) missingVariables.push(key);
     const escaped = escapeHtml(value);
@@ -464,7 +585,11 @@ function renderTemplate(template: string, variables: Record<string, string>) {
   const html = template
     .replace(fieldMarkerPattern, (_match, id: string) => replaceVariable(_match, `field.${id}`))
     .replace(/\{\{\s*([\w.-]+)\s*\}\}/g, replaceVariable);
-  return { html, missingVariables: [...new Set(missingVariables)] };
+  return {
+    html: normalizeAttachmentPlacement(html),
+    missingVariables: [...new Set(missingVariables)],
+    usedFileVariables,
+  };
 }
 
 
@@ -485,6 +610,61 @@ function escapeHtml(value: string) {
 
 function jsonRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function collectNestedFiles(items: Record<string, unknown>[], key: string) {
+  return items.flatMap((item) => Array.isArray(item[key]) ? item[key].map(jsonRecord) : []);
+}
+
+function collectNestedFileNames(items: Record<string, unknown>[], key: string) {
+  return items.flatMap((item) => {
+    const files = Array.isArray(item[key]) ? item[key].map(jsonRecord) : [];
+    return files.map((file) => String(file.fileName ?? "")).filter(Boolean);
+  });
+}
+
+async function buildInlineFileMarkup(tenantId: string, refs: Record<string, unknown>[]) {
+  const fileIds = refs.map((file) => typeof file.id === "string" ? file.id : "").filter(Boolean);
+  if (!fileIds.length) return "";
+  const assets = await prisma.fileAsset.findMany({
+    where: { tenantId, id: { in: fileIds }, deletedAt: null },
+  });
+  const assetById = new Map(assets.map((asset) => [asset.id, asset]));
+  const blocks: string[] = [];
+
+  for (const ref of refs) {
+    const id = typeof ref.id === "string" ? ref.id : "";
+    const name = typeof ref.fileName === "string" ? ref.fileName : "Uploaded file";
+    const asset = assetById.get(id);
+    if (!asset) continue;
+    if (asset.mimeType.startsWith("image/")) {
+      try {
+        const bytes = await getObjectResilient(asset.storageKey);
+        blocks.push(
+          `<div class="attachment-block inline-attachment-block"><p class="center muted">${escapeHtml(name)}</p><img src="data:${asset.mimeType};base64,${bytes.toString("base64")}" alt="${escapeHtml(name)}" /></div>`,
+        );
+      } catch {
+        blocks.push(`<div class="attachment-block inline-attachment-block"><p class="center muted">${escapeHtml(name)}</p><p class="center muted">This image could not be loaded for preview.</p></div>`);
+      }
+      continue;
+    }
+    blocks.push(`<div class="attachment-block inline-attachment-block"><p class="center muted">${escapeHtml(name)}</p><p class="center muted">Preview not available for this file type.</p></div>`);
+  }
+
+  return blocks.join("");
+}
+
+function normalizeAttachmentPlacement(html: string) {
+  let normalized = html;
+  const paragraphWithBlockPattern = /<p([^>]*)>([\s\S]*?)(<div class="attachment-block inline-attachment-block">[\s\S]*?<\/div>)([\s\S]*?)<\/p>/i;
+  while (paragraphWithBlockPattern.test(normalized)) {
+    normalized = normalized.replace(paragraphWithBlockPattern, (_match, attrs: string, before: string, block: string, after: string) => {
+      const prefix = before.trim() ? `<p${attrs}>${before}</p>` : "";
+      const suffix = after.trim() ? `<p${attrs}>${after}</p>` : "";
+      return `${prefix}${block}${suffix}`;
+    });
+  }
+  return normalized.replace(/<p([^>]*)>\s*(<div class="attachment-block inline-attachment-block">[\s\S]*?<\/div>)\s*<\/p>/gi, "$2");
 }
 
 function stringFromKyc(record: Record<string, unknown>, keys: string[]) {

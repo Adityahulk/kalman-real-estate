@@ -17,8 +17,8 @@ function errorDetails(error: unknown) {
     return {
       status: 400,
       type: "ValidationError",
-      message: "Invalid request",
-      issues: error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })),
+      message: formatValidationError(error),
+      issues: normalizeZodIssues(error),
     };
   }
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
@@ -40,6 +40,30 @@ function errorDetails(error: unknown) {
     };
   }
   return { status: 500, type: "UnknownError", message: String(error) };
+}
+
+export function normalizeZodIssues(error: z.ZodError) {
+  return error.issues.map((issue) => ({
+    path: issue.path.join("."),
+    message: issue.message,
+    code: issue.code,
+  }));
+}
+
+export function formatValidationError(error: z.ZodError) {
+  const [firstIssue] = normalizeZodIssues(error);
+  if (!firstIssue) return "Invalid request.";
+  if (!firstIssue.path) return firstIssue.message;
+  return `${humanizePath(firstIssue.path)}: ${firstIssue.message}`;
+}
+
+function humanizePath(path: string) {
+  return path
+    .split(".")
+    .filter(Boolean)
+    .map((part) => part.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " "))
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" > ");
 }
 
 export function namedErrorStatus(name: string) {

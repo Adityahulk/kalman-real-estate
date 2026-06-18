@@ -105,7 +105,7 @@ export function OwnershipPlotRow({
             <Pencil size={14} /> Edit
           </button>
           <button className="btn-outline h-8 px-3 text-xs" type="button" onClick={() => router.push(`${href}?tab=plot-map`)}>
-            <Map size={14} /> Plot CAD
+            <Map size={14} /> Plot Map
           </button>
           {document ? (
             <button className="btn-outline h-8 px-3 text-xs" type="button" onClick={() => router.push(`${href}/letters/${document.id}`)}>

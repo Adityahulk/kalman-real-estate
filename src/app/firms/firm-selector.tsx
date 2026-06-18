@@ -116,9 +116,18 @@ export function FirmSelector({ firms, customFields }: { firms: Firm[]; customFie
 
       {showForm ? (
         <form className="mt-5 rounded-xl border border-slate-200 bg-white p-5 shadow-card" onSubmit={createFirm}>
-          <div className="flex items-center gap-2">
-            <Building2 size={18} />
-            <h2 className="font-semibold">Add new firm</h2>
+          <div className="flex items-center gap-3">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+              {logoDataUrl ? (
+                <img className="h-full w-full object-contain" src={logoDataUrl} alt="Firm logo preview" />
+              ) : (
+                <Building2 size={24} className="text-slate-400" />
+              )}
+            </div>
+            <div>
+              <h2 className="font-semibold">Add new firm</h2>
+              <p className="text-sm text-slate-500">The uploaded logo will be shown in the app header for this firm.</p>
+            </div>
           </div>
           <div className="mt-5 grid gap-4 sm:grid-cols-2">
             <Field label="Firm name" name="name" required />
@@ -174,6 +183,14 @@ export function FirmSelector({ firms, customFields }: { firms: Firm[]; customFie
                 {logoDataUrl ? "Logo selected" : "Upload logo"}
                 <input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp" onChange={readLogo} />
               </span>
+              {logoDataUrl ? (
+                <div className="mt-3 flex items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+                  <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-white">
+                    <img className="h-full w-full object-contain" src={logoDataUrl} alt="Firm logo preview" />
+                  </div>
+                  <div className="text-sm text-slate-600">This logo will appear on the top left of this firm&apos;s workspace.</div>
+                </div>
+              ) : null}
             </label>
             {customFields.map((field) => (
               <Field key={field.id} label={field.label} name={`custom-${field.key}`} />

@@ -3,6 +3,7 @@ import { FileText, Hammer, MapPinned } from "lucide-react";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
 import { fullInr } from "@/lib/format";
+import { sortByPlotCode } from "@/lib/plot-code-sort";
 
 export const dynamic = "force-dynamic";
 
@@ -23,9 +24,9 @@ export default async function OwnerPortalPage() {
     ? await prisma.plot.findMany({
         where: { tenantId: session.tenantId, currentOwnerId: owner.id, ownerVisible: true, archivedAt: null },
         include: { currentOwner: true, checklistItems: true },
-        orderBy: { code: "asc" },
       })
     : [];
+  const sortedPlots = sortByPlotCode(plots);
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-6">
@@ -33,7 +34,7 @@ export default async function OwnerPortalPage() {
       <p className="mt-2 text-sm text-slate-600">Owner-visible Map, documents, registry, construction progress, and photos.</p>
 
       <section className="mt-6 grid gap-4 md:grid-cols-2">
-        {plots.map((plot) => {
+        {sortedPlots.map((plot) => {
           const progress = plot.checklistItems.length
             ? Math.round(plot.checklistItems.reduce((sum, item) => sum + item.progressPct, 0) / plot.checklistItems.length)
             : 0;
@@ -54,7 +55,7 @@ export default async function OwnerPortalPage() {
             </Link>
           );
         })}
-        {!plots.length ? <div className="card p-8 text-center text-sm text-slate-500">No owner-linked plots found for this login.</div> : null}
+        {!sortedPlots.length ? <div className="card p-8 text-center text-sm text-slate-500">No owner-linked plots found for this login.</div> : null}
       </section>
     </main>
   );

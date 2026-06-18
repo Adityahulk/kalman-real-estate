@@ -60,6 +60,11 @@ export default async function ProjectPlotWorkspacePage({
   const latestPlotCadPreviewId = workspace.childCadFiles.find((file) => file.analysis?.previewArtifactKey)?.id ?? null;
   const registryDocuments = workspace.plotFiles.filter((file) => file.documentType === "REGISTRY_RECEIPT" || file.documentType === "REGISTRY_DEED");
   const ownershipLetters = workspace.generatedDocuments.filter((document) => document.type.includes("allotment") || document.type.includes("transfer"));
+  const latestAllotmentRecord = plot.ownershipRecords.find((record) => record.kind === "ALLOTMENT") ?? null;
+  const allotmentSupportFiles = [
+    ...workspace.ownerFiles.filter((file) => file.categoryKey === "allottee-kyc"),
+    ...workspace.plotFiles.filter((file) => file.categoryKey === "allotment-payment"),
+  ];
   const developmentPct = plot.checklistItems.length
     ? Math.round(plot.checklistItems.reduce((total, item) => total + item.progressPct, 0) / plot.checklistItems.length)
     : 0;
@@ -108,14 +113,23 @@ export default async function ProjectPlotWorkspacePage({
                 <Info label="Prime location" value={plot.primeLocation ?? "-"} />
                 <Info label="Who allotted" value={plot.allottedBy ?? "-"} />
                 <Info label="Dimensions" value={plot.dimensions ?? "-"} />
-                <Info label="North boundary" value={boundaryValue(plot.boundaries, "north")} />
-                <Info label="North plot dimensions" value={boundaryValue(plot.boundaries, "northDimension")} />
-                <Info label="South boundary" value={boundaryValue(plot.boundaries, "south")} />
-                <Info label="South plot dimensions" value={boundaryValue(plot.boundaries, "southDimension")} />
-                <Info label="East boundary" value={boundaryValue(plot.boundaries, "east")} />
-                <Info label="East plot dimensions" value={boundaryValue(plot.boundaries, "eastDimension")} />
-                <Info label="West boundary" value={boundaryValue(plot.boundaries, "west")} />
-                <Info label="West plot dimensions" value={boundaryValue(plot.boundaries, "westDimension")} />
+              </div>
+              <div className="mt-5">
+                <div className="mb-3 text-sm font-semibold text-navy-950">Plot boundary details</div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {([
+                    ["North", "north", "northDimension"],
+                    ["South", "south", "southDimension"],
+                    ["East", "east", "eastDimension"],
+                    ["West", "west", "westDimension"],
+                  ] as const).map(([label, edgeKey, dimensionKey]) => (
+                    <div key={label} className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
+                      <div className="font-medium text-slate-900">{label}</div>
+                      <div className="mt-2 text-slate-600">{boundaryValue(plot.boundaries, edgeKey)}</div>
+                      <div className="mt-1 text-xs text-slate-500">Dimension: {boundaryValue(plot.boundaries, dimensionKey)}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
             </AccordionRow>
 
@@ -164,6 +178,7 @@ export default async function ProjectPlotWorkspacePage({
                 </Link> : null}
                 {plot.currentOwnerId && transferLimitReached ? <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">Transfer limit reached. Registry is the only next ownership action.</div> : null}
                 {plot.currentOwnerId ? <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/registry/update`}><Upload size={17} />{registryDocuments.length ? "+ New registry" : "Upload registry"}</Link> : null}
+                {latestAllotmentRecord ? <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}&edit=1`}><Pencil size={17} />Allotment details</Link> : null}
                 {registryDocuments.length ? <Link className="btn-outline justify-center" href={`?tab=registry`}><Landmark size={17} />View registry</Link> : null}
                 <Link className="btn-outline justify-center" href={`?tab=documents`}><FileText size={17} />Documents</Link>
                 <Link className="btn-outline justify-center" href={`?tab=history`}><History size={17} />History</Link>
@@ -294,8 +309,8 @@ export default async function ProjectPlotWorkspacePage({
               </div>
             </div>
             <div className="card p-5">
-              <h2 className="mb-4 font-semibold">Uploaded plot documents</h2>
-              <DocumentGrid files={workspace.plotFiles} empty="No plot documents uploaded yet." />
+              <h2 className="mb-4 font-semibold">Allotment supporting documents</h2>
+              <DocumentGrid files={allotmentSupportFiles} empty="No Aadhaar, cheque, or allotment support files uploaded yet." />
             </div>
           </div>
           <aside className="space-y-6">
