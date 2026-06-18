@@ -43,6 +43,8 @@ const LETTER_PRINT_CSS = `
   [data-editor-page-controls] { display: none !important; }
 `;
 
+// `--single-process` / `--no-zygote` are memory-savers needed on the small Linux server, but they
+// crash Chromium on macOS — only apply them on Linux so local `npm run dev` works out of the box.
 const LAUNCH_OPTIONS: LaunchOptions = {
   headless: true,
   args: [
@@ -50,8 +52,7 @@ const LAUNCH_OPTIONS: LaunchOptions = {
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
     "--disable-gpu",
-    "--no-zygote",
-    "--single-process",
+    ...(process.platform === "linux" ? ["--no-zygote", "--single-process"] : []),
   ],
   ...(process.env.PUPPETEER_EXECUTABLE_PATH ? { executablePath: process.env.PUPPETEER_EXECUTABLE_PATH } : {}),
 };
