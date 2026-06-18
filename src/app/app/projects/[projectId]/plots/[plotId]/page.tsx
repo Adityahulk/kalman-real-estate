@@ -315,7 +315,10 @@ export default async function ProjectPlotWorkspacePage({
           </div>
           <aside className="space-y-6">
             <ActionCard title="Document actions">
-              <Link className="btn-primary justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/letters/new`}>
+              <Link
+                className="btn-primary justify-center"
+                href={`/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}${latestAllotmentRecord ? "&edit=1" : ""}`}
+              >
                 <FileText size={17} />
                 Generate letter
               </Link>

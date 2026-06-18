@@ -101,6 +101,7 @@ type InitialAllotmentData = {
   allotteeDocuments: AllotteeDocumentEntry[];
   extraFields: AdditionalFieldEntry[];
   letterFields: Record<string, string>;
+  letterFieldUploadedFiles: Record<string, StoredFileRef[]>;
 };
 
 type ManualLetterField = {
@@ -232,6 +233,7 @@ export function ProjectAllotmentFlow({
   const [extraFields, setExtraFields] = useState<AdditionalFieldEntry[]>(initialData?.extraFields ?? []);
   const [letterFields, setLetterFields] = useState<Record<string, string>>(initialData?.letterFields ?? {});
   const [letterFieldFiles, setLetterFieldFiles] = useState<Record<string, File[]>>({});
+  const [letterFieldUploadedFiles, setLetterFieldUploadedFiles] = useState<Record<string, StoredFileRef[]>>(initialData?.letterFieldUploadedFiles ?? {});
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -253,7 +255,7 @@ export function ProjectAllotmentFlow({
         plotId: string; name: string; address: string; phone: string; selectedAuthorizedPerson: string; totalAreaPrice: string; perUnitPrice: string;
         paymentEntries: Array<Pick<PaymentEntry, "mode" | "amount" | "reference" | "uploadedFiles">>;
         effectiveAt: string; stamps: StampEntry[]; witnesses: WitnessEntry[]; allotteeDocuments: Array<Pick<AllotteeDocumentEntry, "kind" | "number" | "uploadedFiles">>;
-        extraFields: AdditionalFieldEntry[]; letterFields: Record<string, string>;
+        extraFields: AdditionalFieldEntry[]; letterFields: Record<string, string>; letterFieldUploadedFiles: Record<string, StoredFileRef[]>;
       }>;
       if (saved.plotId) setPlotId(saved.plotId);
       if (saved.name) setName(saved.name);
@@ -277,6 +279,7 @@ export function ProjectAllotmentFlow({
         })));
       }
       if (saved.letterFields) setLetterFields(saved.letterFields);
+      if (saved.letterFieldUploadedFiles) setLetterFieldUploadedFiles(saved.letterFieldUploadedFiles);
     } catch {
       // Ignore invalid local restore data.
     }
@@ -300,6 +303,7 @@ export function ProjectAllotmentFlow({
       allotteeDocuments: allotteeDocuments.map(({ kind, number }) => ({ kind, number })),
       extraFields: extraFields.map(({ label, inputType, value, uploadedFiles }) => ({ label, inputType, value, uploadedFiles })),
       letterFields,
+      letterFieldUploadedFiles,
     };
     if (typeof window !== "undefined") window.sessionStorage.setItem(restoreKey, JSON.stringify(restorePayload));
     setLoading(true);
@@ -406,6 +410,19 @@ export function ProjectAllotmentFlow({
               )
             : undefined,
         }));
+      const mergedManualLetterFiles = Object.fromEntries(
+        manualLetterFields
+          .filter((field) => field.inputType === "FILE")
+          .map((field) => [
+            field.key,
+            replaceOrKeepStoredFiles(
+              letterFieldFiles[field.key],
+              letterFieldUploadedFiles[field.key],
+              uploadedManualFieldFiles.filter((file) => file.group === `manual-${field.key}`).map(({ group, ...file }) => file),
+            ),
+          ])
+          .filter(([, files]) => (files as Array<unknown>).length),
+      );
 
       const allotMethod = selectedPlot?.currentOwnerId ? "PATCH" : "POST";
       const response = await fetch(`/api/v1/ownership/plots/${plotId}/allot`, {
@@ -456,13 +473,7 @@ export function ProjectAllotmentFlow({
             })),
             customLetterFields: letterFields,
             customLetterFiles: Object.fromEntries(
-              manualLetterFields
-                .filter((field) => field.inputType === "FILE")
-                .map((field) => [
-                  field.key,
-                  uploadedManualFieldFiles.filter((file) => file.group === `manual-${field.key}`).map(({ group, ...file }) => file),
-                ])
-                .filter(([, files]) => (files as Array<unknown>).length),
+              Object.entries(mergedManualLetterFiles),
             ),
             additionalFields: mergedAdditionalFields,
             customFields: Object.fromEntries(mergedAdditionalFields.filter((field) => field.inputType === "TEXT").map((field) => [field.label, field.value ?? ""])),
@@ -478,7 +489,15 @@ export function ProjectAllotmentFlow({
       const draftResponse = await fetch("/api/v1/documents/drafts", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ type: "allotment_letter", recordType: "Plot", recordId: plotId }),
+        body: JSON.stringify({
+          type: "allotment_letter",
+          recordType: "Plot",
+          recordId: plotId,
+          data: {
+            customLetterFields: letterFields,
+            customLetterFiles: mergedManualLetterFiles,
+          },
+        }),
       });
       const draftBody = await draftResponse.json();
       setLoading(false);
@@ -498,6 +517,7 @@ export function ProjectAllotmentFlow({
             value: field.value ?? "",
             uploadedFiles: field.files ?? [],
           })),
+          letterFieldUploadedFiles: mergedManualLetterFiles,
         }));
       }
       const returnTo = `/app/projects/${projectId}/ownership/new-allotment?plotId=${encodeURIComponent(plotId)}${initialData ? "&edit=1" : ""}&restore=1`;
@@ -694,8 +714,8 @@ export function ProjectAllotmentFlow({
               {manualLetterFields.map((field) => field.inputType === "FILE" ? (
                 <label key={field.key}>
                   <span className="label text-amber-950">{field.label}</span>
-                  <input className="input bg-white pt-2" type="file" multiple required={(letterFieldFiles[field.key]?.length ?? 0) === 0} onChange={(event) => setLetterFieldFiles((current) => ({ ...current, [field.key]: Array.from(event.target.files ?? []) }))} />
-                  {(letterFieldFiles[field.key]?.length ?? 0) > 0 ? <div className="mt-1 text-xs text-amber-900">{letterFieldFiles[field.key].map((file) => file.name).join(", ")}</div> : null}
+                  <input className="input bg-white pt-2" type="file" multiple required={(letterFieldFiles[field.key]?.length ?? 0) === 0 && (letterFieldUploadedFiles[field.key]?.length ?? 0) === 0} onChange={(event) => setLetterFieldFiles((current) => ({ ...current, [field.key]: Array.from(event.target.files ?? []) }))} />
+                  {displayFileNames(letterFieldFiles[field.key], letterFieldUploadedFiles[field.key]) ? <div className="mt-1 text-xs text-amber-900">{displayFileNames(letterFieldFiles[field.key], letterFieldUploadedFiles[field.key])}</div> : null}
                 </label>
               ) : (
                 <label key={field.key}>

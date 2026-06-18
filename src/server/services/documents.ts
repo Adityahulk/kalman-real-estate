@@ -24,6 +24,7 @@ export const createDocumentDraftSchema = z.object({
   type: z.enum(["allotment_letter", "transfer_letter", "registry_status_letter"]),
   recordType: z.literal("Plot"),
   recordId: z.string().min(1),
+  data: z.record(z.unknown()).default({}),
 });
 
 export const updateDocumentDraftSchema = z.object({
@@ -88,6 +89,7 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
   const count = await prisma.generatedDocument.count({ where: { tenantId: context.tenantId, type: input.type } });
   const documentNumber = `${input.type.toUpperCase()}-${new Date().getFullYear()}-${String(count + 1).padStart(5, "0")}`;
   const snapshot = await buildPlotDocumentSnapshot(context, input.recordId);
+  applyDraftOverrides(snapshot, input.data);
   snapshot.variables["document.number"] = documentNumber;
   snapshot.variables["document.date"] = new Date().toLocaleDateString("en-IN");
   const selectedTemplate = input.templateId
@@ -123,6 +125,26 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
   await linkDocumentToLatestOwnershipRecord(context, document);
   await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "GeneratedDocument", entityId: document.id, after: document as unknown as Prisma.InputJsonValue });
   return { document, missingVariables };
+}
+
+function applyDraftOverrides(
+  snapshot: {
+    variables: Record<string, string>;
+    fileVariables?: Record<string, string>;
+  },
+  data: Record<string, unknown>,
+) {
+  const customLetterFields = jsonRecord(data.customLetterFields);
+  for (const [key, value] of Object.entries(customLetterFields)) {
+    snapshot.variables[`manual.${key}`] = typeof value === "string" ? value : String(value ?? "");
+  }
+
+  const customLetterFiles = jsonRecord(data.customLetterFiles);
+  for (const [key, value] of Object.entries(customLetterFiles)) {
+    const files = Array.isArray(value) ? value.map(jsonRecord) : [];
+    const names = files.map((file) => String(file.fileName ?? "")).filter(Boolean).join(", ");
+    if (names) snapshot.variables[`manual.${key}`] = names;
+  }
 }
 
 export async function updateDocumentDraft(context: RequestContext, id: string, input: z.infer<typeof updateDocumentDraftSchema>) {

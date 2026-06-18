@@ -132,6 +132,7 @@ function buildInitialAllotmentData(
   const customFields = recordOf(extra.customFields);
   const additionalFields = Array.isArray(extra.additionalFields) ? extra.additionalFields.map(recordOf) : [];
   const customLetterFields = recordOf(extra.customLetterFields);
+  const customLetterFiles = recordOf(extra.customLetterFiles);
   const firmData = recordOf(extra.firm);
   const authorizedPersons = Array.isArray(firm.authorizedPersons) ? firm.authorizedPersons : [];
 
@@ -187,6 +188,9 @@ function buildInitialAllotmentData(
           uploadedFiles: [],
         })),
     letterFields: Object.fromEntries(Object.entries(customLetterFields).map(([key, value]) => [key, typeof value === "string" ? value : String(value ?? "")])),
+    letterFieldUploadedFiles: Object.fromEntries(
+      Object.entries(customLetterFiles).map(([key, value]) => [key, extractStoredFiles(value)]).filter(([, files]) => files.length),
+    ),
   };
 }
 

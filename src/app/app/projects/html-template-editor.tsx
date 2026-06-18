@@ -433,8 +433,15 @@ export function HtmlTemplateEditor({
       afterButton.textContent = "Add page after";
       afterButton.addEventListener("click", () => insertPage(index, "after"));
 
+      const deleteButton = globalThis.document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "rounded-md border border-rose-200 px-2 py-1 text-rose-700 hover:bg-rose-50";
+      deleteButton.textContent = "Delete page";
+      deleteButton.addEventListener("click", () => deletePage(index));
+
       actions.appendChild(beforeButton);
       actions.appendChild(afterButton);
+      actions.appendChild(deleteButton);
       controls.appendChild(actions);
       page.parentElement?.insertBefore(controls, page);
     });
@@ -464,6 +471,22 @@ export function HtmlTemplateEditor({
       selection?.removeAllRanges();
       selection?.addRange(range);
     }
+  }
+
+  function deletePage(pageIndex: number) {
+    const root = editorRef.current;
+    if (!root) return;
+    ensurePagedDocument(root);
+    const pages = [...root.querySelectorAll<HTMLElement>("section[data-ambey-page], section[data-letter-page]")];
+    const target = pages[pageIndex];
+    if (!target) return;
+    if (pages.length === 1) {
+      target.innerHTML = "<p><br></p>";
+    } else {
+      target.remove();
+    }
+    renumberPages(root);
+    injectPageControls(root);
   }
 
   async function refreshCategories() {
