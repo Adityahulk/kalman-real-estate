@@ -88,21 +88,32 @@ export async function generateDocument(context: RequestContext, input: z.infer<t
 export async function createDocumentDraft(context: RequestContext, input: z.infer<typeof createDocumentDraftSchema>) {
   const count = await prisma.generatedDocument.count({ where: { tenantId: context.tenantId, type: input.type } });
   const documentNumber = `${input.type.toUpperCase()}-${new Date().getFullYear()}-${String(count + 1).padStart(5, "0")}`;
-  const snapshot = await buildPlotDocumentSnapshot(context, input.recordId);
-  applyDraftOverrides(snapshot, input.data);
-  snapshot.variables["document.number"] = documentNumber;
-  snapshot.variables["document.date"] = new Date().toLocaleDateString("en-IN");
+
   const selectedTemplate = input.templateId
     ? await prisma.documentTemplate.findFirst({ where: { id: input.templateId, tenantId: context.tenantId, active: true } })
     : null;
+  const templateByProject = selectedTemplate
+    ?? await prisma.documentTemplate.findFirst({ where: { tenantId: context.tenantId, type: input.type, active: true }, orderBy: { createdAt: "desc" } });
+  const earlyTemplateBody = templateByProject?.body && templateByProject.body.length > 100
+    && !templateByProject.body.includes("data-pdf-layout-template")
+    && !templateByProject.body.includes("data-exact-pdf-draft")
+    ? templateByProject.body : defaultLetterBody(input.type);
+  const templateNeedsFileMarkup = /\{\{\s*files\./i.test(earlyTemplateBody);
+
+  const snapshot = await buildPlotDocumentSnapshot(context, input.recordId, { includeFileMarkup: templateNeedsFileMarkup });
+  applyDraftOverrides(snapshot, input.data);
+  snapshot.variables["document.number"] = documentNumber;
+  snapshot.variables["document.date"] = new Date().toLocaleDateString("en-IN");
+
   const template = selectedTemplate
     ?? await prisma.documentTemplate.findFirst({ where: { tenantId: context.tenantId, projectId: snapshot.projectId, type: input.type, active: true }, orderBy: { createdAt: "desc" } })
-    ?? await prisma.documentTemplate.findFirst({ where: { tenantId: context.tenantId, projectId: null, type: input.type, active: true }, orderBy: { createdAt: "desc" } });
+    ?? templateByProject;
   const hasRealBody = template?.body && template.body.length > 100 && !template.body.includes("data-pdf-layout-template") && !template.body.includes("data-exact-pdf-draft");
   const templateBody = hasRealBody ? template.body : defaultLetterBody(input.type);
   const { html, missingVariables, usedFileVariables } = renderTemplate(templateBody, snapshot.variables, snapshot.fileVariables);
   const draftHtml = usedFileVariables ? html : appendSupportingDocumentPages(html, snapshot.supportingDocumentPages);
 
+  const { fileVariables: _fv, supportingDocumentPages: _sp, ...snapshotMeta } = snapshot;
   const document = await prisma.generatedDocument.create({
     data: {
       tenantId: context.tenantId,
@@ -111,7 +122,7 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
       recordType: input.recordType,
       recordId: input.recordId,
       data: {
-        ...snapshot,
+        ...snapshotMeta,
         templateBody,
         missingVariables,
       } as Prisma.InputJsonValue,
@@ -169,7 +180,7 @@ export async function updateDocumentDraft(context: RequestContext, id: string, i
 export async function renderDocumentDraft(context: RequestContext, id: string) {
   const document = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
   const tenant = await prisma.tenant.findUnique({ where: { id: context.tenantId } });
-  const html = document.editableHtml ?? "";
+  const html = await resolveFileUrlsToDataUris(context.tenantId, document.editableHtml ?? "");
   const pdf = await buildGeneratedDocumentPdfFromHtml({
     title: document.type.replaceAll("_", " ").toUpperCase(),
     number: document.number,
@@ -362,7 +373,7 @@ function throwForbidden(message: string): never {
   throw error;
 }
 
-async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string) {
+async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string, options: { includeFileMarkup?: boolean } = {}) {
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: context.tenantId } });
   const plot = await prisma.plot.findFirstOrThrow({
     where: { id: plotId, tenantId: context.tenantId, archivedAt: null },
@@ -438,17 +449,19 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     additionalFields.filter((field) => field.inputType === "FILE"),
     "files",
   );
-  const fileVariables: Record<string, string> = {
+  const fileVariables: Record<string, string> = options.includeFileMarkup ? {
     "files.allotteeDocuments": await buildInlineFileMarkup(context.tenantId, allotteeDocumentFiles),
     "files.paymentDocuments": await buildInlineFileMarkup(context.tenantId, paymentFiles),
     "files.additionalFields": await buildInlineFileMarkup(context.tenantId, additionalFieldFiles),
     "files.allSupportingDocuments": await buildInlineFileMarkup(context.tenantId, [...allotteeDocumentFiles, ...paymentFiles, ...additionalFieldFiles]),
-  };
-  for (const [key, value] of Object.entries(customLetterFiles)) {
-    const files = Array.isArray(value) ? value.map(jsonRecord) : [];
-    fileVariables[`manual.${key}`] = await buildInlineFileMarkup(context.tenantId, files);
+  } : {};
+  if (options.includeFileMarkup) {
+    for (const [key, value] of Object.entries(customLetterFiles)) {
+      const files = Array.isArray(value) ? value.map(jsonRecord) : [];
+      fileVariables[`manual.${key}`] = await buildInlineFileMarkup(context.tenantId, files);
+    }
   }
-  const supportingDocumentPages = await buildSupportingDocumentPages(context.tenantId, plot.id, plot.currentOwnerId, extraDetails);
+  const supportingDocumentPages = await buildSupportingDocumentPagesLight(context.tenantId, plot.id, plot.currentOwnerId, extraDetails);
   const variables: Record<string, string> = {
     "tenant.name": tenant.name,
     "tenant.address": tenant.region ?? "",
@@ -595,6 +608,31 @@ async function buildSupportingDocumentPages(tenantId: string, plotId: string, ow
   return pages;
 }
 
+async function buildSupportingDocumentPagesLight(tenantId: string, plotId: string, ownerId: string | null, extraDetails: Record<string, unknown>) {
+  const fileIds = await collectSupportingFileIds(tenantId, plotId, ownerId, extraDetails);
+  if (!fileIds.length) return [];
+  const files = await prisma.fileAsset.findMany({
+    where: { tenantId, id: { in: fileIds }, deletedAt: null },
+    orderBy: { createdAt: "asc" },
+  });
+  const blocks: string[] = [];
+  for (const file of files) {
+    if (file.mimeType.startsWith("image/")) {
+      blocks.push(`<div class="attachment-block"><img src="/api/v1/files/${file.id}/download?disposition=inline" alt="${escapeHtml(file.fileName)}" /></div>`);
+    } else {
+      blocks.push(`<div class="attachment-block"><p class="center muted">${escapeHtml(file.fileName)}</p></div>`);
+    }
+  }
+  if (!blocks.length) return [];
+  const perPage = 3;
+  const pages: string[] = [];
+  for (let i = 0; i < blocks.length; i += perPage) {
+    const heading = i === 0 ? "<h2>Supporting documents</h2>" : "";
+    pages.push(`<section data-letter-page="0">${heading}${blocks.slice(i, i + perPage).join("")}</section>`);
+  }
+  return pages;
+}
+
 async function collectSupportingFileIds(tenantId: string, plotId: string, ownerId: string | null, extraDetails: Record<string, unknown>) {
   const ids = new Set<string>();
   const allottee = jsonRecord(extraDetails.allottee);
@@ -715,6 +753,29 @@ function collectNestedFileNames(items: Record<string, unknown>[], key: string) {
   return items.flatMap((item) => {
     const files = Array.isArray(item[key]) ? item[key].map(jsonRecord) : [];
     return files.map((file) => String(file.fileName ?? "")).filter(Boolean);
+  });
+}
+
+async function resolveFileUrlsToDataUris(tenantId: string, html: string) {
+  const pattern = /src="\/api\/v1\/files\/([a-zA-Z0-9_-]+)\/download\?disposition=inline"/g;
+  const fileIds = [...html.matchAll(pattern)].map((m) => m[1]);
+  if (!fileIds.length) return html;
+  const assets = await prisma.fileAsset.findMany({
+    where: { tenantId, id: { in: [...new Set(fileIds)] }, deletedAt: null },
+  });
+  const resolved = new Map<string, string>();
+  for (const asset of assets) {
+    if (!asset.mimeType.startsWith("image/")) continue;
+    try {
+      const bytes = await getObjectResilient(asset.storageKey);
+      resolved.set(asset.id, `data:${asset.mimeType};base64,${bytes.toString("base64")}`);
+    } catch {
+      // Leave the URL as-is if the file can't be read.
+    }
+  }
+  return html.replace(pattern, (match, id: string) => {
+    const dataUri = resolved.get(id);
+    return dataUri ? `src="${dataUri}"` : match;
   });
 }
 
