@@ -394,6 +394,28 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
   const extraDetails = jsonRecord(ownership?.extraDetails);
   const pricing = jsonRecord(extraDetails.pricing);
   const payments = Array.isArray(extraDetails.payments) ? extraDetails.payments.map(jsonRecord) : [];
+  const firmDetails = jsonRecord(extraDetails.firm);
+  const extraPlot = jsonRecord(extraDetails.plot);
+  const witnessList = Array.isArray(extraDetails.witnesses) ? extraDetails.witnesses.map(jsonRecord) : [];
+  // Signatory: prefer the partner chosen on the allotment form, fall back to letterhead, then a generic label.
+  const signatoryName =
+    (typeof firmDetails.authorizedPerson === "string" && firmDetails.authorizedPerson) ||
+    stringFromKyc(jsonRecord(tenant.letterhead), ["signatoryName"]) ||
+    "Authorized Signatory";
+  // Price: the user enters total + per-unit on the form (pricing.*); fall back to the derived ownership amount.
+  const perUnitPrice = pricing.perUnitPrice ? Number(pricing.perUnitPrice) : null;
+  const totalPrice = pricing.totalAreaPrice
+    ? Number(pricing.totalAreaPrice)
+    : pricing.calculatedPrice
+      ? Number(pricing.calculatedPrice)
+      : priceInr;
+  const bspRateValue = perUnitPrice ?? bspRate;
+  const eStampNumber = stringFromKyc(extraDetails, ["eStampNumber"]);
+  const eStampDateRaw = stringFromKyc(extraDetails, ["eStampDate"]);
+  const eStampDateDots = /^\d{4}-\d{2}-\d{2}$/.test(eStampDateRaw) ? formatDateDots(new Date(eStampDateRaw)) : "";
+  const oldPlotCode = stringFromKyc(extraPlot, ["oldCode"]);
+  const newPlotCode = stringFromKyc(extraPlot, ["newCode"]) || plot.code;
+  const paymentTableRows = buildPaymentTableRows(payments);
   const allottee = jsonRecord(extraDetails.allottee);
   const additionalFields = Array.isArray(extraDetails.additionalFields) ? extraDetails.additionalFields.map(jsonRecord) : [];
   const customLetterFields = jsonRecord(extraDetails.customLetterFields);
@@ -438,7 +460,7 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "firm.nameUpper": firmNameUpper,
     "firm.address": tenant.region ?? projectAddress,
     "firm.paymentName": firmNameUpper,
-    "firm.signatory.name": stringFromKyc(jsonRecord(tenant.letterhead), ["signatoryName"]) || "Authorized Signatory",
+    "firm.signatory.name": signatoryName,
     "firm.signatory.relation": stringFromKyc(jsonRecord(tenant.letterhead), ["signatoryRelation"]) || "",
     "firm.signatory.authorizationDate": stringFromKyc(jsonRecord(tenant.letterhead), ["authorizationDate"]) || "",
     "firm.partnerDescription": stringFromKyc(jsonRecord(tenant.letterhead), ["partnerDescription"]) || "",
@@ -455,9 +477,11 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "plot.areaSqyd": areaSqyd ? formatNumber(areaSqyd) : "",
     "plot.areaSqydApprox": areaSqyd ? `${formatNumber(areaSqyd)} Sq. Yds. approx.` : "",
     "plot.priceInr": plot.priceInr?.toString() ?? "",
-    "plot.priceInrFormatted": priceInr ? formatIndianAmount(priceInr) : "",
-    "plot.priceInrWords": priceInr ? numberToIndianWords(priceInr) : "",
-    "plot.bspRate": bspRate ? formatIndianAmount(bspRate) : "",
+    "plot.priceInrFormatted": totalPrice ? formatIndianAmount(totalPrice) : "",
+    "plot.priceInrWords": totalPrice ? numberToIndianWords(totalPrice) : "",
+    "plot.bspRate": bspRateValue ? formatIndianAmount(bspRateValue) : "",
+    "plot.oldCode": oldPlotCode,
+    "plot.newCode": newPlotCode,
     "plot.facing": plot.facing ?? "",
     "plot.dimensions": plot.dimensions ?? "",
     "plot.primeLocation": plot.primeLocation ?? "",
@@ -465,14 +489,14 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "plot.southBoundary": stringFromKyc(boundaries, ["south"]),
     "plot.eastBoundary": stringFromKyc(boundaries, ["east"]),
     "plot.westBoundary": stringFromKyc(boundaries, ["west"]),
-    "plot.eastSize": "",
-    "plot.eastAdjoining": "",
-    "plot.westSize": "",
-    "plot.westAdjoining": "",
-    "plot.northSize": "",
-    "plot.northAdjoining": "",
-    "plot.southSize": "",
-    "plot.southAdjoining": "",
+    "plot.eastSize": stringFromKyc(boundaries, ["eastDimension"]),
+    "plot.eastAdjoining": stringFromKyc(boundaries, ["east"]),
+    "plot.westSize": stringFromKyc(boundaries, ["westDimension"]),
+    "plot.westAdjoining": stringFromKyc(boundaries, ["west"]),
+    "plot.northSize": stringFromKyc(boundaries, ["northDimension"]),
+    "plot.northAdjoining": stringFromKyc(boundaries, ["north"]),
+    "plot.southSize": stringFromKyc(boundaries, ["southDimension"]),
+    "plot.southAdjoining": stringFromKyc(boundaries, ["south"]),
     "owner.name": plot.currentOwner?.name ?? "",
     "owner.nameUpper": plot.currentOwner?.name?.toUpperCase() ?? "",
     "owner.nameWithRelation": ownerNameWithRelation,
@@ -495,6 +519,13 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "payment.perUnitPrice": pricing.perUnitPrice ? String(pricing.perUnitPrice) : "",
     "payment.modes": payments.map((payment) => String(payment.mode ?? "")).filter(Boolean).join(", "),
     "payment.entries": payments.map((payment) => [payment.mode, payment.amount ? `INR ${payment.amount}` : "", payment.reference].filter(Boolean).join(" - ")).join("; "),
+    "payment.tableRows": paymentTableRows,
+    "witness.1.name": stringFromKyc(jsonRecord(witnessList[0]), ["name"]),
+    "witness.1.aadhaar": stringFromKyc(jsonRecord(witnessList[0]), ["aadhaar"]),
+    "witness.1.address": stringFromKyc(jsonRecord(witnessList[0]), ["address"]),
+    "witness.2.name": stringFromKyc(jsonRecord(witnessList[1]), ["name"]),
+    "witness.2.aadhaar": stringFromKyc(jsonRecord(witnessList[1]), ["aadhaar"]),
+    "witness.2.address": stringFromKyc(jsonRecord(witnessList[1]), ["address"]),
     "files.allotteeDocuments": allotteeFileNames.join(", "),
     "files.paymentDocuments": paymentFileNames.join(", "),
     "files.additionalFields": additionalFieldFileNames.join(", "),
@@ -508,8 +539,8 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "todayDots": formatDateDots(new Date()),
     "rera.number": plot.project.reraNumber ?? "",
     "stamp.amount": "50/-",
-    "stamp.estampNo": "",
-    "stamp.date": formatDateDots(new Date()),
+    "stamp.estampNo": eStampNumber,
+    "stamp.date": eStampDateDots || formatDateDots(new Date()),
     "possession.date": "",
     "agreement.place": plot.project.city || "Barnala",
     "witness.place": plot.project.city || "Barnala",
@@ -541,20 +572,25 @@ async function buildSupportingDocumentPages(tenantId: string, plotId: string, ow
     orderBy: { createdAt: "asc" },
   });
 
-  const pages: string[] = [];
+  // Build attachment blocks, then pack several per page instead of one image per page.
+  const blocks: string[] = [];
   for (const file of files) {
     if (!file.mimeType.startsWith("image/")) continue;
     try {
       const bytes = await getObjectResilient(file.storageKey);
       const dataUri = `data:${file.mimeType};base64,${bytes.toString("base64")}`;
-      pages.push(
-        `<section data-letter-page="0"><h2>Supporting document</h2><p class="center muted">${escapeHtml(file.fileName)}</p><div class="attachment-block"><img src="${dataUri}" alt="${escapeHtml(file.fileName)}" /></div></section>`,
-      );
+      blocks.push(`<div class="attachment-block"><img src="${dataUri}" alt="${escapeHtml(file.fileName)}" /></div>`);
     } catch {
-      pages.push(
-        `<section data-letter-page="0"><h2>Supporting document</h2><p class="center muted">${escapeHtml(file.fileName)}</p><p class="center muted">This image could not be loaded for preview.</p></section>`,
-      );
+      blocks.push(`<div class="attachment-block"><p class="center muted">${escapeHtml(file.fileName)} (could not be loaded)</p></div>`);
     }
+  }
+  if (!blocks.length) return [];
+
+  const perPage = 3;
+  const pages: string[] = [];
+  for (let i = 0; i < blocks.length; i += perPage) {
+    const heading = i === 0 ? "<h2>Supporting documents</h2>" : "";
+    pages.push(`<section data-letter-page="0">${heading}${blocks.slice(i, i + perPage).join("")}</section>`);
   }
   return pages;
 }
@@ -604,6 +640,9 @@ function appendSupportingDocumentPages(html: string, pages: string[]) {
   return `${html}${pages.join("")}`;
 }
 
+// Keys whose value is HTML built server-side (already safe) and must be inserted unescaped.
+const RAW_HTML_KEYS = new Set(["payment.tableRows"]);
+
 function renderTemplate(template: string, variables: Record<string, string>, fileVariables: Record<string, string> = {}) {
   const missingVariables: string[] = [];
   let usedFileVariables = false;
@@ -613,6 +652,7 @@ function renderTemplate(template: string, variables: Record<string, string>, fil
       return fileVariables[key] || "";
     }
     const value = variables[key] ?? "";
+    if (RAW_HTML_KEYS.has(key)) return value;
     if (!value) missingVariables.push(key);
     const escaped = escapeHtml(value);
     return key.startsWith("field.")
@@ -635,6 +675,23 @@ function documentTypeForLetter(type: string): RealEstateDocumentType {
   if (type.toLowerCase().includes("transfer")) return RealEstateDocumentType.TRANSFER_LETTER;
   if (type.toLowerCase().includes("registry")) return RealEstateDocumentType.OTHER;
   return RealEstateDocumentType.ALLOTMENT_LETTER;
+}
+
+function buildPaymentTableRows(payments: Record<string, unknown>[]) {
+  const rows: string[] = [];
+  for (const payment of payments) {
+    if (!payment.amount && !payment.reference && !payment.date && !payment.bank) continue;
+    const chequeNo = escapeHtml(String(payment.reference ?? ""));
+    const dateStr = typeof payment.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(payment.date)
+      ? formatDateDots(new Date(payment.date))
+      : escapeHtml(String(payment.date ?? ""));
+    const amount = payment.amount ? escapeHtml(formatIndianAmount(Number(payment.amount))) : "";
+    const bank = escapeHtml(String(payment.bank ?? ""));
+    rows.push(`<tr><td>${chequeNo}</td><td>${dateStr}</td><td>${amount}</td><td>${bank}</td></tr>`);
+  }
+  // Keep a few blank rows so the table retains its shape and leaves room for manual additions.
+  for (let i = rows.length; i < 4; i++) rows.push("<tr><td></td><td></td><td></td><td></td></tr>");
+  return rows.join("");
 }
 
 function escapeHtml(value: string) {
@@ -679,7 +736,7 @@ async function buildInlineFileMarkup(tenantId: string, refs: Record<string, unkn
       try {
         const bytes = await getObjectResilient(asset.storageKey);
         blocks.push(
-          `<div class="attachment-block inline-attachment-block"><p class="center muted">${escapeHtml(name)}</p><img src="data:${asset.mimeType};base64,${bytes.toString("base64")}" alt="${escapeHtml(name)}" /></div>`,
+          `<div class="attachment-block inline-attachment-block"><img src="data:${asset.mimeType};base64,${bytes.toString("base64")}" alt="${escapeHtml(name)}" /></div>`,
         );
       } catch {
         blocks.push(`<div class="attachment-block inline-attachment-block"><p class="center muted">${escapeHtml(name)}</p><p class="center muted">This image could not be loaded for preview.</p></div>`);

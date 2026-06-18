@@ -2,7 +2,7 @@
 const nextConfig = {
   output: "standalone",
   experimental: {
-    serverComponentsExternalPackages: ["@napi-rs/canvas", "sharp", "pdfjs-dist"],
+    serverComponentsExternalPackages: ["@napi-rs/canvas", "sharp", "pdfjs-dist", "puppeteer"],
     outputFileTracingIncludes: {
       "/api/**/*": [
         "./node_modules/sharp/**/*",

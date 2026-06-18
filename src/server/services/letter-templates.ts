@@ -52,11 +52,11 @@ export function ambeyAllotmentTemplate() {
 <h1><u>CONSENT IN FAVOUR OF {{firm.nameUpper}}, {{project.city}}</u></h1>
 <p>Subject : Consent for change / Revision / Addition in layout plan of {{project.name}} space having Hadbast No. 55, vide Jamabandi for the year 2019-20, of Village {{project.city}}-A, B, C & D, Tehsil & Distt. {{project.city}}.</p>
 <p>Dear Sir/Madam</p>
-<p>We, the undersigned allottee(s) of Plot No. __ in the project “<strong>{{project.name}}</strong>”, which is registered with Punjab RERA vide Registration No. <strong>{{rera.number}}</strong>, hereby state that the project was earlier approved as per Layout Plan No. <strong>TB/BARNALA/SA/24/01 Dated 09/12/2024</strong>. And License to Develop Colony No. <strong>BNL-UD-LDC-2025/344 Dated 13/03/2025</strong>.</p>
+<p>We, the undersigned allottee(s) of Plot No. {{plot.code}} in the project “<strong>{{project.name}}</strong>”, which is registered with Punjab RERA vide Registration No. <strong>{{rera.number}}</strong>, hereby state that the project was earlier approved as per Layout Plan No. <strong>TB/BARNALA/SA/24/01 Dated 09/12/2024</strong>. And License to Develop Colony No. <strong>BNL-UD-LDC-2025/344 Dated 13/03/2025</strong>.</p>
 <p>We have been informed by the promoter that the layout plan has been revised and approved vide Revised Layout Plan No. <strong>TB/BARNALA/SA/25/01</strong> <strong>Dated 11/11/2025</strong> and License to Develop Colony No. <strong>235/B</strong> <strong>Dated. 22/04/2026.</strong></p>
 <p>As per the revised layout:</p>
-<p>* Old Plot Number: ____<br>* New Plot Number: ____</p>
-<p>At the time of booking of <strong>Plot No.____ </strong>We were shown all documents of above-mentioned Residential Colony like Layout plan, etc. As we are aware that said layout plan is always subject to certain practical changes on site, which are required to be amended or revised for the exact measurements of the plots and for the betterment of the colony. As such by virtue of this letter, I/We do hereby accord and grant our unconditional consent for changes/revision or amendment in the layout plan of the Residential colony. Moreover, if the developer extends the expansion of existing Colony, the same shall be deemed to have been done with my/our consent. Hence, I/We shall not dispute the said changes/revision /amendment/addition of the layout plan of the Residential colony at any stage and grant unconditional consent regarding for any changes/revision /amendment/addition of the commercial colony.</p>
+<p>* Old Plot Number: {{plot.oldCode}}<br>* New Plot Number: {{plot.newCode}}</p>
+<p>At the time of booking of <strong>Plot No.{{plot.code}} </strong>We were shown all documents of above-mentioned Residential Colony like Layout plan, etc. As we are aware that said layout plan is always subject to certain practical changes on site, which are required to be amended or revised for the exact measurements of the plots and for the betterment of the colony. As such by virtue of this letter, I/We do hereby accord and grant our unconditional consent for changes/revision or amendment in the layout plan of the Residential colony. Moreover, if the developer extends the expansion of existing Colony, the same shall be deemed to have been done with my/our consent. Hence, I/We shall not dispute the said changes/revision /amendment/addition of the layout plan of the Residential colony at any stage and grant unconditional consent regarding for any changes/revision /amendment/addition of the commercial colony.</p>
 <p>Thanking you and assuring you all the assistance.</p>
 <p class="right"><strong>(Allottee/ Allottees)</strong></p>
 </section>
@@ -93,7 +93,7 @@ export function ambeyAllotmentTemplate() {
 <p><strong>DETAILS OF PAYMENTS RECEIVED:</strong></p>
 <table class="payments">
 <tr><th>Cheque No./<br>RTGS/NEFT</th><th>Date of Cheque</th><th>Amount</th><th>Drawn on Bank</th></tr>
-<tr><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td></tr><tr><td></td><td></td><td></td><td></td></tr>
+{{payment.tableRows}}
 </table>
 <p>The allottee / vendee shall pay to the promoters / colonizers on prorata basis, the price of said plot, if the dimensions of the said plot increase.</p>
 <p>The colonizers /promoters promise to adjust on prorate basis, the price of plot, if the dimensions of the said plot and hence the area decreases.</p>
@@ -149,9 +149,9 @@ export function ambeyAllotmentTemplate() {
 <section data-ambey-page="13" data-top="790">
 <p>IN WITNESS WHEREOF, the parties hereto have set and subscribed their respective hands at the places and on the day, month and year mentioned under their respective signatures</p>
 <p><strong>SIGNED AND DELIVERED BY THE WITH IN NAMED</strong><br>Allottee (including joint allottees)</p>
-<p>(1) NAME:________________                                                        SIGNATURE<br>(2) NAME:________________                                                        SIGNATURE</p>
+<p>(1) NAME: {{owner.nameWithRelation}}                                                        SIGNATURE<br>(2) NAME:________________                                                        SIGNATURE</p>
 <p>At {{witness.place}} on {{ownership.effectiveDateDots}}</p>
-<p>In the presence of:<br><strong>WITNESSES:</strong><br>i) Name:________________________<br>    Address:_______________________<br>    Contact: ______________________<br>   Signature:______________________<br>ii) Name:________________________<br>   Address:_______________________<br>   Contact: _______________________<br>   Signature:______________________</p>
+<p>In the presence of:<br><strong>WITNESSES:</strong><br>i) Name: {{witness.1.name}}<br>    Address: {{witness.1.address}}<br>    Contact: ______________________<br>   Signature:______________________<br>ii) Name: {{witness.2.name}}<br>   Address: {{witness.2.address}}<br>   Contact: _______________________<br>   Signature:______________________</p>
 <p><strong>SIGNED AND DELIVERED BY THE WITHIN NAMED {{firm.signatory.name}} {{firm.signatory.relation}}</strong></p>
 <p>For and on behalf of Firm {{firm.name}} {{project.city}} at {{witness.place}} on {{ownership.effectiveDateDots}}.</p>
 </section>

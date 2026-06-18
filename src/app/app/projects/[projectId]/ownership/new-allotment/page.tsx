@@ -125,6 +125,7 @@ function buildInitialAllotmentData(
 ) {
   const allottee = recordOf(extra.allottee);
   const pricing = recordOf(extra.pricing);
+  const plotExtra = recordOf(extra.plot);
   const payments = Array.isArray(extra.payments) ? extra.payments.map(recordOf) : [];
   const stamps = Array.isArray(extra.stamps) ? extra.stamps.map(recordOf) : [];
   const witnesses = Array.isArray(extra.witnesses) ? extra.witnesses.map(recordOf) : [];
@@ -148,11 +149,15 @@ function buildInitialAllotmentData(
         : "",
     totalAreaPrice: pricing.totalAreaPrice != null ? String(pricing.totalAreaPrice) : "",
     perUnitPrice: pricing.perUnitPrice != null ? String(pricing.perUnitPrice) : "",
+    oldPlotCode: typeof plotExtra.oldCode === "string" ? plotExtra.oldCode : "",
+    newPlotCode: typeof plotExtra.newCode === "string" ? plotExtra.newCode : "",
     paymentEntries: payments.length
       ? payments.map((payment) => ({
           mode: normalizePaymentMode(payment.mode),
           amount: payment.amount != null ? String(payment.amount) : "",
           reference: typeof payment.reference === "string" ? payment.reference : "",
+          date: typeof payment.date === "string" ? payment.date : "",
+          bank: typeof payment.bank === "string" ? payment.bank : "",
           files: [],
           uploadedFiles: extractStoredFiles(payment.files),
         }))

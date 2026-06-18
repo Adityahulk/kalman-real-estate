@@ -237,6 +237,11 @@ export function HtmlTemplateEditor({
   }
 
   useEffect(() => {
+    // Make Enter insert a clean <p> instead of a <div> so spacing stays consistent.
+    try { globalThis.document.execCommand("defaultParagraphSeparator", false, "p"); } catch {}
+  }, []);
+
+  useEffect(() => {
     if (initialized) return;
     setInitialized(true);
     const active = initialTemplates.find((t) => t.active && t.type === "allotment_letter")

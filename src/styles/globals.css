@@ -106,9 +106,11 @@
   color: #111827;
   font-weight: 700;
   text-align: center;
+  white-space: pre-wrap;
 }
 .letter-paper-editor p {
   margin: 0 0 12px;
+  white-space: pre-wrap;
 }
 .letter-paper-editor .right {
   text-align: right;
@@ -137,6 +139,16 @@
   border: 1px solid #475569;
   padding: 8px 10px;
   vertical-align: top;
+  white-space: pre-wrap;
+}
+.letter-paper-editor .attachment-block {
+  margin: 12px 0;
+}
+.letter-paper-editor .attachment-block img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 8px auto;
 }
 .letter-paper-editor .plain th,
 .letter-paper-editor .plain td {

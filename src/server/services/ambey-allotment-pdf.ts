@@ -71,7 +71,7 @@ async function renderSection(context: RenderContext, html: string) {
     if (tag === "h1" || tag === "h2") {
       drawHeading(context, body, tag === "h1" ? 14 : 11.2);
     } else if (tag === "p") {
-      drawParagraph(context, body, attrs);
+      await drawParagraph(context, body, attrs);
     } else if (tag === "table") {
       drawTable(context, body, attrs);
     } else if (tag === "div") {
@@ -95,7 +95,22 @@ function drawHeading(context: RenderContext, html: string, size: number) {
   context.y -= 8;
 }
 
-function drawParagraph(context: RenderContext, html: string, attrs: Record<string, string>) {
+async function drawParagraph(context: RenderContext, html: string, attrs: Record<string, string>) {
+  // A pasted/inserted image lives inside a paragraph as <img src="data:...">. Render it as an image
+  // (text around it, if any, is rendered as plain lines).
+  if (/<img\b/i.test(html)) {
+    for (const part of html.split(/(<img\b[^>]*>)/i)) {
+      const imgMatch = part.match(/<img\b[^>]*src=["']([^"']+)["']/i);
+      if (imgMatch) {
+        await drawImage(context, imgMatch[1]);
+        continue;
+      }
+      const text = textFromHtml(part).trim();
+      if (text) for (const line of wrapText(text, context.font, BODY_SIZE, TEXT_WIDTH)) drawSingleLine(context, line, "left");
+    }
+    context.y -= 8;
+    return;
+  }
   if (html.includes("right-inline")) {
     const [leftHtml, rightHtml = ""] = html.split(/<span\b[^>]*right-inline[^>]*>/i);
     const rightClean = rightHtml.replace(/<\/span>/i, "");
@@ -291,67 +306,37 @@ async function drawSpecialBox(context: RenderContext, html: string, attrs: Recor
     return;
   }
 
-  if (className.includes("photo-box")) {
-    const bottomLeft = className.includes("bottom-left");
-    const rightMid = className.includes("right-mid");
-    const box = bottomLeft
-      ? { x: 80, y: 130, width: 88, height: 96 }
-      : rightMid
-        ? { x: 430, y: 395, width: 100, height: 135 }
-        : { x: LEFT, y: context.y - 95, width: 90, height: 90 };
-    context.page.drawRectangle({ ...box, borderWidth: 0.8, borderColor: rgb(0.35, 0.35, 0.35) });
-    const inner = { x: box.x + 8, y: box.y + 18, width: box.width - 16, height: box.height - 36 };
-    context.page.drawRectangle({ ...inner, borderWidth: 0.5, borderColor: rgb(0.55, 0.55, 0.55) });
-    const lines = textFromHtml(html).split("\n").map((line) => line.trim()).filter(Boolean);
-    let textY = inner.y + inner.height - 18;
-    for (const line of lines) {
-      const width = context.font.widthOfTextAtSize(line, 8);
-      context.page.drawText(line, { x: inner.x + (inner.width - width) / 2, y: textY, size: 8, font: context.font });
-      textY -= 12;
-    }
-  }
+  // photo-box: the source document simply leaves a blank space to physically affix a photo.
+  // Reserve that space (no border, no placeholder text). The boxes are positioned absolutely
+  // so they don't consume flow — drawing nothing leaves clean empty space.
+}
+
+// Render a data-URL image centred at a modest size so multiple images can share a page.
+async function drawImage(context: RenderContext, dataUrl: string, maxHeight = 170) {
+  const imageBytes = decodeDataUrl(dataUrl);
+  if (!imageBytes) return;
+  const image = imageBytes.mimeType === "image/png"
+    ? await context.pdf.embedPng(imageBytes.bytes)
+    : await context.pdf.embedJpg(imageBytes.bytes);
+  const scale = Math.min(TEXT_WIDTH / image.width, maxHeight / image.height, 1);
+  const width = image.width * scale;
+  const height = image.height * scale;
+  context.page.drawImage(image, { x: (PAGE_WIDTH - width) / 2, y: context.y - height, width, height });
+  context.y -= height + 12;
 }
 
 async function drawAttachmentBlock(context: RenderContext, html: string) {
   const srcMatch = html.match(/<img\b[^>]*src=["']([^"']+)["']/i);
-  const altMatch = html.match(/<img\b[^>]*alt=["']([^"']+)["']/i);
-  const label = altMatch?.[1] ?? "Supporting document";
-  if (!srcMatch) {
-    const box = { x: LEFT, y: Math.max(110, context.y - 120), width: TEXT_WIDTH, height: 88 };
-    context.page.drawRectangle({ ...box, borderWidth: 0.8, borderColor: rgb(0.72, 0.72, 0.72) });
-    context.page.drawText(label, { x: LEFT + 12, y: box.y + box.height - 28, size: BODY_SIZE, font: context.bold, color: rgb(0.12, 0.15, 0.18) });
-    context.y = box.y - 16;
+  if (srcMatch) {
+    await drawImage(context, srcMatch[1]);
     return;
   }
-
-  const imageBytes = decodeDataUrl(srcMatch[1]);
-  if (!imageBytes) {
-    const box = { x: LEFT, y: Math.max(110, context.y - 120), width: TEXT_WIDTH, height: 88 };
-    context.page.drawRectangle({ ...box, borderWidth: 0.8, borderColor: rgb(0.72, 0.72, 0.72) });
-    context.page.drawText(label, { x: LEFT + 12, y: box.y + box.height - 28, size: BODY_SIZE, font: context.bold, color: rgb(0.12, 0.15, 0.18) });
-    context.y = box.y - 16;
-    return;
+  // Non-image fallback (e.g. "could not be loaded"): render its text only, no box.
+  const text = textFromHtml(html).trim();
+  if (text) {
+    drawSingleLine(context, text, "center");
+    context.y -= 6;
   }
-
-  const image = imageBytes.mimeType === "image/png"
-    ? await context.pdf.embedPng(imageBytes.bytes)
-    : await context.pdf.embedJpg(imageBytes.bytes);
-  const maxWidth = TEXT_WIDTH - 24;
-  const maxHeight = Math.min(260, Math.max(100, context.y - 140));
-  const scale = Math.min(maxWidth / image.width, maxHeight / image.height, 1);
-  const width = image.width * scale;
-  const height = image.height * scale;
-  const boxHeight = height + 40;
-  const box = { x: LEFT, y: Math.max(110, context.y - boxHeight - 12), width: TEXT_WIDTH, height: boxHeight };
-  context.page.drawRectangle({ ...box, borderWidth: 0.8, borderColor: rgb(0.72, 0.72, 0.72) });
-  context.page.drawText(label, { x: LEFT + 12, y: box.y + box.height - 24, size: BODY_SIZE, font: context.bold, color: rgb(0.12, 0.15, 0.18) });
-  context.page.drawImage(image, {
-    x: box.x + (box.width - width) / 2,
-    y: box.y + 12,
-    width,
-    height,
-  });
-  context.y = box.y - 16;
 }
 
 function drawCompass(page: PDFPage, font: PDFFont, cx: number, cy: number) {

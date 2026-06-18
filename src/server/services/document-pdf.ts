@@ -1,5 +1,6 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import { buildLetterStudioPdfFromHtml, isLetterStudioHtml } from "./ambey-allotment-pdf";
+import { renderLetterHtmlToPdf } from "./letter-pdf-puppeteer";
 
 export async function buildGeneratedDocumentPdf(input: {
   title: string;
@@ -47,7 +48,14 @@ export async function buildGeneratedDocumentPdfFromHtml(input: {
   html: string;
 }) {
   if (isLetterStudioHtml(input.html)) {
-    return buildLetterStudioPdfFromHtml(input.html);
+    // Primary path: real Chromium renders the editor HTML to a pixel-faithful PDF.
+    // Fallback to the lightweight pdf-lib renderer if Chromium is unavailable (e.g. dev/CI).
+    try {
+      return await renderLetterHtmlToPdf(input.html);
+    } catch (error) {
+      console.error("[letter-pdf] Chromium render failed, falling back to pdf-lib:", error);
+      return buildLetterStudioPdfFromHtml(input.html);
+    }
   }
 
   return buildGeneratedDocumentPdf({

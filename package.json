@@ -50,6 +50,7 @@
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.10.38",
     "pizzip": "^3.2.0",
+    "puppeteer": "^25.1.0",
     "rbush": "^4.0.1",
     "react": "18.3.1",
     "react-dom": "18.3.1",

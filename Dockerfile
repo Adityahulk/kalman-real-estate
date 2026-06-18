@@ -1,6 +1,8 @@
 FROM node:22-bookworm-slim AS deps
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+# Don't download Puppeteer's bundled Chromium; the runner uses the system chromium package.
+ENV PUPPETEER_SKIP_DOWNLOAD=1
 COPY package.json package-lock.json ./
 RUN npm ci
 
@@ -18,8 +20,12 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates openssl libreoffice-writer fonts-liberation \
+  && apt-get install -y --no-install-recommends ca-certificates openssl libreoffice-writer fonts-liberation chromium \
   && rm -rf /var/lib/apt/lists/*
+
+# Puppeteer uses the system Chromium installed above (no bundled download).
+ENV PUPPETEER_SKIP_DOWNLOAD=1
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 RUN addgroup --system --gid 1001 nodejs \
   && adduser --system --uid 1001 nextjs \

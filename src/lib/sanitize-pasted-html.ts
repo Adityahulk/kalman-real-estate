@@ -10,15 +10,24 @@ const ALLOWED_TAGS = new Set([
   "h1", "h2", "h3", "h4", "h5", "h6",
   "ul", "ol", "li",
   "table", "thead", "tbody", "tr", "td", "th",
-  "a", "blockquote",
+  "a", "blockquote", "img",
 ]);
 
 // Tags whose entire subtree should be removed (text included).
 const DROP_TAGS = new Set(["script", "style", "meta", "link", "title", "head", "o:p", "xml"]);
 
-const ALLOWED_ATTRS = new Set(["href", "colspan", "rowspan"]);
+const ALLOWED_ATTRS = new Set(["href", "colspan", "rowspan", "src", "alt"]);
 
 function cleanElement(el: Element) {
+  const tag = el.tagName.toLowerCase();
+  // Drop images whose source isn't a safe data:/http(s): URL (blocks javascript:, file:, etc.).
+  if (tag === "img") {
+    const src = el.getAttribute("src") ?? "";
+    if (!/^(data:image\/|https?:)/i.test(src)) {
+      el.remove();
+      return;
+    }
+  }
   // Remove disallowed attributes (drops inline style, class, lang, mso-*, etc.).
   for (const attr of [...el.attributes]) {
     if (!ALLOWED_ATTRS.has(attr.name.toLowerCase())) {
@@ -26,7 +35,7 @@ function cleanElement(el: Element) {
     }
   }
   // Force anchors to open safely.
-  if (el.tagName.toLowerCase() === "a" && el.getAttribute("href")) {
+  if (tag === "a" && el.getAttribute("href")) {
     el.setAttribute("rel", "noopener noreferrer");
     el.setAttribute("target", "_blank");
   }

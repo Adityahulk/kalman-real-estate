@@ -56,6 +56,8 @@ type PaymentEntry = {
   mode: "Cash" | "Cheque" | "Bank transfer" | "UPI" | "Other";
   amount: string;
   reference: string;
+  date?: string;
+  bank?: string;
   files?: File[];
   uploadedFiles?: StoredFileRef[];
 };
@@ -94,6 +96,8 @@ type InitialAllotmentData = {
   selectedAuthorizedPerson: string;
   totalAreaPrice: string;
   perUnitPrice: string;
+  oldPlotCode?: string;
+  newPlotCode?: string;
   paymentEntries: PaymentEntry[];
   effectiveAt: string;
   stamps: StampEntry[];
@@ -224,6 +228,8 @@ export function ProjectAllotmentFlow({
   const [selectedAuthorizedPerson, setSelectedAuthorizedPerson] = useState(initialData?.selectedAuthorizedPerson ?? firm.authorizedPersons[0] ?? "");
   const [totalAreaPrice, setTotalAreaPrice] = useState(initialData?.totalAreaPrice ?? "");
   const [perUnitPrice, setPerUnitPrice] = useState(initialData?.perUnitPrice ?? "");
+  const [oldPlotCode, setOldPlotCode] = useState(initialData?.oldPlotCode ?? "");
+  const [newPlotCode, setNewPlotCode] = useState(initialData?.newPlotCode ?? "");
   const [paymentEntries, setPaymentEntries] = useState<PaymentEntry[]>(
     initialData?.paymentEntries?.length ? initialData.paymentEntries : [{ mode: "Cash", amount: "", reference: "", files: [], uploadedFiles: [] }],
   );
@@ -296,7 +302,9 @@ export function ProjectAllotmentFlow({
       selectedAuthorizedPerson,
       totalAreaPrice,
       perUnitPrice,
-      paymentEntries: paymentEntries.map(({ mode, amount, reference }) => ({ mode, amount, reference })),
+      oldPlotCode,
+      newPlotCode,
+      paymentEntries: paymentEntries.map(({ mode, amount, reference, date, bank }) => ({ mode, amount, reference, date, bank })),
       effectiveAt,
       stamps,
       witnesses,
@@ -385,11 +393,13 @@ export function ProjectAllotmentFlow({
           ),
         }));
       const mergedPaymentEntries = paymentEntries
-        .filter((entry) => entry.amount || entry.reference || (entry.files?.length ?? 0) > 0 || (entry.uploadedFiles?.length ?? 0) > 0)
+        .filter((entry) => entry.amount || entry.reference || entry.date || entry.bank || (entry.files?.length ?? 0) > 0 || (entry.uploadedFiles?.length ?? 0) > 0)
         .map((entry, index) => ({
           mode: entry.mode,
           amount: entry.amount ? Number(entry.amount) : undefined,
           reference: entry.reference || undefined,
+          date: entry.date || undefined,
+          bank: entry.bank || undefined,
           files: replaceOrKeepStoredFiles(
             entry.files,
             entry.uploadedFiles,
@@ -441,6 +451,8 @@ export function ProjectAllotmentFlow({
               areaSqft: selectedPlot.areaSqft,
               dimensions: selectedPlot.dimensions,
               boundaries: selectedPlot.boundaries,
+              oldCode: oldPlotCode || undefined,
+              newCode: newPlotCode || undefined,
             } : undefined,
             allottee: {
               name,
@@ -617,6 +629,10 @@ export function ProjectAllotmentFlow({
             <label><span className="label">Total price</span><input className="input" inputMode="decimal" value={totalAreaPrice} onChange={(event) => setTotalAreaPrice(event.target.value)} placeholder={calculatedFromUnitPrice ? String(calculatedFromUnitPrice) : ""} /></label>
             <label><span className="label">Per-unit price <span className="font-normal text-slate-400">(per square yard)</span></span><input className="input" inputMode="decimal" value={perUnitPrice} onChange={(event) => setPerUnitPrice(event.target.value)} /></label>
           </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label><span className="label">Old plot number <span className="font-normal text-slate-400">(for revised-layout consent)</span></span><input className="input" value={oldPlotCode} onChange={(event) => setOldPlotCode(event.target.value)} /></label>
+            <label><span className="label">New plot number <span className="font-normal text-slate-400">(blank = current plot)</span></span><input className="input" value={newPlotCode} onChange={(event) => setNewPlotCode(event.target.value)} /></label>
+          </div>
           <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">Final total price: INR {calculatedPrice.toLocaleString("en-IN")}{!totalAreaPrice && calculatedFromUnitPrice ? " (calculated from per-unit price and plot area)" : ""} · Payment entries: INR {paymentTotal.toLocaleString("en-IN")}</div>
           <div className="space-y-3">
             {paymentEntries.map((entry, index) => <div className="grid gap-2 rounded-lg border border-slate-200 p-3 md:grid-cols-[1fr_1fr_1.4fr_auto]" key={index}>
@@ -624,6 +640,10 @@ export function ProjectAllotmentFlow({
               <label><span className="label">Amount</span><input className="input" inputMode="decimal" value={entry.amount} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, amount: event.target.value } : item))} /></label>
               <label><span className="label">{entry.mode === "Cheque" ? "Cheque number" : entry.mode === "Bank transfer" ? "Bank details / reference" : entry.mode === "UPI" ? "UPI ID" : entry.mode === "Other" ? "Payment details" : "Reference (optional)"}</span><input className="input" value={entry.reference} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, reference: event.target.value } : item))} /></label>
               <button className="btn-outline self-end px-3" type="button" aria-label="Remove payment entry" disabled={paymentEntries.length === 1} onClick={() => setPaymentEntries((entries) => entries.filter((_, itemIndex) => itemIndex !== index))}><X size={16} /></button>
+              {entry.mode === "Cheque" || entry.mode === "Bank transfer" ? <div className="md:col-span-4 grid gap-2 md:grid-cols-2">
+                <label><span className="label">Date of cheque</span><input className="input" type="date" value={entry.date ?? ""} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, date: event.target.value } : item))} /></label>
+                <label><span className="label">Drawn on bank</span><input className="input" value={entry.bank ?? ""} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, bank: event.target.value } : item))} /></label>
+              </div> : null}
               <label className="md:col-span-4"><span className="label">Upload files</span><input className="input pt-2" type="file" multiple onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, files: Array.from(event.target.files ?? []) } : item))} /></label>
               {displayFileNames(entry.files, entry.uploadedFiles) ? <div className="md:col-span-4 text-xs text-slate-500">{displayFileNames(entry.files, entry.uploadedFiles)}</div> : null}
             </div>)}
@@ -1206,6 +1226,12 @@ function LetterDraftCanvas({
   draftHtml: string;
   onInput: () => void;
 }) {
+  useEffect(() => {
+    // Make Enter insert a clean <p> (matching the template structure) instead of a <div>,
+    // so spacing stays consistent and no content is lost on render.
+    try { globalThis.document.execCommand("defaultParagraphSeparator", false, "p"); } catch {}
+  }, []);
+
   useEffect(() => {
     if (!editorRef.current) return;
     editorRef.current.innerHTML = draftHtml;
