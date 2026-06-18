@@ -68,8 +68,6 @@ export function DevelopmentTaskDashboard({
   const [category, setCategory] = useState("all");
   const [delayedOnly, setDelayedOnly] = useState(false);
   const [editingTask, setEditingTask] = useState<TaskFormInput | null>(null);
-  const [showPlans, setShowPlans] = useState(false);
-  const [showTaskForm, setShowTaskForm] = useState(false);
 
   const filteredTasks = useMemo(() => tasks.filter((task) => {
     const matchesQuery = !query.trim() || `${task.name} ${task.category} ${task.assignedTo ?? ""}`.toLowerCase().includes(query.trim().toLowerCase());
@@ -94,67 +92,16 @@ export function DevelopmentTaskDashboard({
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
-          <button
-            className={showPlans ? "btn-primary" : "btn-outline"}
-            type="button"
-            onClick={() => setShowPlans((current) => !current)}
-          >
+          <Link className="btn-outline h-10 px-4" href={`/app/projects/${projectId}/development/plans`}>
             <FileStack size={16} />
             View plans
-          </button>
-          <button
-            className={showTaskForm || editingTask ? "btn-primary" : "btn-outline"}
-            type="button"
-            onClick={() => {
-              setEditingTask(null);
-              setShowTaskForm((current) => !current);
-            }}
-          >
+          </Link>
+          <Link className="btn-outline h-10 px-4" href={`/app/projects/${projectId}/development/new-task`}>
             <Plus size={16} />
             Add task
-          </button>
+          </Link>
         </div>
       </header>
-
-      {showPlans || showTaskForm || editingTask ? (
-        <section className="grid gap-6 xl:grid-cols-2">
-          {showPlans ? (
-            <section className="rounded-xl border border-slate-200 bg-white p-5">
-              <div className="mb-4 flex items-center gap-2">
-                <FileStack size={18} />
-                <h2 className="font-semibold">View plans</h2>
-              </div>
-              <div className="space-y-3">
-                {planFiles.map((file) => (
-                  <div className="rounded-lg border border-slate-200 p-3 text-sm" key={file.id}>
-                    <div className="font-medium">{file.taskName}</div>
-                    <div className="mt-1 text-slate-500">{file.fileName}</div>
-                    <div className="mt-3">
-                      <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${file.id}/download?disposition=inline&proxy=1`} target="_blank" rel="noreferrer">
-                        <ExternalLink size={13} />
-                        Open plan
-                      </a>
-                    </div>
-                  </div>
-                ))}
-                {!planFiles.length ? <EmptyBlock label="No task plans uploaded yet." /> : null}
-              </div>
-            </section>
-          ) : null}
-
-          {showTaskForm || editingTask ? (
-            <DevelopmentTaskForm
-              projectId={projectId}
-              categories={categories}
-              initialTask={editingTask ?? undefined}
-              onDone={() => {
-                setEditingTask(null);
-                setShowTaskForm(false);
-              }}
-            />
-          ) : null}
-        </section>
-      ) : null}
 
       <div className="space-y-6">
         <section className="grid gap-4 md:grid-cols-3">
@@ -189,24 +136,27 @@ export function DevelopmentTaskDashboard({
             empty="No ongoing tasks yet."
             tasks={ongoingTasks}
             projectId={projectId}
-            onEdit={(task) => {
-              setEditingTask(toTaskFormInput(task));
-              setShowTaskForm(true);
-            }}
+            onEdit={(task) => setEditingTask(toTaskFormInput(task))}
             showManageActions={false}
           />
           <TaskListCard
             title="All upcoming tasks"
             empty="No upcoming tasks yet."
             tasks={upcomingTasks}
-            onEdit={(task) => {
-              setEditingTask(toTaskFormInput(task));
-              setShowTaskForm(true);
-            }}
+            onEdit={(task) => setEditingTask(toTaskFormInput(task))}
             projectId={projectId}
             showManageActions
           />
         </section>
+
+        {editingTask ? (
+          <DevelopmentTaskForm
+            projectId={projectId}
+            categories={categories}
+            initialTask={editingTask}
+            onDone={() => setEditingTask(null)}
+          />
+        ) : null}
       </div>
     </div>
   );

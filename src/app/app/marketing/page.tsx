@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Plus } from "lucide-react";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
-import { MarketingIdeaActions, MarketingTaskForm } from "./marketing-actions";
+import { MarketingIdeaActions } from "./marketing-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +29,10 @@ export default async function MarketingPage() {
             Manage team ideas, approve the right ones, and keep only media upload on this module.
           </p>
         </div>
+        <Link className="btn-primary h-10 px-4" href="/app/marketing/new">
+          <Plus size={16} />
+          Add new project idea
+        </Link>
       </div>
       <section className="mb-6 grid gap-4 md:grid-cols-3">
         <div className="card p-4">
@@ -56,7 +60,7 @@ export default async function MarketingPage() {
                       <div className="text-sm text-slate-500">{task.assignee || "Unassigned"}</div>
                       <h3 className="mt-1 font-semibold">{task.title}</h3>
                     </div>
-                    <span className="chip bg-slate-100 text-slate-700">{task.status.replaceAll("_", " ")}</span>
+                    <span className="chip bg-slate-100 text-slate-700">{marketingStatusLabel(task.status)}</span>
                   </div>
                   {task.dueAt ? <div className="mt-3 text-sm text-slate-500">Deadline: {new Date(task.dueAt).toLocaleDateString("en-IN")}</div> : null}
                   <p className="mt-3 text-sm leading-6 text-slate-600">{task.brief}</p>
@@ -110,10 +114,12 @@ export default async function MarketingPage() {
             </div>
           </div>
         </section>
-        <aside className="space-y-6">
-          <MarketingTaskForm />
-        </aside>
       </div>
     </main>
   );
+}
+
+function marketingStatusLabel(status: string) {
+  if (status === "APPROVED") return "APPROVED";
+  return "TEAM IDEA";
 }
