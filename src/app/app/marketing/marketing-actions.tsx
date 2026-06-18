@@ -124,23 +124,23 @@ export function MarketingMediaPanel({ tasks }: { tasks: { id: string; title: str
           Add a team idea first to upload task media.
         </div>
       ) : (
-      <div className="mt-4 grid gap-3">
-        <label>
-          <span className="label">Task</span>
-          <select className="input" value={taskId} onChange={(event) => setTaskId(event.target.value)}>
-            {tasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
-          </select>
-        </label>
-        <label>
-          <span className="label">Media stage</span>
-          <select className="input" value={kind} onChange={(event) => setKind(event.target.value)}>
-            <option value="RAW">Raw footage</option>
-            <option value="DRAFT">Editor draft</option>
-            <option value="FINAL">Final video</option>
-          </select>
-        </label>
-        <FileUploader label="Upload media file" visibility="TEAM" ownerType="MarketingTask" ownerId={taskId} accept="video/*,image/*" onUploaded={attach} />
-      </div>
+        <div className="mt-4 grid gap-3">
+          <label>
+            <span className="label">Task</span>
+            <select className="input" value={taskId} onChange={(event) => setTaskId(event.target.value)}>
+              {tasks.map((task) => <option key={task.id} value={task.id}>{task.title}</option>)}
+            </select>
+          </label>
+          <label>
+            <span className="label">Media stage</span>
+            <select className="input" value={kind} onChange={(event) => setKind(event.target.value)}>
+              <option value="RAW">Raw footage</option>
+              <option value="DRAFT">Editor draft</option>
+              <option value="FINAL">Final video</option>
+            </select>
+          </label>
+          <FileUploader label="Upload media file" visibility="TEAM" ownerType="MarketingTask" ownerId={taskId} accept="video/*,image/*" onUploaded={attach} />
+        </div>
       )}
       {message ? <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
     </div>
@@ -183,5 +183,117 @@ export function MarketingIdeaActions({ taskId }: { taskId: string }) {
       </div>
       {message ? <div className="text-sm text-rose-700">{message}</div> : null}
     </div>
+  );
+}
+
+export function MarketingProjectDetailEditor({
+  task,
+}: {
+  task: { id: string; title: string; brief: string; assignee: string | null; dueAt: string | null; links: string[]; status: string };
+}) {
+  const router = useRouter();
+  const [title, setTitle] = useState(task.title);
+  const [brief, setBrief] = useState(task.brief);
+  const [dueAt, setDueAt] = useState(task.dueAt ? task.dueAt.slice(0, 10) : "");
+  const [assignee, setAssignee] = useState(task.assignee ?? "");
+  const [links, setLinks] = useState<string[]>(task.links.length ? task.links : [""]);
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    setMessage("");
+    const response = await fetch(`/api/v1/marketing/tasks/${task.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        title,
+        brief,
+        dueAt: dueAt ? new Date(dueAt).toISOString() : undefined,
+        assignee: assignee || undefined,
+        links: links.map((item) => item.trim()).filter(Boolean),
+        status: task.status,
+      }),
+    });
+    const body = await response.json().catch(() => ({}));
+    setLoading(false);
+    if (!response.ok) {
+      setMessage(body.error ?? "Could not save project details.");
+      return;
+    }
+    setMessage("Project details updated.");
+    router.refresh();
+  }
+
+  async function removeTask() {
+    if (!window.confirm(`Delete "${task.title}"?`)) return;
+    setDeleting(true);
+    const response = await fetch(`/api/v1/marketing/tasks/${task.id}`, { method: "DELETE" });
+    const body = await response.json().catch(() => ({}));
+    setDeleting(false);
+    if (!response.ok) {
+      setMessage(body.error ?? "Could not delete project.");
+      return;
+    }
+    router.push("/app/marketing");
+    router.refresh();
+  }
+
+  return (
+    <form onSubmit={submit} className="card p-5">
+      <div className="flex items-start justify-between gap-3">
+        <h2 className="font-semibold">Project details</h2>
+        <button className="btn-outline h-9 px-3 text-sm text-rose-700" type="button" onClick={() => void removeTask()} disabled={deleting || loading}>
+          {deleting ? <Loader2 className="animate-spin" size={15} /> : <X size={15} />}
+          Delete
+        </button>
+      </div>
+      <label className="mt-4 block">
+        <span className="label">Project name</span>
+        <input className="input" value={title} onChange={(event) => setTitle(event.target.value)} />
+      </label>
+      <label className="mt-3 block">
+        <span className="label">Deadline</span>
+        <input className="input" type="date" value={dueAt} onChange={(event) => setDueAt(event.target.value)} />
+      </label>
+      <label className="mt-3 block">
+        <span className="label">Project idea</span>
+        <textarea className="input min-h-24" value={brief} onChange={(event) => setBrief(event.target.value)} />
+      </label>
+      <label className="mt-3 block">
+        <span className="label">Assign to</span>
+        <input className="input" value={assignee} onChange={(event) => setAssignee(event.target.value)} />
+      </label>
+      <div className="mt-3">
+        <span className="label">Links</span>
+        <div className="mt-2 space-y-2">
+          {links.map((link, index) => (
+            <div className="flex gap-2" key={index}>
+              <input
+                className="input"
+                value={link}
+                onChange={(event) => setLinks((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))}
+              />
+              {links.length > 1 ? (
+                <button className="btn-outline h-10 px-3" type="button" onClick={() => setLinks((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
+                  <X size={16} />
+                </button>
+              ) : null}
+            </div>
+          ))}
+        </div>
+        <button className="btn-outline mt-3 h-9 px-3 text-sm" type="button" onClick={() => setLinks((current) => [...current, ""])}>
+          <Plus size={15} />
+          Add link
+        </button>
+      </div>
+      {message ? <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
+      <button className="btn-primary mt-4" disabled={loading || !title || !brief}>
+        {loading ? <Loader2 className="animate-spin" size={17} /> : <Check size={17} />}
+        Save project details
+      </button>
+    </form>
   );
 }

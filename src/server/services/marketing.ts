@@ -13,6 +13,10 @@ export const marketingTaskSchema = z.object({
   links: z.array(z.string().trim().min(1)).default([]),
 });
 
+export const updateMarketingTaskSchema = marketingTaskSchema.extend({
+  status: z.nativeEnum(MarketingTaskStatus).optional(),
+});
+
 export async function createMarketingTask(context: RequestContext, input: z.infer<typeof marketingTaskSchema>) {
   const task = await prisma.marketingTask.create({
     data: {
@@ -33,6 +37,35 @@ export async function createMarketingTask(context: RequestContext, input: z.infe
     data: { taskId: task.id },
   });
   return task;
+}
+
+export async function updateMarketingTask(context: RequestContext, taskId: string, input: z.infer<typeof updateMarketingTaskSchema>) {
+  await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId } });
+  const task = await prisma.marketingTask.update({
+    where: { id: taskId },
+    data: {
+      title: input.title,
+      brief: input.brief,
+      dueAt: input.dueAt ? new Date(input.dueAt) : null,
+      assignee: input.assignee?.trim() || null,
+      links: input.links,
+      status: input.status,
+    },
+  });
+  await writeAuditEvent(context, { action: AuditAction.UPDATE, entityType: "MarketingTask", entityId: task.id, after: task });
+  return task;
+}
+
+export async function deleteMarketingTask(context: RequestContext, taskId: string) {
+  await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId } });
+  await prisma.$transaction([
+    prisma.approval.deleteMany({ where: { tenantId: context.tenantId, recordType: "MarketingTask", recordId: taskId } }),
+    prisma.reviewComment.deleteMany({ where: { tenantId: context.tenantId, taskId } }),
+    prisma.mediaAsset.deleteMany({ where: { tenantId: context.tenantId, taskId } }),
+    prisma.marketingTask.delete({ where: { id: taskId } }),
+  ]);
+  await writeAuditEvent(context, { action: AuditAction.DELETE, entityType: "MarketingTask", entityId: taskId, after: { deleted: true } });
+  return { id: taskId };
 }
 
 export const mediaSchema = z.object({

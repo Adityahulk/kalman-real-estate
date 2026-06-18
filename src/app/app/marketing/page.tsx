@@ -1,7 +1,8 @@
+import Link from "next/link";
 import { ExternalLink } from "lucide-react";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
-import { MarketingIdeaActions, MarketingMediaPanel, MarketingTaskForm } from "./marketing-actions";
+import { MarketingIdeaActions, MarketingTaskForm } from "./marketing-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -82,27 +83,35 @@ export default async function MarketingPage() {
 
           <div className="card p-5">
             <h2 className="font-semibold">Approved projects</h2>
-            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Project</th>
+                    <th className="px-4 py-3">Deadline</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
               {approvedIdeas.map((task, index) => (
-                <article key={task.id} className="rounded-xl border border-slate-200 p-5">
-                  <div className="text-sm text-slate-500">Project {index + 1}</div>
-                  <h3 className="mt-1 font-semibold">{task.title}</h3>
-                  {task.dueAt ? <div className="mt-3 text-sm text-slate-500">Deadline: {new Date(task.dueAt).toLocaleDateString("en-IN")}</div> : null}
-                  <div className="mt-3 text-sm text-slate-500">Assigned to: {task.assignee || "Unassigned"}</div>
-                  <p className="mt-3 text-sm leading-6 text-slate-600">{task.brief}</p>
-                </article>
+                  <tr key={task.id} className="hover:bg-slate-50">
+                    <td className="px-4 py-3">
+                      <Link className="font-medium text-navy-900 hover:text-navy-700" href={`/app/marketing/${task.id}`}>
+                        Project {index + 1} · {task.title}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {task.dueAt ? new Date(task.dueAt).toLocaleDateString("en-IN") : "-"}
+                    </td>
+                  </tr>
               ))}
-              {!approvedIdeas.length ? (
-                <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500 lg:col-span-2">
-                  No approved ideas yet.
-                </div>
-              ) : null}
+                </tbody>
+              </table>
+              {!approvedIdeas.length ? <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">No approved ideas yet.</div> : null}
             </div>
           </div>
         </section>
         <aside className="space-y-6">
           <MarketingTaskForm />
-          <MarketingMediaPanel tasks={tasks.map((task) => ({ id: task.id, title: task.title }))} />
         </aside>
       </div>
     </main>
