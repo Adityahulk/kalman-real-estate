@@ -37,6 +37,7 @@ const LETTER_PRINT_CSS = `
   .letter-paper-editor table { width: 100%; border-collapse: collapse; margin: 12px 0; }
   .letter-paper-editor th, .letter-paper-editor td { border: 1px solid #475569; padding: 8px 10px; vertical-align: top; white-space: pre-wrap; }
   .letter-paper-editor .plain th, .letter-paper-editor .plain td { border: 0; padding: 4px 0; }
+  .letter-paper-editor .side-table th, .letter-paper-editor .side-table td { text-align: center; }
   .letter-paper-editor ol, .letter-paper-editor ul { padding-left: 22px; }
   .letter-paper-editor li { margin-bottom: 8px; }
   .letter-paper-editor .attachment-block img { max-width: 100%; height: auto; display: block; margin: 8px auto; }

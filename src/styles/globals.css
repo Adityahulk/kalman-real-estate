@@ -155,6 +155,10 @@
   border: 0;
   padding: 4px 0;
 }
+.letter-paper-editor .side-table th,
+.letter-paper-editor .side-table td {
+  text-align: center;
+}
 .letter-paper-editor ol,
 .letter-paper-editor ul {
   padding-left: 22px;
