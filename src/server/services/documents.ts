@@ -434,6 +434,14 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
   const eStampNumber = stringFromKyc(extraDetails, ["eStampNumber"]);
   const eStampDateRaw = stringFromKyc(extraDetails, ["eStampDate"]);
   const eStampDateDots = /^\d{4}-\d{2}-\d{2}$/.test(eStampDateRaw) ? formatDateDots(new Date(eStampDateRaw)) : "";
+  // The allotment letter has up to three E-Stamp slots (Self Declaration, Consent, Buyers' Agreement).
+  // Map the entered stamps to those slots in order so each slot shows its own number/date.
+  const stampList = Array.isArray(extraDetails.stamps) ? extraDetails.stamps.map(jsonRecord) : [];
+  const stampNo = (index: number) => stringFromKyc(jsonRecord(stampList[index]), ["number"]);
+  const stampDateDots = (index: number) => {
+    const raw = stringFromKyc(jsonRecord(stampList[index]), ["dated"]);
+    return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? formatDateDots(new Date(raw)) : "";
+  };
   const oldPlotCode = stringFromKyc(extraPlot, ["oldCode"]);
   const newPlotCode = stringFromKyc(extraPlot, ["newCode"]) || plot.code;
   const paymentTableRows = buildPaymentTableRows(payments);
@@ -562,8 +570,12 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "todayDots": formatDateDots(new Date()),
     "rera.number": plot.project.reraNumber ?? "",
     "stamp.amount": "50/-",
-    "stamp.estampNo": eStampNumber,
-    "stamp.date": eStampDateDots || formatDateDots(new Date()),
+    "stamp.estampNo": stampNo(0) || eStampNumber,
+    "stamp.date": stampDateDots(0) || eStampDateDots || formatDateDots(new Date()),
+    "stamp.2.estampNo": stampNo(1),
+    "stamp.2.date": stampDateDots(1),
+    "stamp.3.estampNo": stampNo(2),
+    "stamp.3.date": stampDateDots(2),
     "possession.date": "",
     "agreement.place": plot.project.city || "Barnala",
     "witness.place": plot.project.city || "Barnala",

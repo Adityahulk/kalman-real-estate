@@ -238,7 +238,11 @@ export function ProjectAllotmentFlow({
     initialData?.paymentEntries?.length ? initialData.paymentEntries : [{ mode: "Cash", amount: "", reference: "", files: [], uploadedFiles: [] }],
   );
   const [effectiveAt, setEffectiveAt] = useState(initialData?.effectiveAt ?? new Date().toISOString().slice(0, 10));
-  const [stamps, setStamps] = useState<StampEntry[]>(initialData?.stamps?.length ? initialData.stamps : [{ number: "", dated: new Date().toISOString().slice(0, 10) }]);
+  const [stamps, setStamps] = useState<StampEntry[]>(initialData?.stamps?.length ? initialData.stamps : [
+    { number: "", dated: new Date().toISOString().slice(0, 10) },
+    { number: "", dated: new Date().toISOString().slice(0, 10) },
+    { number: "", dated: new Date().toISOString().slice(0, 10) },
+  ]);
   const [witnesses, setWitnesses] = useState<WitnessEntry[]>(initialData?.witnesses?.length ? initialData.witnesses : [{ name: "", aadhaar: "", address: "" }]);
   const [extraFields, setExtraFields] = useState<AdditionalFieldEntry[]>(initialData?.extraFields ?? []);
   const [letterFields, setLetterFields] = useState<Record<string, string>>(initialData?.letterFields ?? {});
