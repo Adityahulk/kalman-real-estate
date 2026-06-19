@@ -147,6 +147,8 @@ function buildInitialAllotmentData(
       : typeof authorizedPersons[0] === "string"
         ? authorizedPersons[0]
         : "",
+    signatoryRelation: typeof firmData.signatoryRelation === "string" ? firmData.signatoryRelation : "",
+    authorizationDate: typeof firmData.authorizationDate === "string" ? firmData.authorizationDate : "",
     totalAreaPrice: pricing.totalAreaPrice != null ? String(pricing.totalAreaPrice) : "",
     perUnitPrice: pricing.perUnitPrice != null ? String(pricing.perUnitPrice) : "",
     oldPlotCode: typeof plotExtra.oldCode === "string" ? plotExtra.oldCode : "",

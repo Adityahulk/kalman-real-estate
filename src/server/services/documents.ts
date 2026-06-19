@@ -414,6 +414,15 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     (typeof firmDetails.authorizedPerson === "string" && firmDetails.authorizedPerson) ||
     stringFromKyc(jsonRecord(tenant.letterhead), ["signatoryName"]) ||
     "Authorized Signatory";
+  // Signatory relation + authority-letter date are firm-level, but there is no firm-settings UI yet,
+  // so accept them per-allotment (extraDetails.firm.*) and fall back to the letterhead if configured.
+  const letterhead = jsonRecord(tenant.letterhead);
+  const signatoryRelation =
+    stringFromKyc(firmDetails, ["signatoryRelation", "authorizedPersonRelation"]) ||
+    stringFromKyc(letterhead, ["signatoryRelation"]);
+  const signatoryAuthorizationDate =
+    stringFromKyc(firmDetails, ["authorizationDate", "signatoryAuthorizationDate"]) ||
+    stringFromKyc(letterhead, ["authorizationDate"]);
   // Price: the user enters total + per-unit on the form (pricing.*); fall back to the derived ownership amount.
   const perUnitPrice = pricing.perUnitPrice ? Number(pricing.perUnitPrice) : null;
   const totalPrice = pricing.totalAreaPrice
@@ -475,8 +484,8 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "firm.address": tenant.region ?? projectAddress,
     "firm.paymentName": firmNameUpper,
     "firm.signatory.name": signatoryName,
-    "firm.signatory.relation": stringFromKyc(jsonRecord(tenant.letterhead), ["signatoryRelation"]) || "",
-    "firm.signatory.authorizationDate": stringFromKyc(jsonRecord(tenant.letterhead), ["authorizationDate"]) || "",
+    "firm.signatory.relation": signatoryRelation,
+    "firm.signatory.authorizationDate": signatoryAuthorizationDate,
     "firm.partnerDescription": stringFromKyc(jsonRecord(tenant.letterhead), ["partnerDescription"]) || "",
     "project.name": plot.project.name,
     "project.nameUpper": projectName.toUpperCase(),
@@ -484,7 +493,7 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "project.address": plot.project.address ?? "",
     "project.fullAddress": projectAddress,
     "project.approvalAuthority": stringFromKyc(jsonRecord(plot.project as unknown as Record<string, unknown>), ["approvalAuthority"]) || "Competent Authority cum Deputy Director, Local Body Government, Patiala under PAPRA Act 1995",
-    "project.revenueEstate": stringFromKyc(jsonRecord(plot.project as unknown as Record<string, unknown>), ["revenueEstate"]) || "",
+    "project.revenueEstate": stringFromKyc(jsonRecord(plot.project as unknown as Record<string, unknown>), ["revenueEstate"]) || plot.project.city || "",
     "project.developedLandDescription": stringFromKyc(jsonRecord(plot.project as unknown as Record<string, unknown>), ["developedLandDescription"]) || "",
     "plot.code": plot.code,
     "plot.areaSqft": plot.areaSqft?.toString() ?? "",

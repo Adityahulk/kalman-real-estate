@@ -94,6 +94,8 @@ type InitialAllotmentData = {
   address: string;
   phone: string;
   selectedAuthorizedPerson: string;
+  signatoryRelation?: string;
+  authorizationDate?: string;
   totalAreaPrice: string;
   perUnitPrice: string;
   oldPlotCode?: string;
@@ -226,6 +228,8 @@ export function ProjectAllotmentFlow({
     initialData?.allotteeDocuments?.length ? initialData.allotteeDocuments : [{ kind: "Aadhaar", number: "", files: [], uploadedFiles: [] }],
   );
   const [selectedAuthorizedPerson, setSelectedAuthorizedPerson] = useState(initialData?.selectedAuthorizedPerson ?? firm.authorizedPersons[0] ?? "");
+  const [signatoryRelation, setSignatoryRelation] = useState(initialData?.signatoryRelation ?? "");
+  const [authorizationDate, setAuthorizationDate] = useState(initialData?.authorizationDate ?? "");
   const [totalAreaPrice, setTotalAreaPrice] = useState(initialData?.totalAreaPrice ?? "");
   const [perUnitPrice, setPerUnitPrice] = useState(initialData?.perUnitPrice ?? "");
   const [oldPlotCode, setOldPlotCode] = useState(initialData?.oldPlotCode ?? "");
@@ -258,7 +262,7 @@ export function ProjectAllotmentFlow({
     if (!new URLSearchParams(window.location.search).has("restore")) return;
     try {
       const saved = JSON.parse(window.sessionStorage.getItem(restoreKey) ?? "{}") as Partial<{
-        plotId: string; name: string; address: string; phone: string; selectedAuthorizedPerson: string; totalAreaPrice: string; perUnitPrice: string;
+        plotId: string; name: string; address: string; phone: string; selectedAuthorizedPerson: string; signatoryRelation: string; authorizationDate: string; totalAreaPrice: string; perUnitPrice: string;
         paymentEntries: Array<Pick<PaymentEntry, "mode" | "amount" | "reference" | "uploadedFiles">>;
         effectiveAt: string; stamps: StampEntry[]; witnesses: WitnessEntry[]; allotteeDocuments: Array<Pick<AllotteeDocumentEntry, "kind" | "number" | "uploadedFiles">>;
         extraFields: AdditionalFieldEntry[]; letterFields: Record<string, string>; letterFieldUploadedFiles: Record<string, StoredFileRef[]>;
@@ -268,6 +272,8 @@ export function ProjectAllotmentFlow({
       if (saved.address) setAddress(saved.address);
       if (saved.phone) setPhone(saved.phone);
       if (saved.selectedAuthorizedPerson) setSelectedAuthorizedPerson(saved.selectedAuthorizedPerson);
+      if (saved.signatoryRelation) setSignatoryRelation(saved.signatoryRelation);
+      if (saved.authorizationDate) setAuthorizationDate(saved.authorizationDate);
       if (saved.totalAreaPrice) setTotalAreaPrice(saved.totalAreaPrice);
       if (saved.perUnitPrice) setPerUnitPrice(saved.perUnitPrice);
       if (Array.isArray(saved.paymentEntries) && saved.paymentEntries.length) setPaymentEntries(saved.paymentEntries.map((entry) => ({ ...entry, files: [], uploadedFiles: entry.uploadedFiles ?? [] })));
@@ -300,6 +306,8 @@ export function ProjectAllotmentFlow({
       address,
       phone,
       selectedAuthorizedPerson,
+      signatoryRelation,
+      authorizationDate,
       totalAreaPrice,
       perUnitPrice,
       oldPlotCode,
@@ -465,6 +473,8 @@ export function ProjectAllotmentFlow({
               phone: firm.contactPhone || undefined,
               address: firm.address || undefined,
               authorizedPerson: selectedAuthorizedPerson || undefined,
+              signatoryRelation: signatoryRelation || undefined,
+              authorizationDate: authorizationDate || undefined,
             },
             pricing: {
               type: "TOTAL_AND_PER_UNIT",
@@ -614,11 +624,25 @@ export function ProjectAllotmentFlow({
           <FirmValue label="PAN" value={firm.pan} />
           <FirmValue label="Address" value={firm.address} />
           <label className="md:col-span-2">
-            <span className="label">Authorised person</span>
-            <select className="input" value={selectedAuthorizedPerson} onChange={(event) => setSelectedAuthorizedPerson(event.target.value)}>
-              {!firm.authorizedPersons.length ? <option value="">No authorised person added</option> : null}
-              {firm.authorizedPersons.map((person) => <option key={person} value={person}>{person}</option>)}
-            </select>
+            <span className="label">Authorised signatory name</span>
+            <input
+              className="input"
+              list="authorized-persons-list"
+              value={selectedAuthorizedPerson}
+              onChange={(event) => setSelectedAuthorizedPerson(event.target.value)}
+              placeholder="Name of the partner / authorised signatory who signs the letter"
+            />
+            <datalist id="authorized-persons-list">
+              {firm.authorizedPersons.map((person) => <option key={person} value={person} />)}
+            </datalist>
+          </label>
+          <label>
+            <span className="label">Signatory relation <span className="font-normal text-slate-400">(e.g. S/o … , Partner)</span></span>
+            <input className="input" value={signatoryRelation} onChange={(event) => setSignatoryRelation(event.target.value)} placeholder="Optional" />
+          </label>
+          <label>
+            <span className="label">Authority letter date</span>
+            <input className="input" type="date" value={authorizationDate} onChange={(event) => setAuthorizationDate(event.target.value)} />
           </label>
         </div>
       </FormSection>
