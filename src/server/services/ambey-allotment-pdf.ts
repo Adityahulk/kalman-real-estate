@@ -121,6 +121,10 @@ async function drawParagraph(context: RenderContext, html: string, attrs: Record
   }
 
   const className = attrs.class ?? "";
+  if (className.includes("first-page-signoff")) {
+    drawFirstPageSignoff(context, html);
+    return;
+  }
   const align = className.includes("right") ? "right" : className.includes("center") ? "center" : "left";
   const forceBold = className.includes("bold");
   // Each <br> starts a new hard line; words inside carry their own bold/italic/underline styling.
@@ -134,6 +138,24 @@ async function drawParagraph(context: RenderContext, html: string, attrs: Record
     }
   }
   context.y -= 8;
+}
+
+function drawFirstPageSignoff(context: RenderContext, html: string) {
+  const lines = textFromHtml(html).split("\n").map((line) => line.trim()).filter(Boolean);
+  const boldLines = Array.from(html.matchAll(/<(?:strong|b)\b[^>]*>([\s\S]*?)<\/(?:strong|b)>/gi))
+    .map((match) => textFromHtml(match[1]).trim())
+    .filter(Boolean);
+  const startY = 124;
+  let y = startY;
+  for (const line of lines) {
+    const bold = boldLines.includes(line);
+    const font = bold ? context.bold : context.font;
+    const size = BODY_SIZE;
+    const width = font.widthOfTextAtSize(line, size);
+    const x = PAGE_WIDTH - RIGHT - width;
+    context.page.drawText(line, { x, y, size, font, color: INK });
+    y -= LINE_HEIGHT;
+  }
 }
 
 function fontFor(context: RenderContext, bold: boolean, italic: boolean) {
@@ -291,7 +313,11 @@ function drawTable(context: RenderContext, html: string, attrs: Record<string, s
     return;
   }
 
-  const widths = className.includes("payments") ? [120, 120, 95, 116] : [140, TEXT_WIDTH - 140];
+  const widths = className.includes("payments")
+    ? [120, 120, 95, 116]
+    : className.includes("pricing-table")
+      ? [170, 28, TEXT_WIDTH - 198]
+      : [140, TEXT_WIDTH - 140];
   const tableX = LEFT;
   let y = context.y;
   for (const row of rows) {
@@ -319,6 +345,10 @@ async function drawSpecialBox(context: RenderContext, html: string, attrs: Recor
     await drawAttachmentBlock(context, html);
     return;
   }
+  if (className.includes("possession-layout")) {
+    drawPossessionLayout(context, html);
+    return;
+  }
   if (className.includes("site-plan-box")) {
     const x = 365;
     const y = 330;
@@ -331,9 +361,134 @@ async function drawSpecialBox(context: RenderContext, html: string, attrs: Recor
     return;
   }
 
-  // photo-box: the source document simply leaves a blank space to physically affix a photo.
-  // Reserve that space (no border, no placeholder text). The boxes are positioned absolutely
-  // so they don't consume flow — drawing nothing leaves clean empty space.
+  if (className.includes("photo-box")) {
+    drawPhotoPlaceholder(context, html, className);
+  }
+}
+
+function drawPossessionLayout(context: RenderContext, html: string) {
+  const tableMatch = html.match(/<table\b([^>]*)>([\s\S]*?)<\/table>/i);
+  const signatureMatch = html.match(/<p\b[^>]*certificate-signature[^>]*>([\s\S]*?)<\/p>/i);
+  const rows = tableMatch ? parseRows(tableMatch[2]) : [];
+  const tableX = LEFT;
+  const topY = context.y - 6;
+  const widths = [150, 28, 118, 154];
+  let y = topY;
+
+  for (const row of rows) {
+    const wrapped = row.map((cell, index) =>
+      wrapText(cell.text, cell.header || cell.bold ? context.bold : context.font, BODY_SIZE, (widths[index] ?? 120) - 12),
+    );
+    const rowHeight = Math.max(38, Math.max(...wrapped.map((lines) => lines.length)) * 14 + 12);
+    let x = tableX;
+    row.forEach((cell, index) => {
+      const width = widths[index] ?? 120;
+      context.page.drawRectangle({
+        x,
+        y: y - rowHeight,
+        width,
+        height: rowHeight,
+        borderColor: rgb(0.25, 0.3, 0.38),
+        borderWidth: 0.9,
+      });
+      let textY = y - 17;
+      for (const line of wrapped[index]) {
+        const font = cell.header || cell.bold ? context.bold : context.font;
+        const isColonCell = index === 1;
+        const lineWidth = font.widthOfTextAtSize(line, BODY_SIZE);
+        const textX = isColonCell ? x + (width - lineWidth) / 2 : x + 8;
+        context.page.drawText(line, { x: textX, y: textY, size: BODY_SIZE, font, color: INK });
+        textY -= 14;
+      }
+      x += width;
+    });
+    y -= rowHeight;
+  }
+
+  const boxX = 402;
+  const boxTop = topY + 8;
+  const boxHeight = 260;
+  const boxWidth = 150;
+  context.page.drawRectangle({
+    x: boxX,
+    y: boxTop - boxHeight,
+    width: boxWidth,
+    height: boxHeight,
+    borderWidth: 2.2,
+    borderColor: INK,
+  });
+
+  const label = "SITE PLAN (NOT TO SCALE)";
+  const labelWidth = context.bold.widthOfTextAtSize(label, 11.5);
+  const labelY = boxTop - boxHeight - 40;
+  context.page.drawText(label, {
+    x: boxX + (boxWidth - labelWidth) / 2,
+    y: labelY,
+    size: 11.5,
+    font: context.bold,
+    color: INK,
+  });
+
+  drawCompass(context.page, context.font, boxX + boxWidth / 2, labelY - 86);
+
+  const signatureText = signatureMatch ? textFromHtml(signatureMatch[1]) : "";
+  if (signatureText) {
+    let sigY = labelY - 176;
+    for (const line of signatureText.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
+      const width = context.bold.widthOfTextAtSize(line, line.includes("Authorized Signatory") ? 10.6 : 11.8);
+      const font = line.includes("Authorized Signatory") ? context.font : context.bold;
+      const size = line.includes("Authorized Signatory") ? 10.6 : 11.8;
+      context.page.drawText(line, {
+        x: boxX + (boxWidth - width) / 2,
+        y: sigY,
+        size,
+        font,
+        color: INK,
+      });
+      sigY -= 16;
+    }
+  }
+
+  context.y = Math.min(y - 18, labelY - 210);
+}
+
+function drawPhotoPlaceholder(context: RenderContext, html: string, className: string) {
+  const text = textFromHtml(html).trim();
+  if (!text) return;
+
+  const width = 132;
+  const height = 170;
+  const x = className.includes("right") ? PAGE_WIDTH - RIGHT - width : LEFT;
+  const y = className.includes("bottom-left") ? context.y - height - 28 : context.y - height + 6;
+
+  context.page.drawRectangle({
+    x,
+    y,
+    width,
+    height,
+    borderWidth: 0.8,
+    borderColor: rgb(0.72, 0.77, 0.84),
+    borderDashArray: [4, 3],
+  });
+
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  const size = 11;
+  const lineGap = 18;
+  const totalHeight = lines.length * lineGap;
+  let textY = y + (height + totalHeight) / 2 - lineGap;
+  for (const line of lines) {
+    const lineWidth = context.font.widthOfTextAtSize(line, size);
+    context.page.drawText(line, {
+      x: x + (width - lineWidth) / 2,
+      y: textY,
+      size,
+      font: context.font,
+      color: rgb(0.4, 0.45, 0.52),
+    });
+    textY -= lineGap;
+  }
+
+  if (className.includes("bottom-left")) context.y = y - 18;
 }
 
 // Render a data-URL image centred at a modest size so multiple images can share a page.
