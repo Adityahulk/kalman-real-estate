@@ -23,17 +23,18 @@ export function ambeyAllotmentTemplate() {
 <h1><u>CERTIFICATE OF POSSESSION</u></h1>
 <p>Physical Possession of residential <u><strong>Plot No. {{plot.code}}</strong></u> situated in <strong>{{project.name}}, {{project.fullAddress}}</strong> duly approved by {{project.approvalAuthority}} measuring {{plot.areaSqyd}} Sqyds. approx. is handed over by <u><strong>{{firm.signatory.name}} {{firm.signatory.relation}}</strong></u>, one of the authorized partner / person of the promoters with valid title land under residential/ commercial zone to <u><strong>{{owner.nameWithRelation}} resident of {{owner.address}}</strong></u> as per the following details:-</p>
 <div class="possession-layout">
-<table class="plain side-table">
-<tr><th>SIDES</th><th>: SIZE</th><th>ADJOINING</th></tr>
-<tr><td>EAST SIDE</td><td>: {{plot.eastSize}}</td><td>{{plot.eastAdjoining}}</td></tr>
-<tr><td>WEST SIDE</td><td>: {{plot.westSize}}</td><td>{{plot.westAdjoining}}</td></tr>
-<tr><td>NORTH SIDE</td><td>: {{plot.northSize}}</td><td>{{plot.northAdjoining}}</td></tr>
-<tr><td>SOUTH SIDE</td><td>: {{plot.southSize}}</td><td>{{plot.southAdjoining}}</td></tr>
+<table class="side-grid-table possession-table">
+<tr><th>SIDES</th><th>:</th><th>SIZE</th><th>ADJOINING</th></tr>
+<tr><td>EAST SIDE</td><td>:</td><td>{{plot.eastSize}}</td><td>{{plot.eastAdjoining}}</td></tr>
+<tr><td>WEST SIDE</td><td>:</td><td>{{plot.westSize}}</td><td>{{plot.westAdjoining}}</td></tr>
+<tr><td>NORTH SIDE</td><td>:</td><td>{{plot.northSize}}</td><td>{{plot.northAdjoining}}</td></tr>
+<tr><td>SOUTH SIDE</td><td>:</td><td>{{plot.southSize}}</td><td>{{plot.southAdjoining}}</td></tr>
 </table>
 <div class="possession-aside">
-<div class="site-plan-box">SITE PLAN (NOT TO SCALE)</div>
-<div class="compass"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="46" fill="none" stroke="#475569" stroke-width="2"/><polygon points="50,8 57,50 50,46 43,50" fill="#475569"/><polygon points="50,92 43,50 50,54 57,50" fill="#cbd5e1"/><text x="50" y="22" text-anchor="middle" font-size="13" font-weight="700" fill="#111827">N</text><text x="50" y="98" text-anchor="middle" font-size="10" fill="#475569">S</text><text x="5" y="54" font-size="10" fill="#475569">W</text><text x="89" y="54" font-size="10" fill="#475569">E</text></svg></div>
-<p class="center"><strong>For M/s. {{firm.nameUpper}}</strong><br>(Authorized Signatory)</p>
+<div class="site-plan-box outline possession-plan-box"></div>
+<div class="site-plan-label">SITE PLAN (NOT TO SCALE)</div>
+<div class="compass"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="33" fill="none" stroke="#111827" stroke-width="1.25"/><circle cx="50" cy="50" r="27" fill="none" stroke="#111827" stroke-width="0.75"/><circle cx="50" cy="50" r="7" fill="#111827"/><polygon points="50,8 54,46 50,42 46,46" fill="#111827"/><polygon points="50,92 46,54 50,58 54,54" fill="#111827"/><polygon points="8,50 46,46 42,50 46,54" fill="#111827"/><polygon points="92,50 54,54 58,50 54,46" fill="#111827"/><line x1="50" y1="14" x2="50" y2="86" stroke="#111827" stroke-width="1.1"/><line x1="14" y1="50" x2="86" y2="50" stroke="#111827" stroke-width="1.1"/><text x="50" y="12" text-anchor="middle" font-size="8" font-weight="700" fill="#111827">N</text><text x="50" y="98" text-anchor="middle" font-size="8" fill="#111827">S</text><text x="4" y="53" font-size="8" fill="#111827">W</text><text x="90" y="53" font-size="8" fill="#111827">E</text></svg></div>
+<p class="center certificate-signature"><strong>For M/s. {{firm.nameUpper}}</strong><br>(Authorized Signatory)</p>
 </div>
 </div>
 </section>

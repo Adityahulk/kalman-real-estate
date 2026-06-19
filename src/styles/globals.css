@@ -186,32 +186,75 @@
 .letter-paper-editor .side-table td {
   text-align: center;
 }
+.letter-paper-editor .side-grid-table th,
+.letter-paper-editor .side-grid-table td {
+  text-align: left;
+}
 /* Certificate of Possession: plot table on the left, site plan + compass + signatory on the right. */
 .letter-paper-editor .possession-layout {
   display: flex;
-  gap: 24px;
+  gap: 36px;
   align-items: flex-start;
-  margin: 12px 0;
+  justify-content: space-between;
+  margin: 18px 0 0;
 }
-.letter-paper-editor .possession-layout .side-table {
-  flex: 1;
+.letter-paper-editor .possession-table {
+  width: 52%;
   margin: 0;
+  table-layout: fixed;
+}
+.letter-paper-editor .possession-table th:nth-child(1),
+.letter-paper-editor .possession-table td:nth-child(1) {
+  width: 34%;
+}
+.letter-paper-editor .possession-table th:nth-child(2),
+.letter-paper-editor .possession-table td:nth-child(2) {
+  width: 4%;
+  text-align: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+.letter-paper-editor .possession-table th:nth-child(3),
+.letter-paper-editor .possession-table td:nth-child(3) {
+  width: 22%;
+}
+.letter-paper-editor .possession-table th:nth-child(4),
+.letter-paper-editor .possession-table td:nth-child(4) {
+  width: 40%;
+}
+.letter-paper-editor .possession-table th,
+.letter-paper-editor .possession-table td {
+  padding: 12px 10px;
+  font-size: 14px;
+  line-height: 1.2;
 }
 .letter-paper-editor .possession-aside {
-  width: 240px;
+  width: 300px;
   flex-shrink: 0;
+  text-align: center;
 }
-.letter-paper-editor .possession-aside .site-plan-box {
-  min-height: 170px;
+.letter-paper-editor .possession-plan-box {
+  min-height: 300px;
+  border-width: 3px;
+  margin: 0 auto;
+}
+.letter-paper-editor .site-plan-label {
+  margin-top: 72px;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 .letter-paper-editor .compass {
   display: flex;
   justify-content: center;
-  margin: 10px 0;
+  margin: 44px 0 24px;
 }
 .letter-paper-editor .compass svg {
-  width: 120px;
-  height: 120px;
+  width: 150px;
+  height: 150px;
+}
+.letter-paper-editor .certificate-signature {
+  margin-top: 18px;
 }
 .letter-paper-editor ol,
 .letter-paper-editor ul {
@@ -229,6 +272,13 @@
   .letter-paper-editor section[data-ambey-page="1"],
   .letter-paper-editor section[data-ambey-page="2"] {
     padding-top: 96px;
+  }
+  .letter-paper-editor .possession-layout {
+    flex-direction: column;
+  }
+  .letter-paper-editor .possession-table,
+  .letter-paper-editor .possession-aside {
+    width: 100%;
   }
 }
 .letter-auto-field {

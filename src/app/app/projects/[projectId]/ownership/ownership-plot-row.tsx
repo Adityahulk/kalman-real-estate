@@ -114,22 +114,19 @@ export function OwnershipPlotRow({
       </td>
       <td className="px-5 py-4">
         <div className="flex flex-wrap gap-2" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-          <button className="btn-primary h-8 px-3 text-xs" type="button" onClick={() => router.push(href)}>
-            Open plot
+          <button className="btn-outline h-8 w-8 px-0 text-slate-600" type="button" title="Edit plot" aria-label="Edit plot" onClick={() => router.push(`${href}/edit`)}>
+            <Pencil size={14} />
           </button>
-          <button className="btn-outline h-8 px-3 text-xs" type="button" onClick={() => router.push(`${href}/edit`)}>
-            <Pencil size={14} /> Edit
-          </button>
-          <button className="btn-outline h-8 px-3 text-xs" type="button" onClick={() => router.push(`${href}?tab=plot-map`)}>
-            <Map size={14} /> Plot Map
+          <button className="btn-outline h-8 w-8 px-0 text-slate-600" type="button" title="Plot map" aria-label="Open plot map" onClick={() => router.push(`${href}?tab=plot-map`)}>
+            <Map size={14} />
           </button>
           {document ? (
-            <button className="btn-outline h-8 px-3 text-xs" type="button" onClick={() => router.push(`${href}/letters/${document.id}`)}>
-              <FileText size={14} /> Open letter
+            <button className="btn-outline h-8 w-8 px-0 text-slate-600" type="button" title="Open letter" aria-label="Open letter" onClick={() => router.push(`${href}/letters/${document.id}`)}>
+              <FileText size={14} />
             </button>
           ) : null}
-          <button className="btn-outline h-8 px-3 text-xs border-rose-300 text-rose-600 hover:bg-rose-50" type="button" onClick={() => void deletePlot()} disabled={deleting}>
-            {deleting ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />} Delete
+          <button className="btn-outline h-8 w-8 px-0 border-rose-300 text-rose-600 hover:bg-rose-50" type="button" title="Delete plot" aria-label="Delete plot" onClick={() => void deletePlot()} disabled={deleting}>
+            {deleting ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />}
           </button>
         </div>
       </td>

@@ -1198,7 +1198,6 @@ export function LetterStudioEditor({
                 className="input h-9 w-auto px-2 py-0 text-xs"
                 title="Font size for selected text"
                 value=""
-                onMouseDown={(e) => e.preventDefault()}
                 onChange={(e) => { applyFontSize(e.target.value); e.target.value = ""; }}
                 disabled={view !== "edit"}
               >

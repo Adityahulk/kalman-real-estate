@@ -20,7 +20,7 @@ const LINE_HEIGHT = 14.4;
 const INK = rgb(0.12, 0.15, 0.18);
 
 // One contiguous run of identically-styled characters within a word.
-type StyledRun = { text: string; b: boolean; i: boolean; u: boolean };
+type StyledRun = { text: string; b: boolean; i: boolean; u: boolean; size?: number };
 // A space-delimited word, possibly containing several differently-styled runs.
 type Word = StyledRun[];
 
@@ -144,7 +144,8 @@ function fontFor(context: RenderContext, bold: boolean, italic: boolean) {
 }
 
 function runWidth(context: RenderContext, run: StyledRun, size: number) {
-  return fontFor(context, run.b, run.i).widthOfTextAtSize(run.text, size);
+  const resolvedSize = run.size ?? size;
+  return fontFor(context, run.b, run.i).widthOfTextAtSize(run.text, resolvedSize);
 }
 
 function wordWidth(context: RenderContext, word: Word, size: number) {
@@ -158,6 +159,7 @@ function parseStyledLines(html: string): Word[][] {
   let words: Word[] = [];
   let word: Word = [];
   let bold = 0, italic = 0, underline = 0;
+  const sizeStack: Array<number | undefined> = [];
 
   const flushWord = () => { if (word.length) { words.push(word); word = []; } };
   const flushLine = () => { flushWord(); lines.push(words); words = []; };
@@ -165,9 +167,10 @@ function parseStyledLines(html: string): Word[][] {
     for (const ch of text) {
       if (ch === " " || ch === "\t" || ch === "\n") { flushWord(); continue; }
       const b = bold > 0, i = italic > 0, u = underline > 0;
+      const size = sizeStack.length ? sizeStack[sizeStack.length - 1] : undefined;
       const last = word[word.length - 1];
-      if (last && last.b === b && last.i === i && last.u === u) last.text += ch;
-      else word.push({ text: ch, b, i, u });
+      if (last && last.b === b && last.i === i && last.u === u && last.size === size) last.text += ch;
+      else word.push({ text: ch, b, i, u, size });
     }
   };
 
@@ -181,6 +184,10 @@ function parseStyledLines(html: string): Word[][] {
       if (tag === "b" || tag === "strong") bold = Math.max(0, bold + delta);
       else if (tag === "i" || tag === "em") italic = Math.max(0, italic + delta);
       else if (tag === "u") underline = Math.max(0, underline + delta);
+      else if (tag === "span") {
+        if (closing) sizeStack.pop();
+        else sizeStack.push(extractInlineFontSize(token));
+      }
     } else {
       appendText(decodeHtml(token));
     }
@@ -191,12 +198,12 @@ function parseStyledLines(html: string): Word[][] {
 
 // Greedily wrap words into visual lines that fit within maxWidth.
 function wrapWords(context: RenderContext, words: Word[], size: number, maxWidth: number): Word[][] {
-  const spaceW = context.font.widthOfTextAtSize(" ", size);
   const lines: Word[][] = [];
   let line: Word[] = [];
   let width = 0;
   for (const word of words) {
     const ww = wordWidth(context, word, size);
+    const spaceW = context.font.widthOfTextAtSize(" ", Math.max(wordMaxSize(word, size), line.length ? lineMaxSize(line, size) : size));
     const add = line.length ? spaceW + ww : ww;
     if (line.length && width + add > maxWidth) {
       lines.push(line);
@@ -213,13 +220,17 @@ function wrapWords(context: RenderContext, words: Word[], size: number, maxWidth
 
 function drawWordLine(context: RenderContext, words: Word[], align: "left" | "center" | "right", forceBold: boolean) {
   const size = BODY_SIZE;
-  const spaceW = context.font.widthOfTextAtSize(" ", size);
-  const total = words.reduce((sum, word, index) => sum + wordWidth(context, word, size) + (index ? spaceW : 0), 0);
+  const total = words.reduce((sum, word, index) => {
+    const spaceW = index ? context.font.widthOfTextAtSize(" ", Math.max(wordMaxSize(word, size), lineMaxSize(words.slice(0, index), size))) : 0;
+    return sum + wordWidth(context, word, size) + spaceW;
+  }, 0);
   const y = context.y;
   let x = align === "right" ? PAGE_WIDTH - RIGHT - total : align === "center" ? (PAGE_WIDTH - total) / 2 : LEFT;
+  const maxSize = lineMaxSize(words, size);
 
   words.forEach((word, wi) => {
     if (wi) {
+      const spaceW = context.font.widthOfTextAtSize(" ", Math.max(wordMaxSize(word, size), maxSize));
       // Keep the underline continuous across a space when both neighbouring runs are underlined.
       const prevUnderlined = words[wi - 1][words[wi - 1].length - 1]?.u;
       const nextUnderlined = word[0]?.u;
@@ -230,13 +241,27 @@ function drawWordLine(context: RenderContext, words: Word[], align: "left" | "ce
     }
     for (const run of word) {
       const font = fontFor(context, run.b || forceBold, run.i);
-      const w = font.widthOfTextAtSize(run.text, size);
-      context.page.drawText(run.text, { x, y, size, font, color: INK });
+      const runSize = run.size ?? size;
+      const w = font.widthOfTextAtSize(run.text, runSize);
+      context.page.drawText(run.text, { x, y, size: runSize, font, color: INK });
       if (run.u) context.page.drawLine({ start: { x, y: y - 2 }, end: { x: x + w, y: y - 2 }, thickness: 0.6, color: INK });
       x += w;
     }
   });
-  context.y -= LINE_HEIGHT;
+  context.y -= Math.max(LINE_HEIGHT, maxSize * 1.38);
+}
+
+function extractInlineFontSize(token: string) {
+  const match = token.match(/font-size\s*:\s*(\d+(?:\.\d+)?)px/i);
+  return match ? Number(match[1]) : undefined;
+}
+
+function wordMaxSize(word: Word, fallback: number) {
+  return word.reduce((max, run) => Math.max(max, run.size ?? fallback), fallback);
+}
+
+function lineMaxSize(words: Word[], fallback: number) {
+  return words.reduce((max, word) => Math.max(max, wordMaxSize(word, fallback)), fallback);
 }
 
 function drawSingleLine(context: RenderContext, text: string, align: "left" | "center" | "right", bold = false, italic = false) {
