@@ -126,7 +126,7 @@
   display: grid;
   min-height: 210px;
   place-items: center;
-  border: 1px solid #94a3b8;
+  border: none;
   color: #64748b;
 }
 .letter-paper-editor table {

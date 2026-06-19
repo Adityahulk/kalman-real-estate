@@ -111,7 +111,8 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
   const hasRealBody = template?.body && template.body.length > 100 && !template.body.includes("data-pdf-layout-template") && !template.body.includes("data-exact-pdf-draft");
   const templateBody = hasRealBody ? template.body : defaultLetterBody(input.type);
   const { html, missingVariables, usedFileVariables } = renderTemplate(templateBody, snapshot.variables, snapshot.fileVariables);
-  const draftHtml = usedFileVariables ? html : appendSupportingDocumentPages(html, snapshot.supportingDocumentPages);
+  const reconciledHtml = reconcileStructuredBlocks(html, snapshot.variables);
+  const draftHtml = usedFileVariables ? reconciledHtml : appendSupportingDocumentPages(reconciledHtml, snapshot.supportingDocumentPages);
 
   const { fileVariables: _fv, supportingDocumentPages: _sp, ...snapshotMeta } = snapshot;
   const document = await prisma.generatedDocument.create({
@@ -713,6 +714,25 @@ function documentTypeForLetter(type: string): RealEstateDocumentType {
   if (type.toLowerCase().includes("transfer")) return RealEstateDocumentType.TRANSFER_LETTER;
   if (type.toLowerCase().includes("registry")) return RealEstateDocumentType.OTHER;
   return RealEstateDocumentType.ALLOTMENT_LETTER;
+}
+
+// Safety net for structured blocks whose dynamic placeholders can be lost when a template is
+// edited/saved (e.g. `{{payment.tableRows}}` sits as loose text directly inside <table>, which
+// the contenteditable editor can drop, freezing the table into empty rows). We re-inject the
+// real rows by anchoring on the table's `payments` class instead of trusting the placeholder to
+// survive — so cheque/payment data always reaches the draft. Idempotent: when the placeholder
+// did survive and rendered correctly, this reproduces the same header + data rows.
+function reconcileStructuredBlocks(html: string, variables: Record<string, string>) {
+  const paymentRows = variables["payment.tableRows"];
+  if (!paymentRows) return html;
+  return html.replace(
+    /(<table\b[^>]*class="[^"]*\bpayments\b[^"]*"[^>]*>)([\s\S]*?)(<\/table>)/gi,
+    (_full, open: string, inner: string, close: string) => {
+      const rows = inner.match(/<tr\b[\s\S]*?<\/tr>/gi) ?? [];
+      const headerRows = rows.filter((row) => /<th[\s>]/i.test(row));
+      return `${open}${headerRows.join("")}${paymentRows}${close}`;
+    },
+  );
 }
 
 function buildPaymentTableRows(payments: Record<string, unknown>[]) {

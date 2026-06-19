@@ -1,4 +1,5 @@
 import type { Browser, LaunchOptions } from "puppeteer";
+import { PDFDocument } from "pdf-lib";
 
 // Renders the letter editor's saved HTML to a PDF with real headless Chromium, so the PDF is a
 // pixel-faithful copy of what the user sees in the "Letter Studio" editor (same HTML + same CSS).
@@ -31,7 +32,7 @@ const LETTER_PRINT_CSS = `
   .letter-paper-editor .center { text-align: center; }
   .letter-paper-editor .muted { color: #475569; }
   .letter-paper-editor .photo-box, .letter-paper-editor .site-plan-box {
-    display: grid; min-height: 210px; place-items: center; border: 1px solid #94a3b8; color: #64748b;
+    display: grid; min-height: 210px; place-items: center; border: none; color: #64748b;
   }
   .letter-paper-editor table { width: 100%; border-collapse: collapse; margin: 12px 0; }
   .letter-paper-editor th, .letter-paper-editor td { border: 1px solid #475569; padding: 8px 10px; vertical-align: top; white-space: pre-wrap; }
@@ -78,13 +79,52 @@ async function renderOnce(bodyHtml: string): Promise<Buffer> {
     browser = await puppeteer.launch(LAUNCH_OPTIONS);
     const page = await browser.newPage();
     await page.setContent(wrapDocument(bodyHtml), { waitUntil: "load", timeout: 30000 });
-    const pdf = await page.pdf({
-      width: "860px",
-      height: "1110px",
-      printBackground: true,
-      preferCSSPageSize: false,
+
+    // Images are inlined as data URIs, but still decode asynchronously — wait so their height
+    // is included when we measure each section.
+    await page.evaluate(() => Promise.all(
+      Array.from(document.images).map((img) =>
+        img.complete ? null : new Promise<void>((resolve) => { img.onload = img.onerror = () => resolve(); })),
+    ));
+
+    // Each <section> is one editor "sheet" that grows with its content (min-height: 1110px).
+    // Render each section as its own page sized to that section's height so a single dense
+    // section never splits across two PDF pages — matching the editor exactly.
+    const heights = await page.evaluate(() => {
+      const sections = Array.from(document.querySelectorAll<HTMLElement>("section[data-ambey-page], section[data-letter-page]"));
+      return sections.map((el) => Math.ceil(el.getBoundingClientRect().height));
     });
-    return Buffer.from(pdf);
+
+    // Fallback for letters that aren't section-based: render the whole body as one tall page.
+    if (!heights.length) {
+      const bodyHeight = await page.evaluate(() => Math.ceil(document.body.scrollHeight));
+      const pdf = await page.pdf({ width: "860px", height: `${bodyHeight + 2}px`, printBackground: true, preferCSSPageSize: false });
+      return Buffer.from(pdf);
+    }
+
+    const pages: Buffer[] = [];
+    for (let i = 0; i < heights.length; i++) {
+      await page.evaluate((visibleIndex) => {
+        const sections = Array.from(document.querySelectorAll<HTMLElement>("section[data-ambey-page], section[data-letter-page]"));
+        sections.forEach((el, index) => { el.style.display = index === visibleIndex ? "" : "none"; });
+      }, i);
+      const pdf = await page.pdf({
+        width: "860px",
+        height: `${heights[i] + 2}px`,
+        printBackground: true,
+        preferCSSPageSize: false,
+        pageRanges: "1",
+      });
+      pages.push(Buffer.from(pdf));
+    }
+
+    const merged = await PDFDocument.create();
+    for (const buffer of pages) {
+      const doc = await PDFDocument.load(buffer);
+      const copied = await merged.copyPages(doc, doc.getPageIndices());
+      for (const copiedPage of copied) merged.addPage(copiedPage);
+    }
+    return Buffer.from(await merged.save());
   } finally {
     await browser?.close().catch(() => undefined);
   }
