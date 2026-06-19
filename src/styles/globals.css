@@ -186,11 +186,12 @@
   border: 2px solid #111827;
   padding: 16px;
   color: #111827;
+  background: #fff;
 }
 .letter-paper-editor .framed-photo::before {
   content: "";
   position: absolute;
-  inset: 18px 14px 18px 14px;
+  inset: 14px;
   border: 1px solid #111827;
   pointer-events: none;
 }
@@ -327,13 +328,14 @@
 /* Certificate of Possession: plot table on the left, site plan + compass + signatory on the right. */
 .letter-paper-editor .possession-layout {
   display: flex;
-  gap: 36px;
+  gap: 22px;
   align-items: flex-start;
-  justify-content: space-between;
   margin: 18px 0 0;
 }
 .letter-paper-editor .possession-table {
-  width: 52%;
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
   margin: 0;
   table-layout: fixed;
 }
@@ -363,17 +365,18 @@
   line-height: 1.2;
 }
 .letter-paper-editor .possession-aside {
-  width: 300px;
+  width: 204px;
   flex-shrink: 0;
   text-align: center;
 }
 .letter-paper-editor .possession-plan-box {
+  width: 176px;
   min-height: 300px;
   border-width: 3px;
   margin: 0 auto;
 }
 .letter-paper-editor .site-plan-label {
-  margin-top: 52px;
+  margin-top: 28px;
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -381,14 +384,14 @@
 .letter-paper-editor .compass {
   display: flex;
   justify-content: center;
-  margin: 34px 0 24px;
+  margin: 24px 0 18px;
 }
 .letter-paper-editor .compass svg {
-  width: 126px;
-  height: 126px;
+  width: 108px;
+  height: 108px;
 }
 .letter-paper-editor .certificate-signature {
-  margin-top: 20px;
+  margin-top: 12px;
 }
 .letter-paper-editor ol,
 .letter-paper-editor ul {

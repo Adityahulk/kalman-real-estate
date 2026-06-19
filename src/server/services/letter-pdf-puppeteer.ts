@@ -60,8 +60,8 @@ const LETTER_PRINT_CSS = `
   .letter-paper-editor .consent-indent { padding-left: 38px; text-indent: -24px; line-height: 1.62; margin-bottom: 22px; }
   .letter-paper-editor .verification-title { margin-top: 56px; margin-bottom: 48px; }
   .letter-paper-editor .verification-body { margin-top: 78px; max-width: 720px; }
-  .letter-paper-editor .framed-photo { border: 2px solid #111827; padding: 16px; color: #111827; }
-  .letter-paper-editor .framed-photo::before { content: ""; position: absolute; inset: 18px 14px 18px 14px; border: 1px solid #111827; pointer-events: none; }
+  .letter-paper-editor .framed-photo { border: 2px solid #111827; padding: 16px; color: #111827; background: #fff; }
+  .letter-paper-editor .framed-photo::before { content: ""; position: absolute; inset: 14px; border: 1px solid #111827; pointer-events: none; }
   .letter-paper-editor .photo-box { position: relative; }
   .letter-paper-editor .consent-subject { margin-bottom: 34px; }
   .letter-paper-editor .salutation { margin-bottom: 34px; }
@@ -96,19 +96,19 @@ const LETTER_PRINT_CSS = `
   .letter-paper-editor .possession-table td { font-weight: 600; }
   .letter-paper-editor .side-table th, .letter-paper-editor .side-table td { text-align: center; }
   .letter-paper-editor .side-grid-table th, .letter-paper-editor .side-grid-table td { text-align: left; }
-  .letter-paper-editor .possession-layout { display: flex; gap: 36px; align-items: flex-start; justify-content: space-between; margin: 18px 0 0; }
-  .letter-paper-editor .possession-table { width: 52%; margin: 0; table-layout: fixed; }
+  .letter-paper-editor .possession-layout { display: flex; gap: 22px; align-items: flex-start; margin: 18px 0 0; }
+  .letter-paper-editor .possession-table { flex: 1 1 auto; width: auto; min-width: 0; margin: 0; table-layout: fixed; }
   .letter-paper-editor .possession-table th:nth-child(1), .letter-paper-editor .possession-table td:nth-child(1) { width: 34%; }
   .letter-paper-editor .possession-table th:nth-child(2), .letter-paper-editor .possession-table td:nth-child(2) { width: 4%; text-align: center; padding-left: 0; padding-right: 0; }
   .letter-paper-editor .possession-table th:nth-child(3), .letter-paper-editor .possession-table td:nth-child(3) { width: 22%; }
   .letter-paper-editor .possession-table th:nth-child(4), .letter-paper-editor .possession-table td:nth-child(4) { width: 40%; }
   .letter-paper-editor .possession-table th, .letter-paper-editor .possession-table td { padding: 10px 8px; font-size: 14px; line-height: 1.2; }
-  .letter-paper-editor .possession-aside { width: 300px; flex-shrink: 0; text-align: center; }
-  .letter-paper-editor .possession-plan-box { min-height: 300px; border-width: 3px; margin: 0 auto; }
-  .letter-paper-editor .site-plan-label { margin-top: 52px; font-size: 14px; font-weight: 700; letter-spacing: 0.02em; }
-  .letter-paper-editor .compass { display: flex; justify-content: center; margin: 34px 0 24px; }
-  .letter-paper-editor .compass svg { width: 126px; height: 126px; }
-  .letter-paper-editor .certificate-signature { margin-top: 20px; }
+  .letter-paper-editor .possession-aside { width: 204px; flex-shrink: 0; text-align: center; }
+  .letter-paper-editor .possession-plan-box { width: 176px; min-height: 300px; border-width: 3px; margin: 0 auto; }
+  .letter-paper-editor .site-plan-label { margin-top: 28px; font-size: 14px; font-weight: 700; letter-spacing: 0.02em; }
+  .letter-paper-editor .compass { display: flex; justify-content: center; margin: 24px 0 18px; }
+  .letter-paper-editor .compass svg { width: 108px; height: 108px; }
+  .letter-paper-editor .certificate-signature { margin-top: 12px; }
   .letter-paper-editor ol, .letter-paper-editor ul { padding-left: 22px; }
   .letter-paper-editor li { margin-bottom: 8px; }
   .letter-paper-editor .attachment-block img { max-width: 100%; height: auto; display: block; margin: 8px auto; }

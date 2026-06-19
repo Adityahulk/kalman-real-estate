@@ -372,7 +372,7 @@ function drawPossessionLayout(context: RenderContext, html: string) {
   const rows = tableMatch ? parseRows(tableMatch[2]) : [];
   const tableX = LEFT;
   const topY = context.y - 6;
-  const widths = [150, 28, 118, 154];
+  const widths = [110, 18, 78, 122];
   let y = topY;
 
   for (const row of rows) {
@@ -405,10 +405,10 @@ function drawPossessionLayout(context: RenderContext, html: string) {
     y -= rowHeight;
   }
 
-  const boxX = 402;
+  const boxX = 410;
   const boxTop = topY + 8;
-  const boxHeight = 260;
-  const boxWidth = 150;
+  const boxHeight = 220;
+  const boxWidth = 110;
   context.page.drawRectangle({
     x: boxX,
     y: boxTop - boxHeight,
@@ -429,11 +429,11 @@ function drawPossessionLayout(context: RenderContext, html: string) {
     color: INK,
   });
 
-  drawCompass(context.page, context.font, boxX + boxWidth / 2, labelY - 86);
+  drawCompass(context.page, context.font, boxX + boxWidth / 2, labelY - 72);
 
   const signatureText = signatureMatch ? textFromHtml(signatureMatch[1]) : "";
   if (signatureText) {
-    let sigY = labelY - 176;
+    let sigY = labelY - 146;
     for (const line of signatureText.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
       const width = context.bold.widthOfTextAtSize(line, line.includes("Authorized Signatory") ? 10.6 : 11.8);
       const font = line.includes("Authorized Signatory") ? context.font : context.bold;
@@ -449,7 +449,7 @@ function drawPossessionLayout(context: RenderContext, html: string) {
     }
   }
 
-  context.y = Math.min(y - 18, labelY - 210);
+  context.y = Math.min(y - 18, labelY - 178);
 }
 
 function drawPhotoPlaceholder(context: RenderContext, html: string, className: string) {
@@ -466,9 +466,16 @@ function drawPhotoPlaceholder(context: RenderContext, html: string, className: s
     y,
     width,
     height,
+    borderWidth: 1.4,
+    borderColor: INK,
+  });
+  context.page.drawRectangle({
+    x: x + 14,
+    y: y + 14,
+    width: width - 28,
+    height: height - 28,
     borderWidth: 0.8,
-    borderColor: rgb(0.72, 0.77, 0.84),
-    borderDashArray: [4, 3],
+    borderColor: INK,
   });
 
   const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
