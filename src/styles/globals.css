@@ -121,13 +121,40 @@
 .letter-paper-editor .muted {
   color: #475569;
 }
-.letter-paper-editor .photo-box,
 .letter-paper-editor .site-plan-box {
   display: grid;
   min-height: 210px;
   place-items: center;
   border: none;
   color: #64748b;
+}
+/* Passport-size image box (35mm x 45mm) for affixing a photograph; floats to one edge. */
+.letter-paper-editor .photo-box {
+  display: grid;
+  width: 132px;
+  height: 170px;
+  place-items: center;
+  padding: 6px;
+  border: 1px dashed #cbd5e1;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1.3;
+  color: #64748b;
+}
+.letter-paper-editor .photo-box img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.letter-paper-editor .photo-box.bottom-left,
+.letter-paper-editor .photo-box.left {
+  float: left;
+  margin: 8px 16px 8px 0;
+}
+.letter-paper-editor .photo-box.right-mid,
+.letter-paper-editor .photo-box.right {
+  float: right;
+  margin: 8px 0 8px 16px;
 }
 .letter-paper-editor table {
   width: 100%;
@@ -158,6 +185,33 @@
 .letter-paper-editor .side-table th,
 .letter-paper-editor .side-table td {
   text-align: center;
+}
+/* Certificate of Possession: plot table on the left, site plan + compass + signatory on the right. */
+.letter-paper-editor .possession-layout {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  margin: 12px 0;
+}
+.letter-paper-editor .possession-layout .side-table {
+  flex: 1;
+  margin: 0;
+}
+.letter-paper-editor .possession-aside {
+  width: 240px;
+  flex-shrink: 0;
+}
+.letter-paper-editor .possession-aside .site-plan-box {
+  min-height: 170px;
+}
+.letter-paper-editor .compass {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0;
+}
+.letter-paper-editor .compass svg {
+  width: 120px;
+  height: 120px;
 }
 .letter-paper-editor ol,
 .letter-paper-editor ul {

@@ -22,6 +22,7 @@ export function ambeyAllotmentTemplate() {
 <section data-ambey-page="2" data-top="660">
 <h1><u>CERTIFICATE OF POSSESSION</u></h1>
 <p>Physical Possession of residential <u><strong>Plot No. {{plot.code}}</strong></u> situated in <strong>{{project.name}}, {{project.fullAddress}}</strong> duly approved by {{project.approvalAuthority}} measuring {{plot.areaSqyd}} Sqyds. approx. is handed over by <u><strong>{{firm.signatory.name}} {{firm.signatory.relation}}</strong></u>, one of the authorized partner / person of the promoters with valid title land under residential/ commercial zone to <u><strong>{{owner.nameWithRelation}} resident of {{owner.address}}</strong></u> as per the following details:-</p>
+<div class="possession-layout">
 <table class="plain side-table">
 <tr><th>SIDES</th><th>: SIZE</th><th>ADJOINING</th></tr>
 <tr><td>EAST SIDE</td><td>: {{plot.eastSize}}</td><td>{{plot.eastAdjoining}}</td></tr>
@@ -29,8 +30,12 @@ export function ambeyAllotmentTemplate() {
 <tr><td>NORTH SIDE</td><td>: {{plot.northSize}}</td><td>{{plot.northAdjoining}}</td></tr>
 <tr><td>SOUTH SIDE</td><td>: {{plot.southSize}}</td><td>{{plot.southAdjoining}}</td></tr>
 </table>
+<div class="possession-aside">
 <div class="site-plan-box">SITE PLAN (NOT TO SCALE)</div>
+<div class="compass"><svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="50" r="46" fill="none" stroke="#475569" stroke-width="2"/><polygon points="50,8 57,50 50,46 43,50" fill="#475569"/><polygon points="50,92 43,50 50,54 57,50" fill="#cbd5e1"/><text x="50" y="22" text-anchor="middle" font-size="13" font-weight="700" fill="#111827">N</text><text x="50" y="98" text-anchor="middle" font-size="10" fill="#475569">S</text><text x="5" y="54" font-size="10" fill="#475569">W</text><text x="89" y="54" font-size="10" fill="#475569">E</text></svg></div>
 <p class="center"><strong>For M/s. {{firm.nameUpper}}</strong><br>(Authorized Signatory)</p>
+</div>
+</div>
 </section>
 
 <section data-ambey-page="3" data-top="750">
@@ -70,8 +75,8 @@ export function ambeyAllotmentTemplate() {
 <p><strong>{{firm.nameUpper}}**</strong>, {{firm.address}} (hereinafter referred to as the 'Firm', which expression shall unless excluded by or repugnant to the subject or context be deemed to include its executors and authorized vide its permitted assigns) through it's duly Authorized Signatory vide authority letter dated {{firm.signatory.authorizationDate}} of the One Part;</p>
 <p><em>**M/s. {{firm.name}}, {{firm.address}} a partnership firm duly registered under the Indian Partnership Act, 1932 acting through its partner {{firm.signatory.name}} {{firm.signatory.relation}} authorized vide authority letter dated {{firm.signatory.authorizationDate}}.</em></p>
 <p class="center">AND</p>
-<p><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.address}}</u><br><u>Aadhaar No. {{owner.aadhaarNo}}</u><br><u>Pan No. {{owner.panNo}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>
 <div class="photo-box right-mid">Please affix<br>photograph of<br>allottee /<br>purchaser</div>
+<p><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.address}}</u><br><u>Aadhaar No. {{owner.aadhaarNo}}</u><br><u>Pan No. {{owner.panNo}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>
 <p><em>(hereinafter referred to as the *Allottee' which expression shall, unless excluded by or repugnant to the subject or context be deemed to include his/their heirs, executors, administrators, legal representatives, nominees, and assigns of the Other Part.</em></p>
 <p><strong>AND WHEREAS</strong> M/S. {{firm.nameUpper}}, entered into arrangements / collaborations with the Land Owners to develop, market and sell Plots in the said Residential Housing Project under the Brand Name "{{project.name}}" in the revenue estate of {{project.revenueEstate}} situated on {{project.fullAddress}} being developed on the aforesaid land (hereinafter referred to as then "Said Colony').</p>
 <p><strong>AND WHEREAS</strong> The Firm by virtue of the said sale by {{firm.nameUpper}} is entitled to and is competent to construct, develop, market and sell plots in the said colony, receive monies, give receipts, execute conveyance, other documents etc. as may be necessary and expedient to give effect to the aforesaid purpose, for the purpose of construction and sale of plots.</p>
@@ -93,7 +98,6 @@ export function ambeyAllotmentTemplate() {
 <p><strong>DETAILS OF PAYMENTS RECEIVED:</strong></p>
 <table class="payments">
 <tr><th>Cheque No./<br>RTGS/NEFT</th><th>Date of Cheque</th><th>Amount</th><th>Drawn on Bank</th></tr>
-{{payment.tableRows}}
 </table>
 <p>The allottee / vendee shall pay to the promoters / colonizers on prorata basis, the price of said plot, if the dimensions of the said plot increase.</p>
 <p>The colonizers /promoters promise to adjust on prorate basis, the price of plot, if the dimensions of the said plot and hence the area decreases.</p>

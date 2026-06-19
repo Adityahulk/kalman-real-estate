@@ -87,7 +87,12 @@ export async function generateDocument(context: RequestContext, input: z.infer<t
 
 export async function createDocumentDraft(context: RequestContext, input: z.infer<typeof createDocumentDraftSchema>) {
   const count = await prisma.generatedDocument.count({ where: { tenantId: context.tenantId, type: input.type } });
-  const documentNumber = `${input.type.toUpperCase()}-${new Date().getFullYear()}-${String(count + 1).padStart(5, "0")}`;
+  const fallbackNumber = `${input.type.toUpperCase()}-${new Date().getFullYear()}-${String(count + 1).padStart(5, "0")}`;
+  // A user-supplied number (e.g. TBS/AH/2026/006 from the allotment form) is used verbatim.
+  const providedNumber = typeof input.data.documentNumber === "string" && input.data.documentNumber.trim()
+    ? input.data.documentNumber.trim()
+    : null;
+  const documentNumber = providedNumber ?? fallbackNumber;
 
   const selectedTemplate = input.templateId
     ? await prisma.documentTemplate.findFirst({ where: { id: input.templateId, tenantId: context.tenantId, active: true } })

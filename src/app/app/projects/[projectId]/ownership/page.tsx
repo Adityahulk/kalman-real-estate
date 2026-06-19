@@ -170,6 +170,7 @@ export default async function ProjectOwnershipPage({
                   <OwnershipPlotRow
                     key={plot.id}
                     href={`/app/projects/${project.id}/plots/${plot.id}`}
+                    plotId={plot.id}
                     plot={plot.code}
                     ownerName={plot.currentOwner?.name ?? firm.name}
                     area={`${plot.areaSqYards?.toString() ?? (plot.areaSqft ? String(Number(plot.areaSqft) / 9) : "-")} sq yd`}

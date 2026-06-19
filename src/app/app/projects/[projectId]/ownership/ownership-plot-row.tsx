@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Eye, FileText, Loader2, Map, Pencil, X } from "lucide-react";
+import { Check, Eye, FileText, Loader2, Map, Pencil, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -12,6 +12,7 @@ type PlotDocument = {
 
 export function OwnershipPlotRow({
   href,
+  plotId,
   plot,
   ownerName,
   area,
@@ -21,6 +22,7 @@ export function OwnershipPlotRow({
   cadSource,
 }: {
   href: string;
+  plotId: string;
   plot: string;
   ownerName: string;
   area: string;
@@ -32,6 +34,20 @@ export function OwnershipPlotRow({
   const router = useRouter();
   const [status, setStatus] = useState(document?.status ?? "");
   const [loading, setLoading] = useState<"APPROVED" | "REJECTED" | "">("");
+  const [deleting, setDeleting] = useState(false);
+
+  async function deletePlot() {
+    if (deleting) return;
+    if (!globalThis.window.confirm(`Delete plot ${plot}? This removes it from the ownership ledger.`)) return;
+    setDeleting(true);
+    const response = await fetch(`/api/v1/plots/${plotId}`, { method: "DELETE" });
+    if (response.ok) {
+      router.refresh();
+    } else {
+      setDeleting(false);
+      globalThis.window.alert("Could not delete this plot.");
+    }
+  }
   const waiting = Boolean(document && ["DRAFT", "GENERATED", "UNDER_REVIEW"].includes(status));
   const approvalReady = Boolean(waiting && document?.fileAssetId);
 
@@ -112,6 +128,9 @@ export function OwnershipPlotRow({
               <FileText size={14} /> Open letter
             </button>
           ) : null}
+          <button className="btn-outline h-8 px-3 text-xs border-rose-300 text-rose-600 hover:bg-rose-50" type="button" onClick={() => void deletePlot()} disabled={deleting}>
+            {deleting ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />} Delete
+          </button>
         </div>
       </td>
     </tr>

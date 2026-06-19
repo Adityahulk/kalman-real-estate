@@ -31,13 +31,26 @@ const LETTER_PRINT_CSS = `
   .letter-paper-editor .right { text-align: right; }
   .letter-paper-editor .center { text-align: center; }
   .letter-paper-editor .muted { color: #475569; }
-  .letter-paper-editor .photo-box, .letter-paper-editor .site-plan-box {
+  .letter-paper-editor .site-plan-box {
     display: grid; min-height: 210px; place-items: center; border: none; color: #64748b;
   }
+  .letter-paper-editor .photo-box {
+    display: grid; width: 132px; height: 170px; place-items: center; padding: 6px;
+    border: 1px dashed #cbd5e1; text-align: center; font-size: 11px; line-height: 1.3; color: #64748b;
+  }
+  .letter-paper-editor .photo-box img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .letter-paper-editor .photo-box.bottom-left, .letter-paper-editor .photo-box.left { float: left; margin: 8px 16px 8px 0; }
+  .letter-paper-editor .photo-box.right-mid, .letter-paper-editor .photo-box.right { float: right; margin: 8px 0 8px 16px; }
   .letter-paper-editor table { width: 100%; border-collapse: collapse; margin: 12px 0; }
   .letter-paper-editor th, .letter-paper-editor td { border: 1px solid #475569; padding: 8px 10px; vertical-align: top; white-space: pre-wrap; }
   .letter-paper-editor .plain th, .letter-paper-editor .plain td { border: 0; padding: 4px 0; }
   .letter-paper-editor .side-table th, .letter-paper-editor .side-table td { text-align: center; }
+  .letter-paper-editor .possession-layout { display: flex; gap: 24px; align-items: flex-start; margin: 12px 0; }
+  .letter-paper-editor .possession-layout .side-table { flex: 1; margin: 0; }
+  .letter-paper-editor .possession-aside { width: 240px; flex-shrink: 0; }
+  .letter-paper-editor .possession-aside .site-plan-box { min-height: 170px; }
+  .letter-paper-editor .compass { display: flex; justify-content: center; margin: 10px 0; }
+  .letter-paper-editor .compass svg { width: 120px; height: 120px; }
   .letter-paper-editor ol, .letter-paper-editor ul { padding-left: 22px; }
   .letter-paper-editor li { margin-bottom: 8px; }
   .letter-paper-editor .attachment-block img { max-width: 100%; height: auto; display: block; margin: 8px auto; }

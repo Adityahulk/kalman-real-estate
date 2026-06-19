@@ -26,3 +26,8 @@ export async function writeAuditEvent(
     },
   });
 }
+
+export async function deleteAuditEvent(context: RequestContext, id: string) {
+  await prisma.auditEvent.deleteMany({ where: { id, tenantId: context.tenantId } });
+  return { id };
+}

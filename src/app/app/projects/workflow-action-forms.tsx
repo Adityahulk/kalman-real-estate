@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ClipboardEvent, FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { ClipboardEvent, FormEvent, MutableRefObject, RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, Bold, CheckCircle2, Download, Eye, FileText, Italic, Loader2, Plus, Save, Send, Trash2, Underline, Wand2, X } from "lucide-react";
 import { sanitizePastedHtml } from "@/lib/sanitize-pasted-html";
@@ -93,6 +93,7 @@ type InitialAllotmentData = {
   name: string;
   address: string;
   phone: string;
+  allotmentNumber?: string;
   selectedAuthorizedPerson: string;
   signatoryRelation?: string;
   authorizationDate?: string;
@@ -228,6 +229,8 @@ export function ProjectAllotmentFlow({
     initialData?.allotteeDocuments?.length ? initialData.allotteeDocuments : [{ kind: "Aadhaar", number: "", files: [], uploadedFiles: [] }],
   );
   const [selectedAuthorizedPerson, setSelectedAuthorizedPerson] = useState(initialData?.selectedAuthorizedPerson ?? firm.authorizedPersons[0] ?? "");
+  const [allotmentNumber, setAllotmentNumber] = useState(initialData?.allotmentNumber ?? "");
+  const [allotmentNumberEdited, setAllotmentNumberEdited] = useState(Boolean(initialData?.allotmentNumber));
   const [signatoryRelation, setSignatoryRelation] = useState(initialData?.signatoryRelation ?? "");
   const [authorizationDate, setAuthorizationDate] = useState(initialData?.authorizationDate ?? "");
   const [totalAreaPrice, setTotalAreaPrice] = useState(initialData?.totalAreaPrice ?? "");
@@ -252,6 +255,11 @@ export function ProjectAllotmentFlow({
   const [loading, setLoading] = useState(false);
 
   const selectedPlot = useMemo(() => plots.find((plot) => plot.id === plotId), [plotId, plots]);
+  // Auto allotment number TBS/AH/<year>/<zero-padded plot code>, e.g. plot 6 -> TBS/AH/2026/006.
+  const autoAllotmentNumber = useMemo(() => {
+    const digits = (selectedPlot?.code ?? "").replace(/\D/g, "");
+    return digits ? `TBS/AH/${new Date().getFullYear()}/${digits.padStart(3, "0")}` : "";
+  }, [selectedPlot?.code]);
   const calculatedFromUnitPrice = Number(perUnitPrice || 0) * Number(selectedPlot?.areaSqYards || 0);
   const calculatedPrice = Number(totalAreaPrice || 0) || calculatedFromUnitPrice;
   const paymentTotal = paymentEntries.reduce((total, entry) => total + Number(entry.amount || 0), 0);
@@ -261,12 +269,18 @@ export function ProjectAllotmentFlow({
     if (!selectedAuthorizedPerson && firm.authorizedPersons.length) setSelectedAuthorizedPerson(firm.authorizedPersons[0]);
   }, [firm.authorizedPersons, selectedAuthorizedPerson]);
 
+  // Keep the allotment number in sync with the selected plot until the user edits it manually.
+  useEffect(() => {
+    if (allotmentNumberEdited) return;
+    setAllotmentNumber(autoAllotmentNumber);
+  }, [autoAllotmentNumber, allotmentNumberEdited]);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!new URLSearchParams(window.location.search).has("restore")) return;
     try {
       const saved = JSON.parse(window.sessionStorage.getItem(restoreKey) ?? "{}") as Partial<{
-        plotId: string; name: string; address: string; phone: string; selectedAuthorizedPerson: string; signatoryRelation: string; authorizationDate: string; totalAreaPrice: string; perUnitPrice: string;
+        plotId: string; name: string; address: string; phone: string; allotmentNumber: string; selectedAuthorizedPerson: string; signatoryRelation: string; authorizationDate: string; totalAreaPrice: string; perUnitPrice: string;
         paymentEntries: Array<Pick<PaymentEntry, "mode" | "amount" | "reference" | "uploadedFiles">>;
         effectiveAt: string; stamps: StampEntry[]; witnesses: WitnessEntry[]; allotteeDocuments: Array<Pick<AllotteeDocumentEntry, "kind" | "number" | "uploadedFiles">>;
         extraFields: AdditionalFieldEntry[]; letterFields: Record<string, string>; letterFieldUploadedFiles: Record<string, StoredFileRef[]>;
@@ -275,6 +289,7 @@ export function ProjectAllotmentFlow({
       if (saved.name) setName(saved.name);
       if (saved.address) setAddress(saved.address);
       if (saved.phone) setPhone(saved.phone);
+      if (saved.allotmentNumber) { setAllotmentNumber(saved.allotmentNumber); setAllotmentNumberEdited(true); }
       if (saved.selectedAuthorizedPerson) setSelectedAuthorizedPerson(saved.selectedAuthorizedPerson);
       if (saved.signatoryRelation) setSignatoryRelation(saved.signatoryRelation);
       if (saved.authorizationDate) setAuthorizationDate(saved.authorizationDate);
@@ -309,6 +324,7 @@ export function ProjectAllotmentFlow({
       name,
       address,
       phone,
+      allotmentNumber,
       selectedAuthorizedPerson,
       signatoryRelation,
       authorizationDate,
@@ -520,6 +536,7 @@ export function ProjectAllotmentFlow({
           recordType: "Plot",
           recordId: plotId,
           data: {
+            documentNumber: allotmentNumber || undefined,
             customLetterFields: letterFields,
             customLetterFiles: mergedManualLetterFiles,
           },
@@ -576,6 +593,16 @@ export function ProjectAllotmentFlow({
           </label>
           <Link className="btn-outline shrink-0" href={`/app/projects/${projectId}/ownership/add-plot`}><Plus size={17} />Plot</Link>
         </div>
+        <label className="mt-3 block">
+          <span className="label">Allotment letter number</span>
+          <input
+            className="input font-mono"
+            value={allotmentNumber}
+            onChange={(event) => { setAllotmentNumber(event.target.value); setAllotmentNumberEdited(true); }}
+            placeholder="TBS/AH/2026/006"
+          />
+          <span className="mt-1 block text-xs text-slate-500">Auto-filled from the plot code. Edit if you need a different number — it is used as-is on the letter and PDF.</span>
+        </label>
         {selectedPlot ? (
           <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
@@ -967,6 +994,7 @@ export function LetterStudioEditor({
 }) {
   const router = useRouter();
   const editorRef = useRef<HTMLDivElement>(null);
+  const savedRangeRef = useRef<Range | null>(null);
   const [mounted, setMounted] = useState(false);
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [loading, setLoading] = useState<"save" | "render" | "">("");
@@ -996,6 +1024,33 @@ export function LetterStudioEditor({
   function format(command: "bold" | "italic" | "underline") {
     editorRef.current?.focus();
     globalThis.document.execCommand(command);
+    setDirty(true);
+  }
+
+  // Apply a font size to the current selection only (leaves the rest of the document untouched).
+  function applyFontSize(px: string) {
+    const editor = editorRef.current;
+    if (!editor || !px) return;
+    editor.focus();
+    const selection = globalThis.window.getSelection();
+    // Clicking the font-size dropdown moves focus out of the editor and collapses the live
+    // selection, so restore the range captured when the editor last lost focus.
+    if (selection && (selection.rangeCount === 0 || selection.isCollapsed) && savedRangeRef.current) {
+      selection.removeAllRanges();
+      selection.addRange(savedRangeRef.current);
+    }
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      setMessage({ kind: "error", text: "Select some text first, then choose a font size." });
+      return;
+    }
+    // execCommand("fontSize") only accepts 1–7; wrap the selection then convert to an exact px span.
+    globalThis.document.execCommand("fontSize", false, "7");
+    editor.querySelectorAll('font[size="7"]').forEach((node) => {
+      const span = globalThis.document.createElement("span");
+      span.style.fontSize = `${px}px`;
+      while (node.firstChild) span.appendChild(node.firstChild);
+      node.replaceWith(span);
+    });
     setDirty(true);
   }
 
@@ -1139,6 +1194,19 @@ export function LetterStudioEditor({
               <button type="button" className="btn-outline h-9 px-3 text-xs" onMouseDown={(e) => e.preventDefault()} onClick={() => format("underline")} disabled={view !== "edit"}>
                 <Underline size={14} />
               </button>
+              <select
+                className="input h-9 w-auto px-2 py-0 text-xs"
+                title="Font size for selected text"
+                value=""
+                onMouseDown={(e) => e.preventDefault()}
+                onChange={(e) => { applyFontSize(e.target.value); e.target.value = ""; }}
+                disabled={view !== "edit"}
+              >
+                <option value="" disabled>Font size</option>
+                {["10", "11", "12", "13", "14", "16", "18", "20", "24", "28", "32"].map((size) => (
+                  <option key={size} value={size}>{size} px</option>
+                ))}
+              </select>
               <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={saveDraft} disabled={Boolean(loading)}>
                 {loading === "save" ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
                 Save
@@ -1227,6 +1295,7 @@ export function LetterStudioEditor({
           <LetterDraftCanvas
             key={`letter-edit-${letter.id}`}
             editorRef={editorRef}
+            savedRangeRef={savedRangeRef}
             draftHtml={draftHtml}
             onInput={() => setDirty(true)}
           />
@@ -1247,10 +1316,12 @@ export function LetterStudioEditor({
 
 function LetterDraftCanvas({
   editorRef,
+  savedRangeRef,
   draftHtml,
   onInput,
 }: {
   editorRef: RefObject<HTMLDivElement>;
+  savedRangeRef: MutableRefObject<Range | null>;
   draftHtml: string;
   onInput: () => void;
 }) {
@@ -1292,6 +1363,12 @@ function LetterDraftCanvas({
         className="letter-paper-editor"
         onInput={onInput}
         onPaste={handlePaste}
+        onBlur={() => {
+          const selection = globalThis.window.getSelection();
+          if (selection && selection.rangeCount && editorRef.current?.contains(selection.anchorNode)) {
+            savedRangeRef.current = selection.getRangeAt(0).cloneRange();
+          }
+        }}
       />
     </section>
   );

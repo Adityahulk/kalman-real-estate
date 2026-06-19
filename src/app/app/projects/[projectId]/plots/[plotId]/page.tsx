@@ -29,6 +29,7 @@ import {
 } from "../../../../ownership/ownership-actions";
 import { BackButton } from "@/components/back-button";
 import { CadUploadForm } from "../../../../cad/cad-upload-form";
+import { PlotHistoryTable } from "./plot-history-table";
 
 export const dynamic = "force-dynamic";
 
@@ -441,7 +442,7 @@ export default async function ProjectPlotWorkspacePage({
 
       {activeTab === "history" ? (
         <section className="mt-4">
-          <Timeline title="Plot history" items={workspace.timeline} />
+          <PlotHistoryTable items={workspace.timeline} projectId={plot.projectId} plotId={plot.id} />
         </section>
       ) : null}
     </main>
@@ -645,56 +646,6 @@ function DocumentGrid({ files, empty }: { files: Awaited<ReturnType<typeof getPl
   );
 }
 
-function Timeline({
-  title = "Audit timeline",
-  items,
-  collapsible = false,
-}: {
-  title?: string;
-  items: Awaited<ReturnType<typeof getPlotWorkspace>>["timeline"];
-  collapsible?: boolean;
-}) {
-  const body = (
-      <div className="space-y-3">
-        {items.map((item) => (
-          <div key={item.id} className="rounded-lg border border-slate-200 p-3 text-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="font-medium">{item.title}</div>
-              <span className="text-xs text-slate-500">{item.at.toLocaleString("en-IN")}</span>
-            </div>
-            {item.detail ? <div className="mt-1 text-xs text-slate-500">{item.detail}</div> : null}
-          </div>
-        ))}
-        {!items.length ? <Empty label="No audit history yet." /> : null}
-      </div>
-  );
-
-  if (collapsible) {
-    return (
-      <details className="card group p-5">
-        <summary className="flex cursor-pointer list-none items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <History size={18} />
-            <h2 className="font-semibold">{title}</h2>
-            <span className="chip bg-slate-100 text-slate-700">{items.length}</span>
-          </div>
-          <ChevronDown className="text-slate-400 transition group-open:rotate-180" size={18} />
-        </summary>
-        <div className="mt-4 border-t border-slate-100 pt-4">{body}</div>
-      </details>
-    );
-  }
-
-  return (
-    <div className="card p-5">
-      <div className="mb-4 flex items-center gap-2">
-        <History size={18} />
-        <h2 className="font-semibold">{title}</h2>
-      </div>
-      {body}
-    </div>
-  );
-}
 
 function PlotGeometryPreview({
   geometry,

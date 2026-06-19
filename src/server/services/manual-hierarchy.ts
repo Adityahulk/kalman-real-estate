@@ -92,6 +92,22 @@ export async function updateManualPlot(context: RequestContext, plotId: string, 
   return plot;
 }
 
+export async function archiveManualPlot(context: RequestContext, plotId: string) {
+  const before = await prisma.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
+  const plot = await prisma.plot.update({
+    where: { id: plotId },
+    data: { archivedAt: new Date() },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.DELETE,
+    entityType: "Plot",
+    entityId: plot.id,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: plot as unknown as Prisma.InputJsonValue,
+  });
+  return plot;
+}
+
 export const manualSiteAssetSchema = z.object({
   name: z.string().min(2),
   type: z.string().min(2),

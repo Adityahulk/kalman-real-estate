@@ -117,29 +117,48 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
       })
     : [];
 
-  const timeline = [
+  type TimelineItem = {
+    id: string;
+    at: Date;
+    type: string;
+    title: string;
+    detail: string | null;
+    actor: string | null;
+    fileAssetId: string | null;
+    documentId: string | null;
+    auditId: string | null;
+  };
+  const base = { detail: null, actor: null, fileAssetId: null, documentId: null, auditId: null };
+  const timeline: TimelineItem[] = [
     ...plot.ownershipRecords.map((record) => ({
+      ...base,
       id: `ownership-${record.id}`,
       at: record.effectiveAt,
       type: record.kind,
       title: `${record.kind.replaceAll("_", " ")} · ${record.owner?.name ?? "Company inventory"}`,
-      detail: [record.notes, record.createdBy ? `Done by ${record.createdBy.name}` : null].filter(Boolean).join(" · ") || null,
+      detail: record.notes ?? null,
+      actor: record.createdBy?.name ?? null,
     })),
     ...plot.registryRecords.map((record) => ({
+      ...base,
       id: `registry-${record.id}`,
       at: record.createdAt,
       type: "REGISTRY",
-      title: `${record.status}${record.registryNo ? ` · ${record.registryNo}` : ""}`,
+      title: `Registry ${record.status}${record.registryNo ? ` · ${record.registryNo}` : ""}`,
       detail: record.notes ?? null,
     })),
     ...generatedDocuments.map((document) => ({
+      ...base,
       id: `document-${document.id}`,
       at: document.createdAt,
       type: "DOCUMENT",
       title: `${document.type.replaceAll("_", " ")} · ${document.status}`,
       detail: document.number ?? null,
+      fileAssetId: document.fileAssetId ?? null,
+      documentId: document.id,
     })),
     ...historicalFiles.map((file) => ({
+      ...base,
       id: `file-${file.id}`,
       at: file.createdAt,
       type: "FILE_UPLOAD",
@@ -153,13 +172,17 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
         file.deleteReason ? `Delete reason: ${file.deleteReason}` : null,
         file.notes ? `Notes: ${file.notes}` : null,
       ].filter(Boolean).join(" · "),
+      fileAssetId: file.deletedAt ? null : file.id,
     })),
     ...auditEvents.concat(documentAudit, fileAudit).map((event) => ({
+      ...base,
       id: `audit-${event.id}`,
       at: event.createdAt,
       type: "AUDIT",
-      title: `${event.action} · ${event.entityType}${event.actor ? ` · ${event.actor.name}` : ""}`,
-      detail: [event.entityId, event.actor?.email ? `Actor: ${event.actor.email}` : null].filter(Boolean).join(" · "),
+      title: `${event.action} · ${event.entityType.replaceAll("_", " ")}`,
+      detail: event.entityId,
+      actor: event.actor?.name ?? event.actor?.email ?? null,
+      auditId: event.id,
     })),
   ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
