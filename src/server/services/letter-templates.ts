@@ -158,13 +158,27 @@ export function ambeyAllotmentTemplate() {
 </section>
 
 <section data-ambey-page="13" data-top="790">
-<p>IN WITNESS WHEREOF, the parties hereto have set and subscribed their respective hands at the places and on the day, month and year mentioned under their respective signatures</p>
-<p><strong>SIGNED AND DELIVERED BY THE WITH IN NAMED</strong><br>Allottee (including joint allottees)</p>
-<p>(1) NAME: {{owner.nameWithRelation}}                                                        SIGNATURE<br>(2) NAME:________________                                                        SIGNATURE</p>
-<p>At {{witness.place}} on {{ownership.effectiveDateDots}}</p>
-<p>In the presence of:<br><strong>WITNESSES:</strong><br>i) Name: {{witness.1.name}}<br>    Address: {{witness.1.address}}<br>    Contact: ______________________<br>   Signature:______________________<br>ii) Name: {{witness.2.name}}<br>   Address: {{witness.2.address}}<br>   Contact: _______________________<br>   Signature:______________________</p>
-<p><strong>SIGNED AND DELIVERED BY THE WITHIN NAMED {{firm.signatory.name}} {{firm.signatory.relation}}</strong></p>
-<p>For and on behalf of Firm {{firm.name}} {{project.city}} at {{witness.place}} on {{ownership.effectiveDateDots}}.</p>
+<p class="closing-intro">IN WITNESS WHEREOF, the parties hereto have set and subscribed their respective hands at the places and on the day, month and year mentioned under their respective signatures</p>
+<p class="closing-title"><strong>SIGNED AND DELIVERED BY THE WITH IN NAMED</strong><br>Allottee (including joint allottees)</p>
+<table class="signature-lines">
+<tr><td>(1) NAME: {{owner.nameWithRelation}}</td><td>SIGNATURE</td></tr>
+<tr><td>(2) NAME: ________________________</td><td>SIGNATURE</td></tr>
+</table>
+<p class="closing-meta">At {{witness.place}} on {{ownership.effectiveDateDots}}</p>
+<p class="closing-subtitle">In the presence of:</p>
+<p class="closing-witness-title"><strong>WITNESSES:</strong></p>
+<table class="witness-table">
+<tr><td>i) Name:</td><td>{{witness.1.name}}</td></tr>
+<tr><td>Address:</td><td>{{witness.1.address}}</td></tr>
+<tr><td>Contact:</td><td>______________________</td></tr>
+<tr><td>Signature:</td><td>______________________</td></tr>
+<tr><td>ii) Name:</td><td>{{witness.2.name}}</td></tr>
+<tr><td>Address:</td><td>{{witness.2.address}}</td></tr>
+<tr><td>Contact:</td><td>______________________</td></tr>
+<tr><td>Signature:</td><td>______________________</td></tr>
+</table>
+<p class="closing-firm-title"><strong>SIGNED AND DELIVERED BY THE WITHIN NAMED {{firm.signatory.name}} {{firm.signatory.relation}}</strong></p>
+<p class="closing-firm-note">For and on behalf of Firm {{firm.name}} {{project.city}} at {{witness.place}} on {{ownership.effectiveDateDots}}.</p>
 </section>
 </div>`;
 }

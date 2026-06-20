@@ -416,7 +416,7 @@ export function HtmlTemplateEditor({
       const controls = globalThis.document.createElement("div");
       controls.setAttribute("data-editor-page-controls", "true");
       controls.setAttribute("contenteditable", "false");
-      controls.className = "mb-3 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 shadow-sm";
+      controls.className = "mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs text-slate-600 shadow-sm backdrop-blur";
 
       const title = globalThis.document.createElement("span");
       title.className = "font-medium text-slate-700";
@@ -424,23 +424,23 @@ export function HtmlTemplateEditor({
       controls.appendChild(title);
 
       const actions = globalThis.document.createElement("div");
-      actions.className = "flex items-center gap-2";
+      actions.className = "flex flex-wrap items-center justify-end gap-2";
 
       const beforeButton = globalThis.document.createElement("button");
       beforeButton.type = "button";
-      beforeButton.className = "rounded-md border border-slate-200 px-2 py-1 hover:bg-slate-50";
+      beforeButton.className = "rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50";
       beforeButton.textContent = "Add page before";
       beforeButton.addEventListener("click", () => insertPage(index, "before"));
 
       const afterButton = globalThis.document.createElement("button");
       afterButton.type = "button";
-      afterButton.className = "rounded-md border border-slate-200 px-2 py-1 hover:bg-slate-50";
+      afterButton.className = "rounded-lg border border-slate-200 px-2.5 py-1.5 text-[11px] font-medium text-slate-600 hover:bg-slate-50";
       afterButton.textContent = "Add page after";
       afterButton.addEventListener("click", () => insertPage(index, "after"));
 
       const deleteButton = globalThis.document.createElement("button");
       deleteButton.type = "button";
-      deleteButton.className = "rounded-md border border-rose-200 px-2 py-1 text-rose-700 hover:bg-rose-50";
+      deleteButton.className = "rounded-lg border border-rose-200 px-2.5 py-1.5 text-[11px] font-medium text-rose-700 hover:bg-rose-50";
       deleteButton.textContent = "Delete page";
       deleteButton.addEventListener("click", () => deletePage(index));
 
@@ -514,10 +514,11 @@ export function HtmlTemplateEditor({
   }, [templates]);
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <div className="grid gap-5 xl:grid-cols-[minmax(0,1.15fr)_272px]">
       <div className="min-w-0">
         {/* Name + type row */}
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end">
+        <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <div className="flex-1">
             <label className="mb-1 block text-xs font-medium text-slate-600">Template name</label>
             <input
@@ -556,9 +557,10 @@ export function HtmlTemplateEditor({
             Load default
           </button>
         </div>
+        </div>
 
         {/* Toolbar */}
-        <div className="mb-2 flex flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5">
+        <div className="mb-3 flex flex-wrap items-center gap-1 rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-sm">
           <button onMouseDown={(e) => e.preventDefault()} onClick={() => format("bold")} className="rounded p-1.5 text-slate-600 hover:bg-slate-200" title="Bold">
             <Bold className="h-4 w-4" />
           </button>
@@ -571,17 +573,19 @@ export function HtmlTemplateEditor({
         </div>
 
         {/* Editor */}
-        <section className="rounded-2xl border border-slate-200 bg-slate-200/70 p-3 shadow-inner md:p-6">
-          <div
-            ref={editorRef}
-            contentEditable
-            suppressContentEditableWarning
-            suppressHydrationWarning
-            className="letter-paper-editor"
-            style={{ minHeight: "600px" }}
-            onInput={prepareEditorSurface}
-            onPaste={handlePaste}
-          />
+        <section className="rounded-[28px] border border-slate-200 bg-slate-100 p-3 shadow-inner md:p-5">
+          <div className="max-h-[calc(100vh-210px)] overflow-auto rounded-[22px] border border-slate-200 bg-slate-200/70 p-3 md:p-6">
+            <div
+              ref={editorRef}
+              contentEditable
+              suppressContentEditableWarning
+              suppressHydrationWarning
+              className="letter-paper-editor"
+              style={{ minHeight: "720px" }}
+              onInput={prepareEditorSurface}
+              onPaste={handlePaste}
+            />
+          </div>
         </section>
         <p className="mt-2 text-xs text-slate-400">
           Text like <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[11px]">{`{{buyer name}}`}</code> will be replaced automatically with actual details when generating the letter.
@@ -602,8 +606,8 @@ export function HtmlTemplateEditor({
         </div>
       </div>
 
-      <aside className="space-y-4">
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <aside className="space-y-4 xl:sticky xl:top-4 xl:self-start">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <button
             onClick={newTemplate}
             className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-slate-300 py-2.5 text-sm font-medium text-slate-600 transition hover:border-slate-400 hover:text-slate-800"
@@ -615,7 +619,7 @@ export function HtmlTemplateEditor({
               <div
                 key={t.id}
                 onClick={() => selectTemplate(t)}
-                className={`cursor-pointer rounded-lg border p-3 text-sm transition ${
+                className={`cursor-pointer rounded-xl border p-3 text-sm transition ${
                   selectedId === t.id
                     ? "border-blue-400 bg-blue-50 ring-1 ring-blue-200"
                     : "border-slate-200 bg-white hover:border-slate-300"
@@ -641,7 +645,7 @@ export function HtmlTemplateEditor({
           </div>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3 text-sm font-semibold text-slate-700">Create a new field</div>
           <AddCustomFieldInline
             categories={categories}
@@ -655,7 +659,7 @@ export function HtmlTemplateEditor({
           />
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="mb-3 text-sm font-semibold text-slate-700">Insert fields</div>
           <div className="space-y-2">
             {orderedGroups.map(([category, fields]) => {

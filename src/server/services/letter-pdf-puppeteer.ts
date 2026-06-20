@@ -70,6 +70,23 @@ const LETTER_PRINT_CSS = `
   .letter-paper-editor .regulatory-note { font-style: italic; margin-bottom: 30px; }
   .letter-paper-editor .agreement-note { font-style: italic; line-height: 1.45; margin-bottom: 28px; }
   .letter-paper-editor .buyer-note { margin-top: 18px; max-width: 760px; }
+  .letter-paper-editor .closing-intro { line-height: 1.56; margin-bottom: 24px; }
+  .letter-paper-editor .closing-title { margin-bottom: 20px; }
+  .letter-paper-editor .signature-lines,
+  .letter-paper-editor .witness-table { width: 100%; margin: 0 0 18px; table-layout: fixed; }
+  .letter-paper-editor .signature-lines td,
+  .letter-paper-editor .witness-table td { border: 0; padding: 4px 0; vertical-align: top; }
+  .letter-paper-editor .signature-lines td:first-child { width: 72%; }
+  .letter-paper-editor .signature-lines td:last-child { width: 28%; text-align: right; }
+  .letter-paper-editor .witness-table td:first-child { width: 18%; padding-right: 10px; }
+  .letter-paper-editor .witness-table td:last-child { width: 82%; }
+  .letter-paper-editor .closing-meta,
+  .letter-paper-editor .closing-subtitle,
+  .letter-paper-editor .closing-witness-title,
+  .letter-paper-editor .closing-firm-title,
+  .letter-paper-editor .closing-firm-note { margin-bottom: 12px; }
+  .letter-paper-editor .closing-firm-title { margin-top: 18px; }
+  .letter-paper-editor .closing-firm-note { line-height: 1.5; }
   .letter-paper-editor .muted { color: #475569; }
   .letter-paper-editor .site-plan-box {
     display: grid; min-height: 210px; place-items: center; border: none; color: #64748b;

@@ -298,13 +298,23 @@ function drawTable(context: RenderContext, html: string, attrs: Record<string, s
   const rows = parseRows(html);
   if (!rows.length) return;
   const className = attrs.class ?? "";
-  if (className.includes("plain")) {
-    const widths = className.includes("side-table") ? [100, 105, 160] : [140, 160, 150];
+  if (className.includes("plain") || className.includes("signature-lines") || className.includes("witness-table")) {
+    const widths = className.includes("signature-lines")
+      ? [TEXT_WIDTH - 120, 120]
+      : className.includes("witness-table")
+        ? [72, TEXT_WIDTH - 72]
+        : className.includes("side-table")
+          ? [100, 105, 160]
+          : [140, 160, 150];
     for (const row of rows) {
       let x = LEFT;
       const rowHeight = 23;
       row.forEach((cell, index) => {
-        context.page.drawText(cell.text, { x, y: context.y, size: BODY_SIZE, font: cell.header || cell.bold ? context.bold : context.font, color: rgb(0.12, 0.15, 0.18) });
+        const width = widths[index] ?? 120;
+        const font = cell.header || cell.bold ? context.bold : context.font;
+        const textWidth = font.widthOfTextAtSize(cell.text, BODY_SIZE);
+        const textX = className.includes("signature-lines") && index === row.length - 1 ? x + width - textWidth : x;
+        context.page.drawText(cell.text, { x: textX, y: context.y, size: BODY_SIZE, font, color: rgb(0.12, 0.15, 0.18) });
         x += widths[index] ?? 120;
       });
       context.y -= rowHeight;
