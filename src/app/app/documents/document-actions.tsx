@@ -1,7 +1,8 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { Loader2, Wand2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Loader2, Trash2, Wand2 } from "lucide-react";
 
 export function GenerateDocumentForm({ plots }: { plots: { id: string; code: string; ownerName: string }[] }) {
   const [plotId, setPlotId] = useState(plots[0]?.id ?? "");
@@ -58,8 +59,22 @@ export function GenerateDocumentForm({ plots }: { plots: { id: string; code: str
   );
 }
 
-export function DocumentApprovalButtons({ documentId }: { documentId: string }) {
+export function DocumentApprovalButtons({
+  documentId,
+  status: initialStatus = "GENERATED",
+  fileAssetId = null,
+}: {
+  documentId: string;
+  status?: string;
+  fileAssetId?: string | null;
+}) {
+  const router = useRouter();
   const [message, setMessage] = useState("");
+  const [status, setStatus] = useState(initialStatus);
+
+  const isRejected = status === "REJECTED";
+  const canApprove = Boolean(fileAssetId);
+  const canIssue = Boolean(fileAssetId) && !isRejected;
 
   async function decide(status: "APPROVED" | "ISSUED" | "REJECTED") {
     const endpoint = status === "REJECTED" ? "reject" : "approve";
@@ -69,15 +84,59 @@ export function DocumentApprovalButtons({ documentId }: { documentId: string }) 
       body: JSON.stringify({ status, notes: status }),
     });
     const body = await response.json();
-    setMessage(response.ok ? `Document ${status.toLowerCase()}.` : body.error ?? "Document update failed");
+    if (response.ok) {
+      setStatus(body.data?.status ?? status);
+      setMessage(`Document ${status.toLowerCase()}.`);
+      router.refresh();
+      return;
+    }
+    setMessage(body.error ?? "Document update failed");
   }
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <button className="btn-outline h-8 px-3 text-xs" onClick={() => decide("APPROVED")}>Approve</button>
-      <button className="btn-outline h-8 px-3 text-xs" onClick={() => decide("ISSUED")}>Issue</button>
-      <button className="btn-outline h-8 px-3 text-xs" onClick={() => decide("REJECTED")}>Reject</button>
+      <button className="btn-outline h-8 px-3 text-xs" disabled={!canApprove} onClick={() => decide("APPROVED")}>Approve</button>
+      {!isRejected ? <button className="btn-outline h-8 px-3 text-xs" disabled={!canIssue} onClick={() => decide("ISSUED")}>Issue</button> : null}
+      {!isRejected ? <button className="btn-outline h-8 px-3 text-xs" onClick={() => decide("REJECTED")}>Reject</button> : null}
       {message ? <span className="text-xs text-slate-500">{message}</span> : null}
     </div>
+  );
+}
+
+export function DeleteDocumentButton({
+  documentId,
+  documentName,
+}: {
+  documentId: string;
+  documentName?: string | null;
+}) {
+  const router = useRouter();
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function remove() {
+    if (!globalThis.window.confirm(`Delete ${documentName ?? "this letter"} completely from generated letters?`)) return;
+    setLoading(true);
+    setMessage("");
+    const response = await fetch(`/api/v1/documents/${documentId}`, {
+      method: "DELETE",
+    });
+    const body = await response.json().catch(() => ({}));
+    setLoading(false);
+    if (!response.ok) {
+      setMessage(body.error ?? "Delete failed");
+      return;
+    }
+    router.refresh();
+  }
+
+  return (
+    <span className="inline-flex items-center gap-2">
+      <button type="button" className="btn-outline h-8 px-3 text-xs text-rose-700 hover:bg-rose-50" onClick={remove} disabled={loading}>
+        <Trash2 size={14} />
+        {loading ? "Deleting" : "Delete"}
+      </button>
+      {message ? <span className="text-xs text-rose-700">{message}</span> : null}
+    </span>
   );
 }

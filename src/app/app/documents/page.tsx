@@ -2,8 +2,7 @@ import Link from "next/link";
 import { FileCheck2, FileText, Search } from "lucide-react";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
-import { DocumentApprovalButtons } from "./document-actions";
-import { DeleteFileButton } from "@/components/delete-file-button";
+import { DeleteDocumentButton, DocumentApprovalButtons } from "./document-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -87,9 +86,7 @@ export default async function DocumentsPage() {
                         {document.fileAssetId ? (
                           <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`}>Download</a>
                         ) : null}
-                        {document.fileAssetId ? (
-                          <DeleteFileButton fileId={document.fileAssetId} fileName={document.number ?? document.type} />
-                        ) : null}
+                        <DeleteDocumentButton documentId={document.id} documentName={document.number ?? document.type} />
                         <DocumentApprovalButtons documentId={document.id} />
                       </div>
                     </td>

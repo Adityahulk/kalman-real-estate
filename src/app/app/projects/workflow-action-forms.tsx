@@ -5,6 +5,7 @@ import { ClipboardEvent, FormEvent, MutableRefObject, RefObject, useEffect, useM
 import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, Bold, CheckCircle2, Download, Eye, FileText, Italic, Loader2, Plus, Save, Send, Trash2, Underline, Wand2, X } from "lucide-react";
 import { sanitizePastedHtml } from "@/lib/sanitize-pasted-html";
+import { FileUploader } from "@/components/file-uploader";
 
 type ProjectInfo = {
   id: string;
@@ -978,6 +979,7 @@ export function LetterStudioEditor({
   backHref,
   eyebrow,
   arrangeHref,
+  signedUploadPlotId,
 }: {
   document: {
     id: string;
@@ -991,6 +993,7 @@ export function LetterStudioEditor({
   backHref?: string;
   eyebrow?: string;
   arrangeHref?: string;
+  signedUploadPlotId?: string;
 }) {
   const router = useRouter();
   const editorRef = useRef<HTMLDivElement>(null);
@@ -1147,6 +1150,7 @@ export function LetterStudioEditor({
   const documentTitle = letter.number ?? letter.type.replaceAll("_", " ");
   const canIssue = Boolean(fileAssetId);
   const isRejected = status === "REJECTED";
+  const canUploadSignedLetter = Boolean(signedUploadPlotId && fileAssetId && letter.type.includes("allotment") && status !== "REJECTED");
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-100">
@@ -1231,6 +1235,22 @@ export function LetterStudioEditor({
                   Download
                 </button>
               )}
+              {canUploadSignedLetter ? (
+                <FileUploader
+                  label="Upload signed letter"
+                  ownerType="Plot"
+                  ownerId={signedUploadPlotId!}
+                  visibility="OWNER_VISIBLE"
+                  accept="application/pdf,image/*"
+                  metadata={{
+                    categoryKey: "signed-allotment-letter",
+                    documentType: "ALLOTMENT_LETTER",
+                    documentNo: letter.number ?? undefined,
+                    notes: "Signed version of allotment letter",
+                  }}
+                  refreshOnUpload
+                />
+              ) : null}
               {isRejected ? (
                 <button type="button" className="btn-outline h-9 border-rose-300 px-3 text-xs text-rose-600 hover:bg-rose-50" disabled={deleteLoading} onClick={removeDocument}>
                   {deleteLoading ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />}

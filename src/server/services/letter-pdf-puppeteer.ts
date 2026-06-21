@@ -56,6 +56,23 @@ const LETTER_PRINT_CSS = `
   .letter-paper-editor .agreement-party,
   .letter-paper-editor .buyer-note,
   .letter-paper-editor .regulatory-note { line-height: 1.56; }
+  .letter-paper-editor .agreement-page { font-size: 14.6px; line-height: 1.7; letter-spacing: 0.01em; }
+  .letter-paper-editor .agreement-page p { margin: 0 0 18px; white-space: normal; line-height: 1.72; text-align: justify; text-justify: inter-word; }
+  .letter-paper-editor .agreement-page h2 { margin-bottom: 22px; }
+  .letter-paper-editor .agreement-page table { margin: 12px 0 14px; }
+  .letter-paper-editor .agreement-page .pricing-table + p { margin-bottom: 28px; }
+  .letter-paper-editor .clause-heading-only { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 10px; align-items: start; margin-bottom: 14px; text-align: left; }
+  .letter-paper-editor .clause-block { margin-bottom: 24px; }
+  .letter-paper-editor .clause-heading { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 10px; align-items: start; margin-bottom: 16px; line-height: 1.45; text-align: left; }
+  .letter-paper-editor .clause-heading-number, .letter-paper-editor .clause-heading-text { display: block; }
+  .letter-paper-editor .clause-heading-text { font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+  .letter-paper-editor .clause-body { display: block; padding-left: 34px; white-space: normal; line-height: 1.78; text-align: justify; text-justify: inter-word; }
+  .letter-paper-editor .clause-follow { padding-left: 34px; margin-bottom: 18px; }
+  .letter-paper-editor .clause-continuation { padding-left: 34px; margin-bottom: 18px; white-space: normal; line-height: 1.78; text-align: justify; text-justify: inter-word; }
+  .letter-paper-editor .subclause-item { display: grid; grid-template-columns: 34px minmax(0, 1fr); column-gap: 8px; align-items: start; margin-bottom: 18px; white-space: normal; }
+  .letter-paper-editor .subclause-label, .letter-paper-editor .subclause-text { display: block; }
+  .letter-paper-editor .subclause-text { line-height: 1.72; text-align: justify; text-justify: inter-word; }
+  .letter-paper-editor .subclause-continuation { padding-left: 42px; margin-bottom: 18px; white-space: normal; line-height: 1.72; text-align: justify; text-justify: inter-word; }
   .letter-paper-editor .roman-item,
   .letter-paper-editor .consent-indent { padding-left: 38px; text-indent: -24px; line-height: 1.62; margin-bottom: 22px; }
   .letter-paper-editor .verification-title { margin-top: 56px; margin-bottom: 48px; }
@@ -77,9 +94,9 @@ const LETTER_PRINT_CSS = `
   .letter-paper-editor .closing-witness-layout { display: flex; flex-direction: column; gap: 34px; margin-bottom: 18px; }
   .letter-paper-editor .closing-witness-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 56px; }
   .letter-paper-editor .closing-witness-entry { flex: 1 1 auto; min-width: 0; }
-  .letter-paper-editor .closing-witness-line { display: flex; align-items: center; gap: 0; margin: 0 0 28px; white-space: nowrap; }
-  .letter-paper-editor .closing-witness-label { display: inline-block; min-width: 132px; }
-  .letter-paper-editor .closing-witness-fill { display: inline-block; min-width: 360px; padding-left: 4px; border-bottom: 1.6px solid #1f2937; line-height: 1.1; }
+  .letter-paper-editor .closing-witness-line { display: grid; grid-template-columns: 148px minmax(0, 1fr); align-items: end; column-gap: 10px; margin: 0 0 28px; }
+  .letter-paper-editor .closing-witness-label { display: block; min-width: 0; white-space: nowrap; }
+  .letter-paper-editor .closing-witness-fill { display: block; min-width: 0; padding-left: 4px; border-bottom: 1.6px solid #1f2937; line-height: 1.1; white-space: normal; overflow-wrap: anywhere; }
   .letter-paper-editor .closing-photo-box { width: 104px; height: 142px; flex: 0 0 104px; border: 3px solid #374151; background: #fff; margin-top: 8px; }
   .letter-paper-editor .signature-lines td,
   .letter-paper-editor .witness-table td { border: 0; padding: 8px 0; vertical-align: top; }
