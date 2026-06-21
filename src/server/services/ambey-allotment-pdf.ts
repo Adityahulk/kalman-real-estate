@@ -8,12 +8,19 @@ type RenderContext = {
   italic: PDFFont;
   boldItalic: PDFFont;
   y: number;
+  floatBox?: {
+    side: "left" | "right";
+    top: number;
+    bottom: number;
+    width: number;
+    gap: number;
+  };
 };
 
 const PAGE_WIDTH = 595.32;
 const PAGE_HEIGHT = 841.92;
-const LEFT = 72;
-const RIGHT = 72;
+const LEFT = 46;
+const RIGHT = 46;
 const TEXT_WIDTH = PAGE_WIDTH - LEFT - RIGHT;
 const BODY_SIZE = 10.4;
 const LINE_HEIGHT = 14.4;
@@ -133,8 +140,12 @@ async function drawParagraph(context: RenderContext, html: string, attrs: Record
       context.y -= LINE_HEIGHT;
       continue;
     }
-    for (const visualLine of wrapWords(context, hardLine, BODY_SIZE, TEXT_WIDTH)) {
-      drawWordLine(context, visualLine, align, forceBold);
+    let remaining = hardLine;
+    while (remaining.length) {
+      const { x, width } = lineMetrics(context, align);
+      const { line, rest } = takeWordsForWidth(context, remaining, BODY_SIZE, width);
+      drawWordLine(context, line, align, forceBold, x, width);
+      remaining = rest;
     }
   }
   context.y -= 8;
@@ -240,14 +251,26 @@ function wrapWords(context: RenderContext, words: Word[], size: number, maxWidth
   return lines.length ? lines : [[]];
 }
 
-function drawWordLine(context: RenderContext, words: Word[], align: "left" | "center" | "right", forceBold: boolean) {
+function drawWordLine(
+  context: RenderContext,
+  words: Word[],
+  align: "left" | "center" | "right",
+  forceBold: boolean,
+  baseX = LEFT,
+  availableWidth = TEXT_WIDTH,
+) {
   const size = BODY_SIZE;
   const total = words.reduce((sum, word, index) => {
     const spaceW = index ? context.font.widthOfTextAtSize(" ", Math.max(wordMaxSize(word, size), lineMaxSize(words.slice(0, index), size))) : 0;
     return sum + wordWidth(context, word, size) + spaceW;
   }, 0);
   const y = context.y;
-  let x = align === "right" ? PAGE_WIDTH - RIGHT - total : align === "center" ? (PAGE_WIDTH - total) / 2 : LEFT;
+  let x =
+    align === "right"
+      ? baseX + availableWidth - total
+      : align === "center"
+        ? baseX + (availableWidth - total) / 2
+        : baseX;
   const maxSize = lineMaxSize(words, size);
 
   words.forEach((word, wi) => {
@@ -289,9 +312,57 @@ function lineMaxSize(words: Word[], fallback: number) {
 function drawSingleLine(context: RenderContext, text: string, align: "left" | "center" | "right", bold = false, italic = false) {
   const font = italic ? context.italic : bold ? context.bold : context.font;
   const width = font.widthOfTextAtSize(text, BODY_SIZE);
-  const x = align === "right" ? PAGE_WIDTH - RIGHT - width : align === "center" ? (PAGE_WIDTH - width) / 2 : LEFT;
+  const metrics = lineMetrics(context, align);
+  const x =
+    align === "right"
+      ? metrics.x + metrics.width - width
+      : align === "center"
+        ? metrics.x + (metrics.width - width) / 2
+        : metrics.x;
   context.page.drawText(text, { x, y: context.y, size: BODY_SIZE, font, color: rgb(0.12, 0.15, 0.18) });
   context.y -= LINE_HEIGHT;
+}
+
+function lineMetrics(context: RenderContext, align: "left" | "center" | "right") {
+  const floatBox = context.floatBox;
+  if (
+    !floatBox ||
+    context.y > floatBox.top ||
+    context.y < floatBox.bottom ||
+    align !== "left"
+  ) {
+    if (floatBox && context.y < floatBox.bottom) {
+      delete context.floatBox;
+    }
+    return { x: LEFT, width: TEXT_WIDTH };
+  }
+
+  if (floatBox.side === "right") {
+    return { x: LEFT, width: TEXT_WIDTH - floatBox.width - floatBox.gap };
+  }
+
+  return { x: LEFT + floatBox.width + floatBox.gap, width: TEXT_WIDTH - floatBox.width - floatBox.gap };
+}
+
+function takeWordsForWidth(context: RenderContext, words: Word[], size: number, maxWidth: number) {
+  const line: Word[] = [];
+  let width = 0;
+  let index = 0;
+
+  for (; index < words.length; index += 1) {
+    const word = words[index];
+    const ww = wordWidth(context, word, size);
+    const spaceW = line.length
+      ? context.font.widthOfTextAtSize(" ", Math.max(wordMaxSize(word, size), lineMaxSize(line, size)))
+      : 0;
+    const add = line.length ? spaceW + ww : ww;
+
+    if (line.length && width + add > maxWidth) break;
+    line.push(word);
+    width += add;
+  }
+
+  return { line: line.length ? line : [words[0]], rest: line.length ? words.slice(index) : words.slice(1) };
 }
 
 function drawTable(context: RenderContext, html: string, attrs: Record<string, string>) {
@@ -382,14 +453,14 @@ function drawPossessionLayout(context: RenderContext, html: string) {
   const rows = tableMatch ? parseRows(tableMatch[2]) : [];
   const tableX = LEFT;
   const topY = context.y - 6;
-  const widths = [110, 18, 78, 122];
+  const widths = [104, 16, 72, 124];
   let y = topY;
 
   for (const row of rows) {
     const wrapped = row.map((cell, index) =>
       wrapText(cell.text, cell.header || cell.bold ? context.bold : context.font, BODY_SIZE, (widths[index] ?? 120) - 12),
     );
-    const rowHeight = Math.max(38, Math.max(...wrapped.map((lines) => lines.length)) * 14 + 12);
+    const rowHeight = Math.max(34, Math.max(...wrapped.map((lines) => lines.length)) * 12 + 12);
     let x = tableX;
     row.forEach((cell, index) => {
       const width = widths[index] ?? 120;
@@ -401,24 +472,24 @@ function drawPossessionLayout(context: RenderContext, html: string) {
         borderColor: rgb(0.25, 0.3, 0.38),
         borderWidth: 0.9,
       });
-      let textY = y - 17;
+      let textY = y - 15;
       for (const line of wrapped[index]) {
         const font = cell.header || cell.bold ? context.bold : context.font;
         const isColonCell = index === 1;
-        const lineWidth = font.widthOfTextAtSize(line, BODY_SIZE);
+        const lineWidth = font.widthOfTextAtSize(line, 9.6);
         const textX = isColonCell ? x + (width - lineWidth) / 2 : x + 8;
-        context.page.drawText(line, { x: textX, y: textY, size: BODY_SIZE, font, color: INK });
-        textY -= 14;
+        context.page.drawText(line, { x: textX, y: textY, size: 9.6, font, color: INK });
+        textY -= 12;
       }
       x += width;
     });
     y -= rowHeight;
   }
 
-  const boxX = 410;
+  const boxX = 398;
   const boxTop = topY + 8;
-  const boxHeight = 220;
-  const boxWidth = 110;
+  const boxHeight = 192;
+  const boxWidth = 142;
   context.page.drawRectangle({
     x: boxX,
     y: boxTop - boxHeight,
@@ -429,27 +500,27 @@ function drawPossessionLayout(context: RenderContext, html: string) {
   });
 
   const label = "SITE PLAN (NOT TO SCALE)";
-  const labelWidth = context.bold.widthOfTextAtSize(label, 11.5);
-  const labelY = boxTop - boxHeight - 40;
+  const labelWidth = context.bold.widthOfTextAtSize(label, 11);
+  const labelY = boxTop - boxHeight - 34;
   context.page.drawText(label, {
     x: boxX + (boxWidth - labelWidth) / 2,
     y: labelY,
-    size: 11.5,
+    size: 11,
     font: context.bold,
     color: INK,
   });
 
-  drawCompass(context.page, context.font, boxX + boxWidth / 2, labelY - 72);
+  drawCompass(context.page, context.font, boxX + boxWidth / 2, labelY - 76);
 
   const signatureText = signatureMatch ? textFromHtml(signatureMatch[1]) : "";
   if (signatureText) {
-    let sigY = labelY - 146;
+    let sigY = labelY - 154;
     for (const line of signatureText.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
       const width = context.bold.widthOfTextAtSize(line, line.includes("Authorized Signatory") ? 10.6 : 11.8);
       const font = line.includes("Authorized Signatory") ? context.font : context.bold;
       const size = line.includes("Authorized Signatory") ? 10.6 : 11.8;
       context.page.drawText(line, {
-        x: boxX + (boxWidth - width) / 2,
+        x: boxX + boxWidth - width,
         y: sigY,
         size,
         font,
@@ -459,7 +530,7 @@ function drawPossessionLayout(context: RenderContext, html: string) {
     }
   }
 
-  context.y = Math.min(y - 18, labelY - 178);
+  context.y = Math.min(y - 18, labelY - 188);
 }
 
 function drawPhotoPlaceholder(context: RenderContext, html: string, className: string) {
@@ -503,6 +574,16 @@ function drawPhotoPlaceholder(context: RenderContext, html: string, className: s
       color: rgb(0.4, 0.45, 0.52),
     });
     textY -= lineGap;
+  }
+
+  if (className.includes("right-mid") || className.includes("right")) {
+    context.floatBox = {
+      side: "right",
+      top: y + height,
+      bottom: y,
+      width,
+      gap: 16,
+    };
   }
 
   if (className.includes("bottom-left")) context.y = y - 18;

@@ -10,7 +10,7 @@ import { PDFDocument } from "pdf-lib";
 const LETTER_PRINT_CSS = `
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #fff; }
-  .letter-paper-editor { color: #111827; font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 1.58; }
+  .letter-paper-editor { color: #111827; font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 1.5; }
   .letter-paper-editor section[data-ambey-page],
   .letter-paper-editor section[data-letter-page] {
     position: relative;
@@ -71,11 +71,18 @@ const LETTER_PRINT_CSS = `
   .letter-paper-editor .agreement-note { font-style: italic; line-height: 1.45; margin-bottom: 28px; }
   .letter-paper-editor .buyer-note { margin-top: 18px; max-width: 760px; }
   .letter-paper-editor .closing-intro { line-height: 1.56; margin-bottom: 24px; }
-  .letter-paper-editor .closing-title { margin-bottom: 20px; }
+  .letter-paper-editor .closing-title { margin-bottom: 28px; line-height: 1.6; }
   .letter-paper-editor .signature-lines,
-  .letter-paper-editor .witness-table { width: 100%; margin: 0 0 18px; table-layout: fixed; }
+  .letter-paper-editor .witness-table { width: 100%; margin: 0 0 28px; table-layout: fixed; }
+  .letter-paper-editor .closing-witness-layout { display: flex; flex-direction: column; gap: 34px; margin-bottom: 18px; }
+  .letter-paper-editor .closing-witness-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 56px; }
+  .letter-paper-editor .closing-witness-entry { flex: 1 1 auto; min-width: 0; }
+  .letter-paper-editor .closing-witness-line { display: flex; align-items: center; gap: 0; margin: 0 0 28px; white-space: nowrap; }
+  .letter-paper-editor .closing-witness-label { display: inline-block; min-width: 132px; }
+  .letter-paper-editor .closing-witness-fill { display: inline-block; min-width: 360px; padding-left: 4px; border-bottom: 1.6px solid #1f2937; line-height: 1.1; }
+  .letter-paper-editor .closing-photo-box { width: 104px; height: 142px; flex: 0 0 104px; border: 3px solid #374151; background: #fff; margin-top: 8px; }
   .letter-paper-editor .signature-lines td,
-  .letter-paper-editor .witness-table td { border: 0; padding: 4px 0; vertical-align: top; }
+  .letter-paper-editor .witness-table td { border: 0; padding: 8px 0; vertical-align: top; }
   .letter-paper-editor .signature-lines td:first-child { width: 72%; }
   .letter-paper-editor .signature-lines td:last-child { width: 28%; text-align: right; }
   .letter-paper-editor .witness-table td:first-child { width: 18%; padding-right: 10px; }
@@ -108,24 +115,24 @@ const LETTER_PRINT_CSS = `
   .letter-paper-editor .pricing-table td { font-size: 15px; line-height: 1.25; }
   .letter-paper-editor section[data-ambey-page="1"] table th,
   .letter-paper-editor section[data-ambey-page="1"] table td,
-  .letter-paper-editor .pricing-table td,
-  .letter-paper-editor .possession-table th,
-  .letter-paper-editor .possession-table td { font-weight: 600; }
+  .letter-paper-editor .pricing-table td { font-weight: 600; }
   .letter-paper-editor .side-table th, .letter-paper-editor .side-table td { text-align: center; }
   .letter-paper-editor .side-grid-table th, .letter-paper-editor .side-grid-table td { text-align: left; }
-  .letter-paper-editor .possession-layout { display: flex; gap: 22px; align-items: flex-start; margin: 18px 0 0; }
-  .letter-paper-editor .possession-table { flex: 1 1 auto; width: auto; min-width: 0; margin: 0; table-layout: fixed; }
-  .letter-paper-editor .possession-table th:nth-child(1), .letter-paper-editor .possession-table td:nth-child(1) { width: 34%; }
-  .letter-paper-editor .possession-table th:nth-child(2), .letter-paper-editor .possession-table td:nth-child(2) { width: 4%; text-align: center; padding-left: 0; padding-right: 0; }
+  .letter-paper-editor .possession-layout { display: flex; gap: 42px; align-items: flex-start; margin: 22px 0 0; }
+  .letter-paper-editor .possession-table { flex: 0 0 420px; width: 420px; margin: 0; table-layout: fixed; }
+  .letter-paper-editor .possession-table th:nth-child(1), .letter-paper-editor .possession-table td:nth-child(1) { width: 32%; }
+  .letter-paper-editor .possession-table th:nth-child(2), .letter-paper-editor .possession-table td:nth-child(2) { width: 5%; text-align: center; padding-left: 0; padding-right: 0; }
   .letter-paper-editor .possession-table th:nth-child(3), .letter-paper-editor .possession-table td:nth-child(3) { width: 22%; }
-  .letter-paper-editor .possession-table th:nth-child(4), .letter-paper-editor .possession-table td:nth-child(4) { width: 40%; }
-  .letter-paper-editor .possession-table th, .letter-paper-editor .possession-table td { padding: 10px 8px; font-size: 14px; line-height: 1.2; }
-  .letter-paper-editor .possession-aside { width: 204px; flex-shrink: 0; text-align: center; }
-  .letter-paper-editor .possession-plan-box { width: 176px; min-height: 300px; border-width: 3px; margin: 0 auto; }
-  .letter-paper-editor .site-plan-label { margin-top: 28px; font-size: 14px; font-weight: 700; letter-spacing: 0.02em; }
-  .letter-paper-editor .compass { display: flex; justify-content: center; margin: 24px 0 18px; }
-  .letter-paper-editor .compass svg { width: 108px; height: 108px; }
-  .letter-paper-editor .certificate-signature { margin-top: 12px; }
+  .letter-paper-editor .possession-table th:nth-child(4), .letter-paper-editor .possession-table td:nth-child(4) { width: 41%; }
+  .letter-paper-editor .possession-table th { font-weight: 700; }
+  .letter-paper-editor .possession-table td { font-weight: 500; }
+  .letter-paper-editor .possession-table th, .letter-paper-editor .possession-table td { padding: 9px 10px; font-size: 12px; line-height: 1.15; }
+  .letter-paper-editor .possession-aside { width: 238px; flex-shrink: 0; text-align: center; }
+  .letter-paper-editor .possession-plan-box { width: 190px; min-height: 258px; border: 3px solid #374151; margin: 0 auto; }
+  .letter-paper-editor .site-plan-label { margin-top: 24px; font-size: 13px; font-weight: 700; letter-spacing: 0.02em; }
+  .letter-paper-editor .compass { display: flex; justify-content: center; margin: 26px 0 22px; }
+  .letter-paper-editor .compass svg { width: 118px; height: 118px; }
+  .letter-paper-editor .certificate-signature { margin-top: 20px; line-height: 1.35; }
   .letter-paper-editor ol, .letter-paper-editor ul { padding-left: 22px; }
   .letter-paper-editor li { margin-bottom: 8px; }
   .letter-paper-editor .attachment-block img { max-width: 100%; height: auto; display: block; margin: 8px auto; }
