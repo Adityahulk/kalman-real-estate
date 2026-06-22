@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import type { Browser, LaunchOptions } from "puppeteer";
 import { PDFDocument } from "pdf-lib";
 
@@ -60,17 +61,42 @@ const LETTER_PRINT_CSS = `
 
 // `--single-process` / `--no-zygote` are memory-savers needed on the small Linux server, but they
 // crash Chromium on macOS — only apply them on Linux so local `npm run dev` works out of the box.
-const LAUNCH_OPTIONS: LaunchOptions = {
-  headless: true,
-  args: [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
-    "--disable-gpu",
-    ...(process.platform === "linux" ? ["--no-zygote", "--single-process"] : []),
-  ],
-  ...(process.env.PUPPETEER_EXECUTABLE_PATH ? { executablePath: process.env.PUPPETEER_EXECUTABLE_PATH } : {}),
-};
+// Common system-Chromium install locations, checked when no usable PUPPETEER_EXECUTABLE_PATH is set.
+const SYSTEM_CHROMIUM_PATHS = [
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/google-chrome",
+  "/usr/bin/google-chrome-stable",
+  "/snap/bin/chromium",
+];
+
+// Resolve the Chromium binary at launch time. We trust PUPPETEER_EXECUTABLE_PATH only if the file
+// actually exists (a stale/missing path is the usual "Chromium not installed" cause on servers),
+// then fall back to scanning known system paths, then to Puppeteer's own bundled download.
+function resolveChromiumExecutable(): string | undefined {
+  const fromEnv = process.env.PUPPETEER_EXECUTABLE_PATH?.trim();
+  if (fromEnv && existsSync(fromEnv)) return fromEnv;
+  for (const candidate of SYSTEM_CHROMIUM_PATHS) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+function launchOptions(): LaunchOptions {
+  const executablePath = resolveChromiumExecutable();
+  return {
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--disable-crash-reporter",
+      ...(process.platform === "linux" ? ["--no-zygote", "--single-process"] : []),
+    ],
+    ...(executablePath ? { executablePath } : {}),
+  };
+}
 
 // Serialize renders so only one Chromium runs at a time (memory-safe on small servers).
 let renderChain: Promise<unknown> = Promise.resolve();
@@ -90,7 +116,16 @@ async function renderOnce(bodyHtml: string): Promise<Buffer> {
   const { default: puppeteer } = await import("puppeteer");
   let browser: Browser | undefined;
   try {
-    browser = await puppeteer.launch(LAUNCH_OPTIONS);
+    try {
+      browser = await puppeteer.launch(launchOptions());
+    } catch (launchError) {
+      const detail = launchError instanceof Error ? launchError.message : String(launchError);
+      throw new Error(
+        "Could not launch Chromium for PDF rendering. Install a system Chromium (e.g. `apt-get install -y chromium`) "
+          + "and/or set PUPPETEER_EXECUTABLE_PATH to its path (commonly /usr/bin/chromium). "
+          + `Underlying error: ${detail}`,
+      );
+    }
     const page = await browser.newPage();
     await page.setContent(wrapDocument(bodyHtml), { waitUntil: "load", timeout: 30000 });
 
