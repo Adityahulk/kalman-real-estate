@@ -213,17 +213,23 @@ export function OwnershipDocumentUpload({
   defaultVisibility = "TEAM",
   defaultDocumentType = "ALLOTMENT_LETTER",
   title = "Upload ownership document",
+  fixedCategoryKey,
+  defaultNotes = "",
+  hideDocumentType = false,
 }: {
   ownerType: "Plot" | "Owner" | "RegistryRecord";
   ownerId: string;
   defaultVisibility?: "ADMIN_ONLY" | "TEAM" | "OWNER_VISIBLE" | "SHARED";
   defaultDocumentType?: RealEstateDocumentType;
   title?: string;
+  fixedCategoryKey?: string;
+  defaultNotes?: string;
+  hideDocumentType?: boolean;
 }) {
   const [documentType, setDocumentType] = useState<RealEstateDocumentType>(defaultDocumentType);
   const [documentNo, setDocumentNo] = useState("");
   const [documentDate, setDocumentDate] = useState("");
-  const [notes, setNotes] = useState("");
+  const [notes, setNotes] = useState(defaultNotes);
   const [visibility, setVisibility] = useState(defaultVisibility);
   const [message, setMessage] = useState("");
 
@@ -234,12 +240,14 @@ export function OwnershipDocumentUpload({
         <h3 className="text-sm font-semibold">{title}</h3>
       </div>
       <div className="grid gap-3">
-        <label>
-          <span className="label">Document type</span>
-          <select className="input" value={documentType} onChange={(event) => setDocumentType(event.target.value as RealEstateDocumentType)}>
-            {ownershipDocumentTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
-          </select>
-        </label>
+        {!hideDocumentType ? (
+          <label>
+            <span className="label">Document type</span>
+            <select className="input" value={documentType} onChange={(event) => setDocumentType(event.target.value as RealEstateDocumentType)}>
+              {ownershipDocumentTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+            </select>
+          </label>
+        ) : null}
         <label>
           <span className="label">Document no / reference</span>
           <input className="input" value={documentNo} onChange={(event) => setDocumentNo(event.target.value)} />
@@ -272,6 +280,7 @@ export function OwnershipDocumentUpload({
             documentNo: documentNo || undefined,
             documentDate: documentDate ? new Date(documentDate).toISOString() : undefined,
             notes: notes || undefined,
+            categoryKey: fixedCategoryKey,
           }}
           onUploaded={(file) => setMessage(`Uploaded ${file.fileName}. Refresh to see it in the vault.`)}
         />

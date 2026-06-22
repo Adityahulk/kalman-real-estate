@@ -176,7 +176,7 @@ export default async function ProjectOwnershipPage({
                     area={`${plot.areaSqYards?.toString() ?? (plot.areaSqft ? String(Number(plot.areaSqft) / 9) : "-")} sq yd`}
                     development={development}
                     allotmentStatus={plot.status === "COMPANY_OWNED" ? "Available for allotment" : plot.status.replaceAll("_", " ").toLowerCase().replace(/^\w/, (letter) => letter.toUpperCase())}
-                    document={letter ? { id: letter.id, status: letter.status, fileAssetId: letter.fileAssetId } : null}
+                    document={letter ? { id: letter.id, status: letter.status, fileAssetId: letter.fileAssetId, type: letter.type, number: letter.number, createdAt: letter.createdAt.toISOString() } : null}
                     cadSource={cadLinkByPlot.get(plot.id)?.entity.scene.cadFile ?? null}
                   />
                 );

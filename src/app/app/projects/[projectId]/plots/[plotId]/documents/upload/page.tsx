@@ -26,6 +26,16 @@ export default async function UploadPlotDocumentPage({ params }: { params: { pro
     >
       <div className="grid gap-5 lg:grid-cols-2">
         <OwnershipDocumentUpload ownerType="Plot" ownerId={plot.id} defaultVisibility="OWNER_VISIBLE" defaultDocumentType="ALLOTMENT_LETTER" title="Upload plot document" />
+        <OwnershipDocumentUpload
+          ownerType="Plot"
+          ownerId={plot.id}
+          defaultVisibility="OWNER_VISIBLE"
+          defaultDocumentType="ALLOTMENT_LETTER"
+          fixedCategoryKey="signed-allotment-letter"
+          defaultNotes="Signed version of allotment letter"
+          hideDocumentType
+          title="Upload signed allotment letter"
+        />
         {plot.currentOwnerId ? (
           <OwnershipDocumentUpload ownerType="Owner" ownerId={plot.currentOwnerId} defaultVisibility="TEAM" defaultDocumentType="PAN_CARD" title="Upload owner PAN / Aadhaar / KYC" />
         ) : (

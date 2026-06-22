@@ -11,12 +11,13 @@ import { PDFDocument } from "pdf-lib";
 const LETTER_PRINT_CSS = `
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #fff; }
-  .letter-paper-editor { color: #111827; font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 1.58; }
+  .letter-paper-editor { color: #111827; font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 1.5; }
   .letter-paper-editor section[data-ambey-page],
   .letter-paper-editor section[data-letter-page] {
+    position: relative;
     width: 860px;
     min-height: 1110px;
-    padding: 82px 96px;
+    padding: 74px 86px 82px;
     background: #fff;
     break-after: page;
     page-break-after: always;
@@ -24,13 +25,93 @@ const LETTER_PRINT_CSS = `
   .letter-paper-editor section[data-ambey-page]:last-child,
   .letter-paper-editor section[data-letter-page]:last-child { break-after: auto; page-break-after: auto; }
   .letter-paper-editor section[data-ambey-page="1"],
-  .letter-paper-editor section[data-ambey-page="2"] { padding-top: 190px; }
+  .letter-paper-editor section[data-ambey-page="2"] { padding-top: 150px; }
   .letter-paper-editor h1, .letter-paper-editor h2, .letter-paper-editor h3 {
-    margin: 0 0 14px; color: #111827; font-weight: 700; text-align: center; white-space: pre-wrap;
+    margin: 0 0 18px; color: #111827; font-weight: 700; text-align: center; white-space: pre-wrap; line-height: 1.22;
   }
-  .letter-paper-editor p { margin: 0 0 12px; white-space: pre-wrap; }
+  .letter-paper-editor p { margin: 0 0 16px; white-space: pre-wrap; }
+  .letter-paper-editor h1 u,
+  .letter-paper-editor h2 u,
+  .letter-paper-editor .verification-title u,
+  .letter-paper-editor .regulatory-note u,
+  .letter-paper-editor .buyer-block u,
+  .letter-paper-editor .recipient-block u { text-underline-offset: 3px; }
   .letter-paper-editor .right { text-align: right; }
   .letter-paper-editor .center { text-align: center; }
+  .letter-paper-editor .first-page-signoff {
+    position: absolute;
+    right: 86px;
+    bottom: 74px;
+    margin: 0;
+    text-align: right;
+  }
+  .letter-paper-editor .meta-block { max-width: 330px; margin-left: auto; margin-bottom: 28px; line-height: 1.28; }
+  .letter-paper-editor .recipient-block,
+  .letter-paper-editor .buyer-block { max-width: 520px; line-height: 1.45; }
+  .letter-paper-editor .subject-line { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 18px; align-items: start; font-weight: 700; margin-top: 8px; margin-bottom: 26px; }
+  .letter-paper-editor .stamp-line { margin-bottom: 40px; }
+  .letter-paper-editor .declaration-intro,
+  .letter-paper-editor .verification-body,
+  .letter-paper-editor .consent-subject,
+  .letter-paper-editor .agreement-opening,
+  .letter-paper-editor .agreement-party,
+  .letter-paper-editor .buyer-note,
+  .letter-paper-editor .regulatory-note { line-height: 1.56; }
+  .letter-paper-editor .agreement-page { font-size: 14.6px; line-height: 1.7; letter-spacing: 0.01em; }
+  .letter-paper-editor .agreement-page p { margin: 0 0 18px; white-space: normal; line-height: 1.72; text-align: justify; text-justify: inter-word; }
+  .letter-paper-editor .agreement-page h2 { margin-bottom: 22px; }
+  .letter-paper-editor .agreement-page table { margin: 12px 0 14px; }
+  .letter-paper-editor .agreement-page .pricing-table + p { margin-bottom: 28px; }
+  .letter-paper-editor .clause-heading-only { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 10px; align-items: start; margin-bottom: 14px; text-align: left; }
+  .letter-paper-editor .clause-block { margin-bottom: 24px; }
+  .letter-paper-editor .clause-heading { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 10px; align-items: start; margin-bottom: 16px; line-height: 1.45; text-align: left; }
+  .letter-paper-editor .clause-heading-number, .letter-paper-editor .clause-heading-text { display: block; }
+  .letter-paper-editor .clause-heading-text { font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
+  .letter-paper-editor .clause-body { display: block; padding-left: 34px; white-space: normal; line-height: 1.78; text-align: justify; text-justify: inter-word; }
+  .letter-paper-editor .clause-follow { padding-left: 34px; margin-bottom: 18px; }
+  .letter-paper-editor .clause-continuation { padding-left: 34px; margin-bottom: 18px; white-space: normal; line-height: 1.78; text-align: justify; text-justify: inter-word; }
+  .letter-paper-editor .subclause-item { display: grid; grid-template-columns: 34px minmax(0, 1fr); column-gap: 8px; align-items: start; margin-bottom: 18px; white-space: normal; }
+  .letter-paper-editor .subclause-label, .letter-paper-editor .subclause-text { display: block; }
+  .letter-paper-editor .subclause-text { line-height: 1.72; text-align: justify; text-justify: inter-word; }
+  .letter-paper-editor .subclause-continuation { padding-left: 42px; margin-bottom: 18px; white-space: normal; line-height: 1.72; text-align: justify; text-justify: inter-word; }
+  .letter-paper-editor .roman-item,
+  .letter-paper-editor .consent-indent { padding-left: 38px; text-indent: -24px; line-height: 1.62; margin-bottom: 22px; }
+  .letter-paper-editor .verification-title { margin-top: 56px; margin-bottom: 48px; }
+  .letter-paper-editor .verification-body { margin-top: 78px; max-width: 720px; }
+  .letter-paper-editor .framed-photo { border: 2px solid #111827; padding: 16px; color: #111827; background: #fff; }
+  .letter-paper-editor .framed-photo::before { content: ""; position: absolute; inset: 14px; border: 1px solid #111827; pointer-events: none; }
+  .letter-paper-editor .photo-box { position: relative; }
+  .letter-paper-editor .consent-subject { margin-bottom: 34px; }
+  .letter-paper-editor .salutation { margin-bottom: 34px; }
+  .letter-paper-editor .consent-plot-lines { color: #dc2626; line-height: 1.55; margin-bottom: 22px; }
+  .letter-paper-editor .consent-signoff { margin-top: 56px; }
+  .letter-paper-editor .regulatory-note { font-style: italic; margin-bottom: 30px; }
+  .letter-paper-editor .agreement-note { font-style: italic; line-height: 1.45; margin-bottom: 28px; }
+  .letter-paper-editor .buyer-note { margin-top: 18px; max-width: 760px; }
+  .letter-paper-editor .closing-intro { line-height: 1.56; margin-bottom: 24px; }
+  .letter-paper-editor .closing-title { margin-bottom: 28px; line-height: 1.6; }
+  .letter-paper-editor .signature-lines,
+  .letter-paper-editor .witness-table { width: 100%; margin: 0 0 28px; table-layout: fixed; }
+  .letter-paper-editor .closing-witness-layout { display: flex; flex-direction: column; gap: 34px; margin-bottom: 18px; }
+  .letter-paper-editor .closing-witness-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 56px; }
+  .letter-paper-editor .closing-witness-entry { flex: 1 1 auto; min-width: 0; }
+  .letter-paper-editor .closing-witness-line { display: grid; grid-template-columns: 148px minmax(0, 1fr); align-items: end; column-gap: 10px; margin: 0 0 28px; }
+  .letter-paper-editor .closing-witness-label { display: block; min-width: 0; white-space: nowrap; }
+  .letter-paper-editor .closing-witness-fill { display: block; min-width: 0; padding-left: 4px; border-bottom: 1.6px solid #1f2937; line-height: 1.1; white-space: normal; overflow-wrap: anywhere; }
+  .letter-paper-editor .closing-photo-box { width: 104px; height: 142px; flex: 0 0 104px; border: 3px solid #374151; background: #fff; margin-top: 8px; }
+  .letter-paper-editor .signature-lines td,
+  .letter-paper-editor .witness-table td { border: 0; padding: 8px 0; vertical-align: top; }
+  .letter-paper-editor .signature-lines td:first-child { width: 72%; }
+  .letter-paper-editor .signature-lines td:last-child { width: 28%; text-align: right; }
+  .letter-paper-editor .witness-table td:first-child { width: 18%; padding-right: 10px; }
+  .letter-paper-editor .witness-table td:last-child { width: 82%; }
+  .letter-paper-editor .closing-meta,
+  .letter-paper-editor .closing-subtitle,
+  .letter-paper-editor .closing-witness-title,
+  .letter-paper-editor .closing-firm-title,
+  .letter-paper-editor .closing-firm-note { margin-bottom: 12px; }
+  .letter-paper-editor .closing-firm-title { margin-top: 18px; }
+  .letter-paper-editor .closing-firm-note { line-height: 1.5; }
   .letter-paper-editor .muted { color: #475569; }
   .letter-paper-editor .site-plan-box {
     display: grid; min-height: 210px; place-items: center; border: none; color: #64748b;
@@ -43,15 +124,33 @@ const LETTER_PRINT_CSS = `
   .letter-paper-editor .photo-box.bottom-left, .letter-paper-editor .photo-box.left { float: left; margin: 8px 16px 8px 0; }
   .letter-paper-editor .photo-box.right-mid, .letter-paper-editor .photo-box.right { float: right; margin: 8px 0 8px 16px; }
   .letter-paper-editor table { width: 100%; border-collapse: collapse; margin: 12px 0; }
-  .letter-paper-editor th, .letter-paper-editor td { border: 1px solid #475569; padding: 8px 10px; vertical-align: top; white-space: pre-wrap; }
+  .letter-paper-editor th, .letter-paper-editor td { border: 1px solid #111827; padding: 8px 12px; vertical-align: top; white-space: pre-wrap; }
   .letter-paper-editor .plain th, .letter-paper-editor .plain td { border: 0; padding: 4px 0; }
+  .letter-paper-editor .pricing-table { width: 100%; margin: 8px 0 4px; table-layout: fixed; }
+  .letter-paper-editor .pricing-table td:nth-child(1) { width: 38%; }
+  .letter-paper-editor .pricing-table td:nth-child(2) { width: 5%; text-align: center; padding-left: 0; padding-right: 0; }
+  .letter-paper-editor .pricing-table td:nth-child(3) { width: 57%; }
+  .letter-paper-editor .pricing-table td { font-size: 15px; line-height: 1.25; }
+  .letter-paper-editor section[data-ambey-page="1"] table th,
+  .letter-paper-editor section[data-ambey-page="1"] table td,
+  .letter-paper-editor .pricing-table td { font-weight: 600; }
   .letter-paper-editor .side-table th, .letter-paper-editor .side-table td { text-align: center; }
-  .letter-paper-editor .possession-layout { display: flex; gap: 24px; align-items: flex-start; margin: 12px 0; }
-  .letter-paper-editor .possession-layout .side-table { flex: 1; margin: 0; }
-  .letter-paper-editor .possession-aside { width: 240px; flex-shrink: 0; }
-  .letter-paper-editor .possession-aside .site-plan-box { min-height: 170px; }
-  .letter-paper-editor .compass { display: flex; justify-content: center; margin: 10px 0; }
-  .letter-paper-editor .compass svg { width: 120px; height: 120px; }
+  .letter-paper-editor .side-grid-table th, .letter-paper-editor .side-grid-table td { text-align: left; }
+  .letter-paper-editor .possession-layout { display: flex; gap: 42px; align-items: flex-start; margin: 22px 0 0; }
+  .letter-paper-editor .possession-table { flex: 0 0 420px; width: 420px; margin: 0; table-layout: fixed; }
+  .letter-paper-editor .possession-table th:nth-child(1), .letter-paper-editor .possession-table td:nth-child(1) { width: 32%; }
+  .letter-paper-editor .possession-table th:nth-child(2), .letter-paper-editor .possession-table td:nth-child(2) { width: 5%; text-align: center; padding-left: 0; padding-right: 0; }
+  .letter-paper-editor .possession-table th:nth-child(3), .letter-paper-editor .possession-table td:nth-child(3) { width: 22%; }
+  .letter-paper-editor .possession-table th:nth-child(4), .letter-paper-editor .possession-table td:nth-child(4) { width: 41%; }
+  .letter-paper-editor .possession-table th { font-weight: 700; }
+  .letter-paper-editor .possession-table td { font-weight: 500; }
+  .letter-paper-editor .possession-table th, .letter-paper-editor .possession-table td { padding: 9px 10px; font-size: 12px; line-height: 1.15; }
+  .letter-paper-editor .possession-aside { width: 238px; flex-shrink: 0; text-align: center; }
+  .letter-paper-editor .possession-plan-box { width: 190px; min-height: 258px; border: 3px solid #374151; margin: 0 auto; }
+  .letter-paper-editor .site-plan-label { margin-top: 24px; font-size: 13px; font-weight: 700; letter-spacing: 0.02em; }
+  .letter-paper-editor .compass { display: flex; justify-content: center; margin: 26px 0 22px; }
+  .letter-paper-editor .compass svg { width: 118px; height: 118px; }
+  .letter-paper-editor .certificate-signature { margin-top: 20px; line-height: 1.35; }
   .letter-paper-editor ol, .letter-paper-editor ul { padding-left: 22px; }
   .letter-paper-editor li { margin-bottom: 8px; }
   .letter-paper-editor .attachment-block img { max-width: 100%; height: auto; display: block; margin: 8px auto; }

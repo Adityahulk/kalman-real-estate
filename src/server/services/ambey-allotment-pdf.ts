@@ -8,19 +8,26 @@ type RenderContext = {
   italic: PDFFont;
   boldItalic: PDFFont;
   y: number;
+  floatBox?: {
+    side: "left" | "right";
+    top: number;
+    bottom: number;
+    width: number;
+    gap: number;
+  };
 };
 
 const PAGE_WIDTH = 595.32;
 const PAGE_HEIGHT = 841.92;
-const LEFT = 72;
-const RIGHT = 72;
+const LEFT = 46;
+const RIGHT = 46;
 const TEXT_WIDTH = PAGE_WIDTH - LEFT - RIGHT;
 const BODY_SIZE = 10.4;
 const LINE_HEIGHT = 14.4;
 const INK = rgb(0.12, 0.15, 0.18);
 
 // One contiguous run of identically-styled characters within a word.
-type StyledRun = { text: string; b: boolean; i: boolean; u: boolean };
+type StyledRun = { text: string; b: boolean; i: boolean; u: boolean; size?: number };
 // A space-delimited word, possibly containing several differently-styled runs.
 type Word = StyledRun[];
 
@@ -121,6 +128,10 @@ async function drawParagraph(context: RenderContext, html: string, attrs: Record
   }
 
   const className = attrs.class ?? "";
+  if (className.includes("first-page-signoff")) {
+    drawFirstPageSignoff(context, html);
+    return;
+  }
   const align = className.includes("right") ? "right" : className.includes("center") ? "center" : "left";
   const forceBold = className.includes("bold");
   // Each <br> starts a new hard line; words inside carry their own bold/italic/underline styling.
@@ -129,11 +140,33 @@ async function drawParagraph(context: RenderContext, html: string, attrs: Record
       context.y -= LINE_HEIGHT;
       continue;
     }
-    for (const visualLine of wrapWords(context, hardLine, BODY_SIZE, TEXT_WIDTH)) {
-      drawWordLine(context, visualLine, align, forceBold);
+    let remaining = hardLine;
+    while (remaining.length) {
+      const { x, width } = lineMetrics(context, align);
+      const { line, rest } = takeWordsForWidth(context, remaining, BODY_SIZE, width);
+      drawWordLine(context, line, align, forceBold, x, width);
+      remaining = rest;
     }
   }
   context.y -= 8;
+}
+
+function drawFirstPageSignoff(context: RenderContext, html: string) {
+  const lines = textFromHtml(html).split("\n").map((line) => line.trim()).filter(Boolean);
+  const boldLines = Array.from(html.matchAll(/<(?:strong|b)\b[^>]*>([\s\S]*?)<\/(?:strong|b)>/gi))
+    .map((match) => textFromHtml(match[1]).trim())
+    .filter(Boolean);
+  const startY = 124;
+  let y = startY;
+  for (const line of lines) {
+    const bold = boldLines.includes(line);
+    const font = bold ? context.bold : context.font;
+    const size = BODY_SIZE;
+    const width = font.widthOfTextAtSize(line, size);
+    const x = PAGE_WIDTH - RIGHT - width;
+    context.page.drawText(line, { x, y, size, font, color: INK });
+    y -= LINE_HEIGHT;
+  }
 }
 
 function fontFor(context: RenderContext, bold: boolean, italic: boolean) {
@@ -144,7 +177,8 @@ function fontFor(context: RenderContext, bold: boolean, italic: boolean) {
 }
 
 function runWidth(context: RenderContext, run: StyledRun, size: number) {
-  return fontFor(context, run.b, run.i).widthOfTextAtSize(run.text, size);
+  const resolvedSize = run.size ?? size;
+  return fontFor(context, run.b, run.i).widthOfTextAtSize(run.text, resolvedSize);
 }
 
 function wordWidth(context: RenderContext, word: Word, size: number) {
@@ -158,6 +192,7 @@ function parseStyledLines(html: string): Word[][] {
   let words: Word[] = [];
   let word: Word = [];
   let bold = 0, italic = 0, underline = 0;
+  const sizeStack: Array<number | undefined> = [];
 
   const flushWord = () => { if (word.length) { words.push(word); word = []; } };
   const flushLine = () => { flushWord(); lines.push(words); words = []; };
@@ -165,9 +200,10 @@ function parseStyledLines(html: string): Word[][] {
     for (const ch of text) {
       if (ch === " " || ch === "\t" || ch === "\n") { flushWord(); continue; }
       const b = bold > 0, i = italic > 0, u = underline > 0;
+      const size = sizeStack.length ? sizeStack[sizeStack.length - 1] : undefined;
       const last = word[word.length - 1];
-      if (last && last.b === b && last.i === i && last.u === u) last.text += ch;
-      else word.push({ text: ch, b, i, u });
+      if (last && last.b === b && last.i === i && last.u === u && last.size === size) last.text += ch;
+      else word.push({ text: ch, b, i, u, size });
     }
   };
 
@@ -181,6 +217,10 @@ function parseStyledLines(html: string): Word[][] {
       if (tag === "b" || tag === "strong") bold = Math.max(0, bold + delta);
       else if (tag === "i" || tag === "em") italic = Math.max(0, italic + delta);
       else if (tag === "u") underline = Math.max(0, underline + delta);
+      else if (tag === "span") {
+        if (closing) sizeStack.pop();
+        else sizeStack.push(extractInlineFontSize(token));
+      }
     } else {
       appendText(decodeHtml(token));
     }
@@ -191,12 +231,12 @@ function parseStyledLines(html: string): Word[][] {
 
 // Greedily wrap words into visual lines that fit within maxWidth.
 function wrapWords(context: RenderContext, words: Word[], size: number, maxWidth: number): Word[][] {
-  const spaceW = context.font.widthOfTextAtSize(" ", size);
   const lines: Word[][] = [];
   let line: Word[] = [];
   let width = 0;
   for (const word of words) {
     const ww = wordWidth(context, word, size);
+    const spaceW = context.font.widthOfTextAtSize(" ", Math.max(wordMaxSize(word, size), line.length ? lineMaxSize(line, size) : size));
     const add = line.length ? spaceW + ww : ww;
     if (line.length && width + add > maxWidth) {
       lines.push(line);
@@ -211,15 +251,31 @@ function wrapWords(context: RenderContext, words: Word[], size: number, maxWidth
   return lines.length ? lines : [[]];
 }
 
-function drawWordLine(context: RenderContext, words: Word[], align: "left" | "center" | "right", forceBold: boolean) {
+function drawWordLine(
+  context: RenderContext,
+  words: Word[],
+  align: "left" | "center" | "right",
+  forceBold: boolean,
+  baseX = LEFT,
+  availableWidth = TEXT_WIDTH,
+) {
   const size = BODY_SIZE;
-  const spaceW = context.font.widthOfTextAtSize(" ", size);
-  const total = words.reduce((sum, word, index) => sum + wordWidth(context, word, size) + (index ? spaceW : 0), 0);
+  const total = words.reduce((sum, word, index) => {
+    const spaceW = index ? context.font.widthOfTextAtSize(" ", Math.max(wordMaxSize(word, size), lineMaxSize(words.slice(0, index), size))) : 0;
+    return sum + wordWidth(context, word, size) + spaceW;
+  }, 0);
   const y = context.y;
-  let x = align === "right" ? PAGE_WIDTH - RIGHT - total : align === "center" ? (PAGE_WIDTH - total) / 2 : LEFT;
+  let x =
+    align === "right"
+      ? baseX + availableWidth - total
+      : align === "center"
+        ? baseX + (availableWidth - total) / 2
+        : baseX;
+  const maxSize = lineMaxSize(words, size);
 
   words.forEach((word, wi) => {
     if (wi) {
+      const spaceW = context.font.widthOfTextAtSize(" ", Math.max(wordMaxSize(word, size), maxSize));
       // Keep the underline continuous across a space when both neighbouring runs are underlined.
       const prevUnderlined = words[wi - 1][words[wi - 1].length - 1]?.u;
       const nextUnderlined = word[0]?.u;
@@ -230,34 +286,106 @@ function drawWordLine(context: RenderContext, words: Word[], align: "left" | "ce
     }
     for (const run of word) {
       const font = fontFor(context, run.b || forceBold, run.i);
-      const w = font.widthOfTextAtSize(run.text, size);
-      context.page.drawText(run.text, { x, y, size, font, color: INK });
+      const runSize = run.size ?? size;
+      const w = font.widthOfTextAtSize(run.text, runSize);
+      context.page.drawText(run.text, { x, y, size: runSize, font, color: INK });
       if (run.u) context.page.drawLine({ start: { x, y: y - 2 }, end: { x: x + w, y: y - 2 }, thickness: 0.6, color: INK });
       x += w;
     }
   });
-  context.y -= LINE_HEIGHT;
+  context.y -= Math.max(LINE_HEIGHT, maxSize * 1.38);
+}
+
+function extractInlineFontSize(token: string) {
+  const match = token.match(/font-size\s*:\s*(\d+(?:\.\d+)?)px/i);
+  return match ? Number(match[1]) : undefined;
+}
+
+function wordMaxSize(word: Word, fallback: number) {
+  return word.reduce((max, run) => Math.max(max, run.size ?? fallback), fallback);
+}
+
+function lineMaxSize(words: Word[], fallback: number) {
+  return words.reduce((max, word) => Math.max(max, wordMaxSize(word, fallback)), fallback);
 }
 
 function drawSingleLine(context: RenderContext, text: string, align: "left" | "center" | "right", bold = false, italic = false) {
   const font = italic ? context.italic : bold ? context.bold : context.font;
   const width = font.widthOfTextAtSize(text, BODY_SIZE);
-  const x = align === "right" ? PAGE_WIDTH - RIGHT - width : align === "center" ? (PAGE_WIDTH - width) / 2 : LEFT;
+  const metrics = lineMetrics(context, align);
+  const x =
+    align === "right"
+      ? metrics.x + metrics.width - width
+      : align === "center"
+        ? metrics.x + (metrics.width - width) / 2
+        : metrics.x;
   context.page.drawText(text, { x, y: context.y, size: BODY_SIZE, font, color: rgb(0.12, 0.15, 0.18) });
   context.y -= LINE_HEIGHT;
+}
+
+function lineMetrics(context: RenderContext, align: "left" | "center" | "right") {
+  const floatBox = context.floatBox;
+  if (
+    !floatBox ||
+    context.y > floatBox.top ||
+    context.y < floatBox.bottom ||
+    align !== "left"
+  ) {
+    if (floatBox && context.y < floatBox.bottom) {
+      delete context.floatBox;
+    }
+    return { x: LEFT, width: TEXT_WIDTH };
+  }
+
+  if (floatBox.side === "right") {
+    return { x: LEFT, width: TEXT_WIDTH - floatBox.width - floatBox.gap };
+  }
+
+  return { x: LEFT + floatBox.width + floatBox.gap, width: TEXT_WIDTH - floatBox.width - floatBox.gap };
+}
+
+function takeWordsForWidth(context: RenderContext, words: Word[], size: number, maxWidth: number) {
+  const line: Word[] = [];
+  let width = 0;
+  let index = 0;
+
+  for (; index < words.length; index += 1) {
+    const word = words[index];
+    const ww = wordWidth(context, word, size);
+    const spaceW = line.length
+      ? context.font.widthOfTextAtSize(" ", Math.max(wordMaxSize(word, size), lineMaxSize(line, size)))
+      : 0;
+    const add = line.length ? spaceW + ww : ww;
+
+    if (line.length && width + add > maxWidth) break;
+    line.push(word);
+    width += add;
+  }
+
+  return { line: line.length ? line : [words[0]], rest: line.length ? words.slice(index) : words.slice(1) };
 }
 
 function drawTable(context: RenderContext, html: string, attrs: Record<string, string>) {
   const rows = parseRows(html);
   if (!rows.length) return;
   const className = attrs.class ?? "";
-  if (className.includes("plain")) {
-    const widths = className.includes("side-table") ? [100, 105, 160] : [140, 160, 150];
+  if (className.includes("plain") || className.includes("signature-lines") || className.includes("witness-table")) {
+    const widths = className.includes("signature-lines")
+      ? [TEXT_WIDTH - 120, 120]
+      : className.includes("witness-table")
+        ? [72, TEXT_WIDTH - 72]
+        : className.includes("side-table")
+          ? [100, 105, 160]
+          : [140, 160, 150];
     for (const row of rows) {
       let x = LEFT;
       const rowHeight = 23;
       row.forEach((cell, index) => {
-        context.page.drawText(cell.text, { x, y: context.y, size: BODY_SIZE, font: cell.header || cell.bold ? context.bold : context.font, color: rgb(0.12, 0.15, 0.18) });
+        const width = widths[index] ?? 120;
+        const font = cell.header || cell.bold ? context.bold : context.font;
+        const textWidth = font.widthOfTextAtSize(cell.text, BODY_SIZE);
+        const textX = className.includes("signature-lines") && index === row.length - 1 ? x + width - textWidth : x;
+        context.page.drawText(cell.text, { x: textX, y: context.y, size: BODY_SIZE, font, color: rgb(0.12, 0.15, 0.18) });
         x += widths[index] ?? 120;
       });
       context.y -= rowHeight;
@@ -266,7 +394,11 @@ function drawTable(context: RenderContext, html: string, attrs: Record<string, s
     return;
   }
 
-  const widths = className.includes("payments") ? [120, 120, 95, 116] : [140, TEXT_WIDTH - 140];
+  const widths = className.includes("payments")
+    ? [120, 120, 95, 116]
+    : className.includes("pricing-table")
+      ? [170, 28, TEXT_WIDTH - 198]
+      : [140, TEXT_WIDTH - 140];
   const tableX = LEFT;
   let y = context.y;
   for (const row of rows) {
@@ -294,6 +426,10 @@ async function drawSpecialBox(context: RenderContext, html: string, attrs: Recor
     await drawAttachmentBlock(context, html);
     return;
   }
+  if (className.includes("possession-layout")) {
+    drawPossessionLayout(context, html);
+    return;
+  }
   if (className.includes("site-plan-box")) {
     const x = 365;
     const y = 330;
@@ -306,9 +442,151 @@ async function drawSpecialBox(context: RenderContext, html: string, attrs: Recor
     return;
   }
 
-  // photo-box: the source document simply leaves a blank space to physically affix a photo.
-  // Reserve that space (no border, no placeholder text). The boxes are positioned absolutely
-  // so they don't consume flow — drawing nothing leaves clean empty space.
+  if (className.includes("photo-box")) {
+    drawPhotoPlaceholder(context, html, className);
+  }
+}
+
+function drawPossessionLayout(context: RenderContext, html: string) {
+  const tableMatch = html.match(/<table\b([^>]*)>([\s\S]*?)<\/table>/i);
+  const signatureMatch = html.match(/<p\b[^>]*certificate-signature[^>]*>([\s\S]*?)<\/p>/i);
+  const rows = tableMatch ? parseRows(tableMatch[2]) : [];
+  const tableX = LEFT;
+  const topY = context.y - 6;
+  const widths = [104, 16, 72, 124];
+  let y = topY;
+
+  for (const row of rows) {
+    const wrapped = row.map((cell, index) =>
+      wrapText(cell.text, cell.header || cell.bold ? context.bold : context.font, BODY_SIZE, (widths[index] ?? 120) - 12),
+    );
+    const rowHeight = Math.max(34, Math.max(...wrapped.map((lines) => lines.length)) * 12 + 12);
+    let x = tableX;
+    row.forEach((cell, index) => {
+      const width = widths[index] ?? 120;
+      context.page.drawRectangle({
+        x,
+        y: y - rowHeight,
+        width,
+        height: rowHeight,
+        borderColor: rgb(0.25, 0.3, 0.38),
+        borderWidth: 0.9,
+      });
+      let textY = y - 15;
+      for (const line of wrapped[index]) {
+        const font = cell.header || cell.bold ? context.bold : context.font;
+        const isColonCell = index === 1;
+        const lineWidth = font.widthOfTextAtSize(line, 9.6);
+        const textX = isColonCell ? x + (width - lineWidth) / 2 : x + 8;
+        context.page.drawText(line, { x: textX, y: textY, size: 9.6, font, color: INK });
+        textY -= 12;
+      }
+      x += width;
+    });
+    y -= rowHeight;
+  }
+
+  const boxX = 398;
+  const boxTop = topY + 8;
+  const boxHeight = 192;
+  const boxWidth = 142;
+  context.page.drawRectangle({
+    x: boxX,
+    y: boxTop - boxHeight,
+    width: boxWidth,
+    height: boxHeight,
+    borderWidth: 2.2,
+    borderColor: INK,
+  });
+
+  const label = "SITE PLAN (NOT TO SCALE)";
+  const labelWidth = context.bold.widthOfTextAtSize(label, 11);
+  const labelY = boxTop - boxHeight - 34;
+  context.page.drawText(label, {
+    x: boxX + (boxWidth - labelWidth) / 2,
+    y: labelY,
+    size: 11,
+    font: context.bold,
+    color: INK,
+  });
+
+  drawCompass(context.page, context.font, boxX + boxWidth / 2, labelY - 76);
+
+  const signatureText = signatureMatch ? textFromHtml(signatureMatch[1]) : "";
+  if (signatureText) {
+    let sigY = labelY - 154;
+    for (const line of signatureText.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
+      const width = context.bold.widthOfTextAtSize(line, line.includes("Authorized Signatory") ? 10.6 : 11.8);
+      const font = line.includes("Authorized Signatory") ? context.font : context.bold;
+      const size = line.includes("Authorized Signatory") ? 10.6 : 11.8;
+      context.page.drawText(line, {
+        x: boxX + boxWidth - width,
+        y: sigY,
+        size,
+        font,
+        color: INK,
+      });
+      sigY -= 16;
+    }
+  }
+
+  context.y = Math.min(y - 18, labelY - 188);
+}
+
+function drawPhotoPlaceholder(context: RenderContext, html: string, className: string) {
+  const text = textFromHtml(html).trim();
+  if (!text) return;
+
+  const width = 132;
+  const height = 170;
+  const x = className.includes("right") ? PAGE_WIDTH - RIGHT - width : LEFT;
+  const y = className.includes("bottom-left") ? context.y - height - 28 : context.y - height + 6;
+
+  context.page.drawRectangle({
+    x,
+    y,
+    width,
+    height,
+    borderWidth: 1.4,
+    borderColor: INK,
+  });
+  context.page.drawRectangle({
+    x: x + 14,
+    y: y + 14,
+    width: width - 28,
+    height: height - 28,
+    borderWidth: 0.8,
+    borderColor: INK,
+  });
+
+  const lines = text.split("\n").map((line) => line.trim()).filter(Boolean);
+  const size = 11;
+  const lineGap = 18;
+  const totalHeight = lines.length * lineGap;
+  let textY = y + (height + totalHeight) / 2 - lineGap;
+  for (const line of lines) {
+    const lineWidth = context.font.widthOfTextAtSize(line, size);
+    context.page.drawText(line, {
+      x: x + (width - lineWidth) / 2,
+      y: textY,
+      size,
+      font: context.font,
+      color: rgb(0.4, 0.45, 0.52),
+    });
+    textY -= lineGap;
+  }
+
+  if (className.includes("right-mid") || className.includes("right")) {
+    context.floatBox = {
+      side: "right",
+      top: y + height,
+      bottom: y,
+      width,
+      gap: 16,
+    };
+  }
+
+  if (className.includes("bottom-left")) context.y = y - 18;
 }
 
 // Render a data-URL image centred at a modest size so multiple images can share a page.

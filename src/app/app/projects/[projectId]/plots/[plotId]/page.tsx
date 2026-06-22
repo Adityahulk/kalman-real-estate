@@ -22,7 +22,7 @@ import { DeleteCadButton } from "@/components/delete-cad-button";
 import { FileActions } from "@/components/file-actions";
 import { FilePreview } from "@/components/file-preview";
 import { FileUploader } from "@/components/file-uploader";
-import { DocumentApprovalButtons } from "../../../../documents/document-actions";
+import { DeleteDocumentButton, DocumentApprovalButtons } from "../../../../documents/document-actions";
 import { ManualPlotZoneForm } from "../../../manual-entry-actions";
 import {
   PlotChecklistProgressForm,
@@ -57,10 +57,14 @@ export default async function ProjectPlotWorkspacePage({
   const cadFileId = workspace.spatialLinks[0]?.entity.scene.cadFileId;
   const plotMapFileId = workspace.childCadFiles[0]?.id ?? cadFileId;
   const plotMapFiles = workspace.plotFiles.filter((file) => file.categoryKey === "plot-map");
+  const signedAllotmentFiles = workspace.plotFiles.filter((file) => file.categoryKey === "signed-allotment-letter");
   const latestPlotMapFile = plotMapFiles[0] ?? null;
   const latestPlotCadPreviewId = workspace.childCadFiles.find((file) => file.analysis?.previewArtifactKey)?.id ?? null;
   const registryDocuments = workspace.plotFiles.filter((file) => file.documentType === "REGISTRY_RECEIPT" || file.documentType === "REGISTRY_DEED");
   const ownershipLetters = workspace.generatedDocuments.filter((document) => document.type.includes("allotment") || document.type.includes("transfer"));
+  const latestSignedLetterUploadTargetId = ownershipLetters
+    .filter((document) => document.type.includes("allotment") && document.fileAssetId && document.status !== "REJECTED")
+    .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0]?.id ?? null;
   const latestAllotmentRecord = plot.ownershipRecords.find((record) => record.kind === "ALLOTMENT") ?? null;
   const allotmentSupportFiles = [
     ...workspace.ownerFiles.filter((file) => file.categoryKey === "allottee-kyc"),
@@ -149,7 +153,7 @@ export default async function ProjectPlotWorkspacePage({
 
             <AccordionRow label="Status" value={allotmentStatus}>
               <div className="overflow-x-auto rounded-lg border border-slate-200">
-                <OwnershipLetterRows documents={ownershipLetters} />
+                <OwnershipLetterRows documents={ownershipLetters} plotId={plot.id} latestSignedLetterUploadTargetId={latestSignedLetterUploadTargetId} />
               </div>
             </AccordionRow>
 
@@ -200,7 +204,10 @@ export default async function ProjectPlotWorkspacePage({
             <table className="w-full text-left text-sm">
               <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-5 py-3">Letter</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Date</th><th className="px-5 py-3">Download</th></tr></thead>
               <tbody className="divide-y divide-slate-100">
-                {ownershipLetters.map((document) => <tr key={document.id}><td className="px-5 py-3 font-medium">{document.number ?? document.type.replaceAll("_", " ")}</td><td className="px-5 py-3">{document.status.replaceAll("_", " ")}</td><td className="px-5 py-3">{document.createdAt.toLocaleDateString("en-IN")}</td><td className="px-5 py-3">{document.fileAssetId ? <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`}>Download</a> : <span className="text-slate-500">PDF not generated</span>}</td></tr>)}
+                {ownershipLetters.map((document) => {
+                  const canUploadSignedLetter = document.id === latestSignedLetterUploadTargetId;
+                  return <tr key={document.id}><td className="px-5 py-3 font-medium">{document.number ?? document.type.replaceAll("_", " ")}</td><td className="px-5 py-3">{document.status.replaceAll("_", " ")}</td><td className="px-5 py-3">{document.createdAt.toLocaleDateString("en-IN")}</td><td className="px-5 py-3"><div className="flex flex-wrap items-center gap-2">{document.fileAssetId ? <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`}>Download</a> : <span className="text-slate-500">PDF not generated</span>}{canUploadSignedLetter ? <FileUploader compact label="Upload signed letter" ownerType="Plot" ownerId={plot.id} visibility="OWNER_VISIBLE" accept="application/pdf,image/*" metadata={{ categoryKey: "signed-allotment-letter", documentType: "ALLOTMENT_LETTER", documentNo: document.number ?? undefined, documentDate: document.createdAt.toISOString(), notes: "Signed version of allotment letter" }} refreshOnUpload /> : null}</div></td></tr>;
+                })}
               </tbody>
             </table>
             {!ownershipLetters.length ? <div className="p-6 text-sm text-slate-500">No allotment or transfer letters yet.</div> : null}
@@ -300,14 +307,18 @@ export default async function ProjectPlotWorkspacePage({
                       <div className="flex flex-wrap items-center gap-2">
                         <Link className="btn-outline h-8 px-3 text-xs" href={`/app/projects/${plot.projectId}/plots/${plot.id}/letters/${document.id}`}>Edit</Link>
                         {document.fileAssetId ? <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`}>Download</a> : null}
-                        {document.fileAssetId ? <DeleteFileButton fileId={document.fileAssetId} fileName={document.number ?? document.type} /> : null}
-                        <DocumentApprovalButtons documentId={document.id} />
+                        <DeleteDocumentButton documentId={document.id} documentName={document.number ?? document.type} />
+                        <DocumentApprovalButtons documentId={document.id} status={document.status} fileAssetId={document.fileAssetId} />
                       </div>
                     </div>
                   </div>
                 ))}
                 {!workspace.generatedDocuments.length ? <Empty label="No letters generated yet." /> : null}
               </div>
+            </div>
+            <div className="card p-5">
+              <h2 className="mb-4 font-semibold">Signed allotment letters</h2>
+              <DocumentGrid files={signedAllotmentFiles} empty="No signed allotment letter uploaded yet." />
             </div>
             <div className="card p-5">
               <h2 className="mb-4 font-semibold">Allotment supporting documents</h2>
@@ -599,8 +610,12 @@ function OwnerHistoryRows({
 
 function OwnershipLetterRows({
   documents,
+  plotId,
+  latestSignedLetterUploadTargetId,
 }: {
   documents: Awaited<ReturnType<typeof getPlotWorkspace>>["generatedDocuments"];
+  plotId: string;
+  latestSignedLetterUploadTargetId: string | null;
 }) {
   return (
     <>
@@ -614,7 +629,7 @@ function OwnershipLetterRows({
               <td className="px-4 py-3 font-medium">{document.number ?? document.type.replaceAll("_", " ")}</td>
               <td className="px-4 py-3">{document.status.replaceAll("_", " ")}</td>
               <td className="whitespace-nowrap px-4 py-3">{document.createdAt.toLocaleDateString("en-IN")}</td>
-              <td className="px-4 py-3">{document.fileAssetId ? <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`}>Download</a> : <span className="text-slate-500">PDF not generated</span>}</td>
+              <td className="px-4 py-3"><div className="flex flex-wrap items-center gap-2">{document.fileAssetId ? <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`}>Download</a> : <span className="text-slate-500">PDF not generated</span>}{document.id === latestSignedLetterUploadTargetId ? <FileUploader compact label="Upload signed letter" ownerType="Plot" ownerId={plotId} visibility="OWNER_VISIBLE" accept="application/pdf,image/*" metadata={{ categoryKey: "signed-allotment-letter", documentType: "ALLOTMENT_LETTER", documentNo: document.number ?? undefined, documentDate: document.createdAt.toISOString(), notes: "Signed version of allotment letter" }} refreshOnUpload /> : null}</div></td>
             </tr>
           ))}
         </tbody>
@@ -629,7 +644,7 @@ function DocumentGrid({ files, empty }: { files: Awaited<ReturnType<typeof getPl
     <div className="grid gap-3 md:grid-cols-2">
       {files.map((file) => (
         <div key={file.id} className="rounded-lg border border-slate-200 p-3 text-sm">
-          <div className="font-medium">{file.documentType?.replaceAll("_", " ") ?? "Document"}</div>
+          <div className="font-medium">{file.categoryKey === "signed-allotment-letter" ? "Signed version of allotment letter" : file.documentType?.replaceAll("_", " ") ?? "Document"}</div>
           <div className="mt-1 truncate text-xs text-slate-500">{file.fileName}</div>
           <div className="mt-2 text-xs text-slate-500">
             {file.documentNo ?? "No reference"} · {(file.documentDate ?? file.createdAt).toLocaleDateString("en-IN")} · {file.visibility.replaceAll("_", " ")}

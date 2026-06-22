@@ -3,11 +3,15 @@
 import { Check, Eye, FileText, Loader2, Map, Pencil, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { FileUploader } from "@/components/file-uploader";
 
 type PlotDocument = {
   id: string;
   status: string;
   fileAssetId: string | null;
+  type?: string;
+  number?: string | null;
+  createdAt?: string;
 };
 
 export function OwnershipPlotRow({
@@ -50,6 +54,12 @@ export function OwnershipPlotRow({
   }
   const waiting = Boolean(document && ["DRAFT", "GENERATED", "UNDER_REVIEW"].includes(status));
   const approvalReady = Boolean(waiting && document?.fileAssetId);
+  const canUploadSignedLetter = Boolean(
+    document &&
+    document.type?.toLowerCase().includes("allotment") &&
+    document.fileAssetId &&
+    status !== "REJECTED",
+  );
 
   async function decide(nextStatus: "APPROVED" | "REJECTED") {
     if (!document || loading) return;
@@ -93,43 +103,84 @@ export function OwnershipPlotRow({
         )}
       </td>
       <td className="px-5 py-4">
-        <div className="flex flex-wrap items-center gap-2" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-          {!document ? <span className="chip bg-slate-100 text-slate-700">{allotmentStatus}</span> : null}
-          {waiting && document?.fileAssetId ? <span className="chip bg-amber-100 text-amber-800">Waiting for approval</span> : null}
-          {waiting && !document?.fileAssetId ? <span className="chip bg-slate-100 text-slate-700">Letter in progress</span> : null}
-          {status === "APPROVED" || status === "ISSUED" ? <span className="chip bg-emerald-50 text-emerald-700">{status === "ISSUED" ? "Allotment issued" : "Allotment approved"}</span> : null}
-          {status === "REJECTED" ? <span className="chip bg-rose-50 text-rose-700">Allotment rejected</span> : null}
-          {document?.fileAssetId ? <a className="btn-outline h-8 px-2 text-xs" href={`/api/v1/files/${document.fileAssetId}/download?disposition=inline&proxy=1`} target="_blank" rel="noreferrer"><Eye size={14} /> View PDF</a> : null}
-          {approvalReady ? (
-            <>
-              <button className="btn-outline h-8 px-2 text-xs text-emerald-700" type="button" onClick={() => void decide("APPROVED")} disabled={Boolean(loading)}>
-                {loading === "APPROVED" ? <Loader2 className="animate-spin" size={14} /> : <Check size={14} />} Approve
-              </button>
-              <button className="btn-outline h-8 px-2 text-xs text-rose-700" type="button" onClick={() => void decide("REJECTED")} disabled={Boolean(loading)}>
-                {loading === "REJECTED" ? <Loader2 className="animate-spin" size={14} /> : <X size={14} />} Reject
-              </button>
-            </>
+        <div
+          className="min-w-[320px] rounded-xl border border-slate-200 bg-slate-50/80 p-3"
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            {!document ? <span className="chip bg-slate-100 text-slate-700">{allotmentStatus}</span> : null}
+            {waiting && document?.fileAssetId ? <span className="chip bg-amber-100 text-amber-800">Waiting for approval</span> : null}
+            {waiting && !document?.fileAssetId ? <span className="chip bg-slate-100 text-slate-700">Letter in progress</span> : null}
+            {status === "APPROVED" || status === "ISSUED" ? <span className="chip bg-emerald-50 text-emerald-700">{status === "ISSUED" ? "Allotment issued" : "Allotment approved"}</span> : null}
+            {status === "REJECTED" ? <span className="chip bg-rose-50 text-rose-700">Allotment rejected</span> : null}
+          </div>
+
+          {document ? (
+            <div className="mt-2 text-xs text-slate-500">
+              {document.number ?? "Letter draft"}{document.createdAt ? ` · ${new Date(document.createdAt).toLocaleDateString("en-IN")}` : ""}
+            </div>
+          ) : (
+            <div className="mt-2 text-xs text-slate-500">No allotment letter has been generated yet.</div>
+          )}
+
+          {(document?.fileAssetId || canUploadSignedLetter || approvalReady) ? (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {document?.fileAssetId ? (
+                <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download?disposition=inline&proxy=1`} target="_blank" rel="noreferrer">
+                  <Eye size={14} />
+                  View PDF
+                </a>
+              ) : null}
+              {canUploadSignedLetter ? (
+                <FileUploader
+                  compact
+                  label="Upload signed"
+                  ownerType="Plot"
+                  ownerId={plotId}
+                  visibility="OWNER_VISIBLE"
+                  accept="application/pdf,image/*"
+                  refreshOnUpload
+                  metadata={{
+                    documentType: "ALLOTMENT_LETTER",
+                    documentNo: document?.number ?? undefined,
+                    documentDate: document?.createdAt ? new Date(document.createdAt).toISOString() : undefined,
+                    notes: "Signed version of allotment letter",
+                    categoryKey: "signed-allotment-letter",
+                  }}
+                />
+              ) : null}
+              {approvalReady ? (
+                <>
+                  <button className="btn-outline h-8 px-3 text-xs text-emerald-700" type="button" onClick={() => void decide("APPROVED")} disabled={Boolean(loading)}>
+                    {loading === "APPROVED" ? <Loader2 className="animate-spin" size={14} /> : <Check size={14} />}
+                    Approve
+                  </button>
+                  <button className="btn-outline h-8 px-3 text-xs text-rose-700" type="button" onClick={() => void decide("REJECTED")} disabled={Boolean(loading)}>
+                    {loading === "REJECTED" ? <Loader2 className="animate-spin" size={14} /> : <X size={14} />}
+                    Reject
+                  </button>
+                </>
+              ) : null}
+            </div>
           ) : null}
         </div>
       </td>
       <td className="px-5 py-4">
         <div className="flex flex-wrap gap-2" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
-          <button className="btn-primary h-8 px-3 text-xs" type="button" onClick={() => router.push(href)}>
-            Open plot
+          <button className="btn-outline h-8 w-8 px-0 text-slate-600" type="button" title="Edit plot" aria-label="Edit plot" onClick={() => router.push(`${href}/edit`)}>
+            <Pencil size={14} />
           </button>
-          <button className="btn-outline h-8 px-3 text-xs" type="button" onClick={() => router.push(`${href}/edit`)}>
-            <Pencil size={14} /> Edit
-          </button>
-          <button className="btn-outline h-8 px-3 text-xs" type="button" onClick={() => router.push(`${href}?tab=plot-map`)}>
-            <Map size={14} /> Plot Map
+          <button className="btn-outline h-8 w-8 px-0 text-slate-600" type="button" title="Plot map" aria-label="Open plot map" onClick={() => router.push(`${href}?tab=plot-map`)}>
+            <Map size={14} />
           </button>
           {document ? (
-            <button className="btn-outline h-8 px-3 text-xs" type="button" onClick={() => router.push(`${href}/letters/${document.id}`)}>
-              <FileText size={14} /> Open letter
+            <button className="btn-outline h-8 w-8 px-0 text-slate-600" type="button" title="Open letter" aria-label="Open letter" onClick={() => router.push(`${href}/letters/${document.id}`)}>
+              <FileText size={14} />
             </button>
           ) : null}
-          <button className="btn-outline h-8 px-3 text-xs border-rose-300 text-rose-600 hover:bg-rose-50" type="button" onClick={() => void deletePlot()} disabled={deleting}>
-            {deleting ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />} Delete
+          <button className="btn-outline h-8 w-8 px-0 border-rose-300 text-rose-600 hover:bg-rose-50" type="button" title="Delete plot" aria-label="Delete plot" onClick={() => void deletePlot()} disabled={deleting}>
+            {deleting ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />}
           </button>
         </div>
       </td>
