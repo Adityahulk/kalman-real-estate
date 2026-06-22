@@ -12,12 +12,9 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 RUN addgroup --system --gid 1001 nodejs \
-  && adduser --system --uid 1001 nextjs \
+  && adduser --system --uid 1001 --home /tmp nextjs \
   && mkdir -p /app/storage \
   && chown -R nextjs:nodejs /app/storage
-
-# Chromium's crashpad handler needs a writable home for its crash database.
-ENV HOME=/tmp
 
 COPY package.json package-lock.json ./
 RUN npm ci --include=dev

@@ -28,12 +28,9 @@ ENV PUPPETEER_SKIP_DOWNLOAD=1
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 RUN addgroup --system --gid 1001 nodejs \
-  && adduser --system --uid 1001 nextjs \
+  && adduser --system --uid 1001 --home /tmp nextjs \
   && mkdir -p /app/storage \
   && chown -R nextjs:nodejs /app/storage
-
-# Chromium's crashpad handler needs a writable home for its crash database.
-ENV HOME=/tmp
 
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
