@@ -32,6 +32,9 @@ RUN addgroup --system --gid 1001 nodejs \
   && mkdir -p /app/storage \
   && chown -R nextjs:nodejs /app/storage
 
+# Chromium's crashpad handler needs a writable home for its crash database.
+ENV HOME=/tmp
+
 COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static

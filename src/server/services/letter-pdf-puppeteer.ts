@@ -191,6 +191,7 @@ function launchOptions(): LaunchOptions {
       "--disable-dev-shm-usage",
       "--disable-gpu",
       "--disable-crash-reporter",
+      "--crash-dumps-dir=/tmp",
       ...(process.platform === "linux" ? ["--no-zygote", "--single-process"] : []),
     ],
     ...(executablePath ? { executablePath } : {}),
