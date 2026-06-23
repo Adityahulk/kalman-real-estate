@@ -105,7 +105,7 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
     ? templateByProject.body : defaultLetterBody(input.type);
   const templateNeedsFileMarkup = /\{\{\s*files\./i.test(earlyTemplateBody);
 
-  const snapshot = await buildPlotDocumentSnapshot(context, input.recordId, { includeFileMarkup: templateNeedsFileMarkup });
+  const snapshot = await buildPlotDocumentSnapshot(context, input.recordId, { documentType: input.type, includeFileMarkup: templateNeedsFileMarkup });
   applyDraftOverrides(snapshot, input.data);
   snapshot.variables["document.number"] = documentNumber;
   snapshot.variables["document.date"] = new Date().toLocaleDateString("en-IN");
@@ -380,18 +380,18 @@ function throwForbidden(message: string): never {
   throw error;
 }
 
-async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string, options: { includeFileMarkup?: boolean } = {}) {
+async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string, options: { documentType?: string; includeFileMarkup?: boolean } = {}) {
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: context.tenantId } });
   const plot = await prisma.plot.findFirstOrThrow({
     where: { id: plotId, tenantId: context.tenantId, archivedAt: null },
     include: {
       project: true,
       currentOwner: true,
-      ownershipRecords: { include: { owner: true }, orderBy: { effectiveAt: "desc" }, take: 1 },
+      ownershipRecords: { include: { owner: true }, orderBy: [{ createdAt: "desc" }, { effectiveAt: "desc" }] },
       registryRecords: { orderBy: { createdAt: "desc" }, take: 1 },
     },
   });
-  const ownership = plot.ownershipRecords[0];
+  const ownership = ownershipRecordForDocument(plot.ownershipRecords, options.documentType);
   const registry = plot.registryRecords[0];
   const ownerKyc = jsonRecord(plot.currentOwner?.kyc);
   const fatherName = stringFromKyc(ownerKyc, ["fatherName", "father", "relationName"]);
@@ -637,6 +637,25 @@ async function buildSupportingDocumentPages(tenantId: string, plotId: string, ow
     pages.push(`<section data-letter-page="0">${heading}${blocks.slice(i, i + perPage).join("")}</section>`);
   }
   return pages;
+}
+
+function ownershipRecordForDocument<T extends { kind: OwnershipKind }>(records: T[], documentType?: string) {
+  if (documentType === "allotment_letter") {
+    return records.find((record) => record.kind === OwnershipKind.ALLOTMENT)
+      ?? records.find((record) => record.kind === OwnershipKind.TRANSFER)
+      ?? records.find((record) => record.kind !== OwnershipKind.COMPANY_INVENTORY)
+      ?? records[0];
+  }
+  if (documentType === "transfer_letter") {
+    return records.find((record) => record.kind === OwnershipKind.TRANSFER)
+      ?? records.find((record) => record.kind === OwnershipKind.ALLOTMENT)
+      ?? records.find((record) => record.kind !== OwnershipKind.COMPANY_INVENTORY)
+      ?? records[0];
+  }
+  return records.find((record) => record.kind === OwnershipKind.TRANSFER)
+    ?? records.find((record) => record.kind === OwnershipKind.ALLOTMENT)
+    ?? records.find((record) => record.kind !== OwnershipKind.COMPANY_INVENTORY)
+    ?? records[0];
 }
 
 async function buildSupportingDocumentPagesLight(tenantId: string, plotId: string, ownerId: string | null, extraDetails: Record<string, unknown>) {
