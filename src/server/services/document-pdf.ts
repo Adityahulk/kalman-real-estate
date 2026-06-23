@@ -48,22 +48,15 @@ export async function buildGeneratedDocumentPdfFromHtml(input: {
   html: string;
 }) {
   if (isLetterStudioHtml(input.html)) {
-    // Exact visual parity with the edit draft requires the Chromium renderer.
-    // The lightweight pdf-lib fallback is intentionally opt-in because it cannot guarantee
-    // identical fonts, spacing, wrapping, bold/italic treatment, and pagination.
+    // Prefer exact Chromium rendering, but do not block production document generation when the
+    // server is missing Chromium/Puppeteer. Fall back to the lightweight renderer so every tenant
+    // can still generate a usable PDF.
     try {
       return await renderLetterHtmlToPdf(input.html);
     } catch (error) {
       console.error("[letter-pdf] Chromium render failed:", error);
-      if (process.env.ALLOW_LETTER_PDF_FALLBACK === "1") {
-        console.warn("[letter-pdf] Using approximate pdf-lib fallback because ALLOW_LETTER_PDF_FALLBACK=1");
-        return buildLetterStudioPdfFromHtml(input.html);
-      }
-      const renderError = new Error(
-        "Exact letter PDF rendering requires the Chromium renderer. Please install/configure Puppeteer or set PUPPETEER_EXECUTABLE_PATH. The approximate fallback has been disabled so the generated PDF matches the edit draft.",
-      );
-      (renderError as Error & { cause?: unknown }).cause = error;
-      throw renderError;
+      console.warn("[letter-pdf] Falling back to approximate pdf-lib renderer.");
+      return buildLetterStudioPdfFromHtml(input.html);
     }
   }
 

@@ -4,6 +4,7 @@ import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
 import { sortByPlotCode } from "@/lib/plot-code-sort";
+import { ensureProjectLetterTemplates } from "./document-templates";
 
 export const createProjectSchema = z.object({
   name: z.string().min(2),
@@ -67,6 +68,7 @@ export async function createProject(context: RequestContext, input: z.infer<type
     entityId: project.id,
     after: project as unknown as Prisma.InputJsonValue,
   });
+  await ensureProjectLetterTemplates(context.tenantId, project.id);
 
   return project;
 }

@@ -19,6 +19,28 @@ export function defaultLetterBody(type: string): string {
   return ambeyAllotmentTemplate();
 }
 
+export async function ensureProjectLetterTemplates(tenantId: string, projectId: string) {
+  const types = ["allotment_letter", "transfer_letter", "registry_status_letter"] as const;
+  for (const type of types) {
+    const existing = await prisma.documentTemplate.findFirst({
+      where: { tenantId, projectId, type, active: true },
+      select: { id: true },
+    });
+    if (existing) continue;
+    await prisma.documentTemplate.create({
+      data: {
+        tenantId,
+        projectId,
+        name: `${humanizeTemplateType(type)} default`,
+        type,
+        body: defaultLetterBody(type),
+        variables: { fields: [] } as Prisma.InputJsonValue,
+        active: true,
+      },
+    });
+  }
+}
+
 export async function saveProjectLetterTemplate(context: RequestContext, projectId: string, input: z.infer<typeof saveProjectLetterTemplateSchema>) {
   await prisma.project.findFirstOrThrow({ where: { id: projectId, tenantId: context.tenantId } });
   const body = input.body?.trim() || defaultLetterBody(input.type);
@@ -107,6 +129,10 @@ function humanizeTemplateKey(value: string) {
     .pop()
     ?.replace(/[_-]+/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase()) ?? value;
+}
+
+function humanizeTemplateType(value: string) {
+  return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 export async function activateTemplate(context: RequestContext, projectId: string, templateId: string) {

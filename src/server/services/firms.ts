@@ -1,9 +1,11 @@
 import bcrypt from "bcryptjs";
-import { Role } from "@prisma/client";
+import { Prisma, Role } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../db";
 import { createSessionToken, SessionUser } from "../session";
 import { defaultProjectFileFields, defaultProjectMapFields } from "./project-file-fields";
+import { ensureDefaultLetterFields } from "./letter-field-settings";
+import { ensureProjectLetterTemplates } from "./document-templates";
 
 export const createFirmSchema = z.object({
   name: z.string().min(2).max(120),
@@ -56,11 +58,12 @@ export async function createFirm(user: SessionUser, input: z.infer<typeof create
   const slugBase = input.name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "firm";
   const slug = `${slugBase}-${Date.now().toString(36)}`;
 
-  return prisma.$transaction(async (tx) => {
+  const tenant = await prisma.$transaction(async (tx) => {
     const tenant = await tx.tenant.create({
       data: {
         name: input.name,
         slug,
+        region: input.address,
         address: input.address,
         pan: input.pan.toUpperCase(),
         contactEmail: input.email,
@@ -68,6 +71,10 @@ export async function createFirm(user: SessionUser, input: z.infer<typeof create
         editKeyHash,
         logoDataUrl: input.logoDataUrl,
         customFields: input.customFields ?? {},
+        letterhead: {
+          address: input.address,
+          signatoryName: input.authorizedPersons[0] ?? "Authorized Signatory",
+        },
       },
     });
     await tx.userFirmMembership.create({
@@ -81,6 +88,8 @@ export async function createFirm(user: SessionUser, input: z.infer<typeof create
     });
     return tenant;
   });
+  await ensureFirmBaselineData(tenant.id);
+  return tenant;
 }
 
 export async function createFirmField(user: SessionUser, input: z.infer<typeof firmFieldSchema>) {
@@ -144,16 +153,23 @@ export async function updateFirm(user: SessionUser, tenantId: string, input: z.i
     error.name = "ForbiddenError";
     throw error;
   }
+  const letterhead = jsonObject(firm.letterhead);
   return prisma.tenant.update({
     where: { id: tenantId },
     data: {
       name: input.name,
       address: input.address,
+      region: input.address,
       pan: input.pan.toUpperCase(),
       contactEmail: input.email,
       authorizedPersons: input.authorizedPersons,
       logoDataUrl: input.logoDataUrl || undefined,
       customFields: input.customFields ?? {},
+      letterhead: {
+        ...letterhead,
+        address: input.address,
+        signatoryName: input.authorizedPersons[0] ?? letterhead.signatoryName ?? "Authorized Signatory",
+      } as Prisma.InputJsonValue,
     },
   });
 }
@@ -168,6 +184,7 @@ export async function selectFirm(user: SessionUser, tenantId: string) {
     error.name = "ForbiddenError";
     throw error;
   }
+  const firm = await ensureFirmBaselineData(tenantId);
 
   const token = await createSessionToken({
     id: user.id,
@@ -175,5 +192,48 @@ export async function selectFirm(user: SessionUser, tenantId: string) {
     role: membership.role,
     email: user.email,
   });
-  return { token, firm: membership.tenant };
+  return { token, firm: firm ?? membership.tenant };
+}
+
+async function ensureFirmBaselineData(tenantId: string) {
+  const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+  if (!tenant) return;
+
+  const address = tenant.address?.trim() || tenant.region?.trim() || "";
+  const authorizedPersons = Array.isArray(tenant.authorizedPersons)
+    ? tenant.authorizedPersons.map((value) => String(value).trim()).filter(Boolean)
+    : [];
+  const letterhead = jsonObject(tenant.letterhead);
+  const tenantUpdate: Prisma.TenantUpdateInput = {};
+
+  if (!tenant.address && tenant.region) tenantUpdate.address = tenant.region;
+  if (!tenant.region && tenant.address) tenantUpdate.region = tenant.address;
+  if (address || authorizedPersons.length) {
+    const nextLetterhead = { ...letterhead };
+    if (address && !nextLetterhead.address) nextLetterhead.address = address;
+    if (authorizedPersons[0] && !nextLetterhead.signatoryName) nextLetterhead.signatoryName = authorizedPersons[0];
+    if (JSON.stringify(nextLetterhead) !== JSON.stringify(letterhead)) tenantUpdate.letterhead = nextLetterhead as Prisma.InputJsonValue;
+  }
+
+  if (Object.keys(tenantUpdate).length) {
+    await prisma.tenant.update({ where: { id: tenantId }, data: tenantUpdate });
+  }
+
+  await prisma.projectFileField.createMany({
+    data: [
+      ...defaultProjectFileFields.map((field) => ({ tenantId, section: "PROJECT_FILES", ...field })),
+      ...defaultProjectMapFields.map((field) => ({ tenantId, section: "PROJECT_MAPS", ...field })),
+    ],
+    skipDuplicates: true,
+  });
+  await ensureDefaultLetterFields(tenantId);
+
+  const projects = await prisma.project.findMany({ where: { tenantId }, select: { id: true } });
+  await Promise.all(projects.map((project) => ensureProjectLetterTemplates(tenantId, project.id)));
+  return prisma.tenant.findUnique({ where: { id: tenantId } });
+}
+
+function jsonObject(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, unknown>;
 }

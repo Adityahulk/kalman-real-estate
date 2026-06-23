@@ -16,18 +16,29 @@ export const updateLetterFieldSchema = z.object({
 });
 
 export async function ensureDefaultLetterFields(tenantId: string) {
-  if (await prisma.letterFieldCategory.count({ where: { tenantId } })) return;
   for (const categoryName of [...new Set(letterSystemFields.map((field) => field.category))]) {
-    const category = await prisma.letterFieldCategory.create({
-      data: { tenantId, name: categoryName, key: await uniqueCategoryKey(tenantId, categoryName) },
+    const categoryKey = keyFromLabel(categoryName);
+    const category = await prisma.letterFieldCategory.upsert({
+      where: { tenantId_key: { tenantId, key: categoryKey } },
+      update: {},
+      create: { tenantId, name: categoryName, key: categoryKey },
     });
+    const existingMappings = new Set(
+      (await prisma.letterFieldDefinition.findMany({
+        where: { categoryId: category.id },
+        select: { mapping: true },
+      })).map((field) => field.mapping).filter(Boolean),
+    );
+    const missingFields = letterSystemFields.filter((field) => field.category === categoryName && !existingMappings.has(field.value));
+    if (!missingFields.length) continue;
     await prisma.letterFieldDefinition.createMany({
-      data: letterSystemFields.filter((field) => field.category === categoryName).map((field) => ({
+      data: missingFields.map((field) => ({
         categoryId: category.id,
         label: field.label,
         key: keyFromLabel(field.label),
         mapping: field.value,
       })),
+      skipDuplicates: true,
     });
   }
 }

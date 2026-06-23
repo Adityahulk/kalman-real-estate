@@ -9,7 +9,7 @@ import { generatedDocumentStorageKey, putGeneratedObject } from "../storage";
 import { createGeneratedFileAsset } from "./files";
 import { buildGeneratedDocumentPdf, buildGeneratedDocumentPdfFromHtml } from "./document-pdf";
 import { createNotification } from "./notifications";
-import { defaultLetterBody } from "./document-templates";
+import { defaultLetterBody, ensureProjectLetterTemplates } from "./document-templates";
 
 export const generateDocumentSchema = z.object({
   templateId: z.string().optional(),
@@ -109,6 +109,7 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
   applyDraftOverrides(snapshot, input.data);
   snapshot.variables["document.number"] = documentNumber;
   snapshot.variables["document.date"] = new Date().toLocaleDateString("en-IN");
+  await ensureProjectLetterTemplates(context.tenantId, snapshot.projectId);
 
   const template = selectedTemplate
     ?? await prisma.documentTemplate.findFirst({ where: { tenantId: context.tenantId, projectId: snapshot.projectId, type: input.type, active: true }, orderBy: { createdAt: "desc" } })
@@ -487,14 +488,14 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
   const supportingDocumentPages = await buildSupportingDocumentPagesLight(context.tenantId, plot.id, plot.currentOwnerId, extraDetails);
   const variables: Record<string, string> = {
     "tenant.name": tenant.name,
-    "tenant.address": tenant.region ?? "",
+    "tenant.address": tenant.address ?? tenant.region ?? "",
     "tenant.gstin": tenant.gstin ?? "",
     "tenant.pan": tenant.pan ?? "",
     "tenant.contactEmail": tenant.contactEmail ?? "",
     "tenant.contactPhone": tenant.contactPhone ?? "",
     "firm.name": firmName,
     "firm.nameUpper": firmNameUpper,
-    "firm.address": tenant.region ?? projectAddress,
+    "firm.address": tenant.address ?? tenant.region ?? projectAddress,
     "firm.paymentName": firmNameUpper,
     "firm.signatory.name": signatoryName,
     "firm.signatory.relation": signatoryRelation,
