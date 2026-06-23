@@ -430,12 +430,10 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     stringFromKyc(firmDetails, ["authorizationDate", "signatoryAuthorizationDate"]) ||
     stringFromKyc(letterhead, ["authorizationDate"]);
   // Price: the user enters total + per-unit on the form (pricing.*); fall back to the derived ownership amount.
-  const perUnitPrice = pricing.perUnitPrice ? Number(pricing.perUnitPrice) : null;
-  const totalPrice = pricing.totalAreaPrice
-    ? Number(pricing.totalAreaPrice)
-    : pricing.calculatedPrice
-      ? Number(pricing.calculatedPrice)
-      : priceInr;
+  const perUnitPrice = firstMoney(pricing, ["perUnitPrice", "unitPrice", "pricePerUnit", "bspRate"]);
+  const totalPrice =
+    firstMoney(pricing, ["totalAreaPrice", "totalSalePrice", "salePrice", "totalPrice", "calculatedPrice", "amountInr"])
+    ?? priceInr;
   const bspRateValue = perUnitPrice ?? bspRate;
   const eStampNumber = stringFromKyc(extraDetails, ["eStampNumber"]);
   const eStampDateRaw = stringFromKyc(extraDetails, ["eStampDate"]);
@@ -513,7 +511,7 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "plot.areaSqft": plot.areaSqft?.toString() ?? "",
     "plot.areaSqyd": areaSqyd ? formatNumber(areaSqyd) : "",
     "plot.areaSqydApprox": areaSqyd ? `${formatNumber(areaSqyd)} Sq. Yds. approx.` : "",
-    "plot.priceInr": plot.priceInr?.toString() ?? "",
+    "plot.priceInr": totalPrice ? String(totalPrice) : plot.priceInr?.toString() ?? "",
     "plot.priceInrFormatted": totalPrice ? formatIndianAmount(totalPrice) : "",
     "plot.priceInrWords": totalPrice ? numberToIndianWords(totalPrice) : "",
     "plot.bspRate": bspRateValue ? formatIndianAmount(bspRateValue) : "",
@@ -553,9 +551,14 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "ownership.effectiveMonth": effectiveAt.toLocaleString("en-IN", { month: "long" }),
     "ownership.effectiveYear": String(effectiveAt.getFullYear()),
     "ownership.sharePct": ownership?.sharePct?.toString() ?? "100",
-    "payment.perUnitPrice": pricing.perUnitPrice ? String(pricing.perUnitPrice) : "",
+    "payment.totalPrice": totalPrice ? formatIndianAmount(totalPrice) : "",
+    "payment.totalSalePrice": totalPrice ? formatIndianAmount(totalPrice) : "",
+    "payment.perUnitPrice": perUnitPrice ? formatIndianAmount(perUnitPrice) : "",
     "payment.modes": payments.map((payment) => String(payment.mode ?? "")).filter(Boolean).join(", "),
-    "payment.entries": payments.map((payment) => [payment.mode, payment.amount ? `INR ${payment.amount}` : "", payment.reference].filter(Boolean).join(" - ")).join("; "),
+    "payment.entries": payments.map((payment) => {
+      const amount = firstMoney(payment, ["amount", "amountInr", "value"]);
+      return [payment.mode, amount ? `INR ${formatIndianAmount(amount)}` : "", payment.reference].filter(Boolean).join(" - ");
+    }).join("; "),
     "payment.tableRows": paymentTableRows,
     "witness.1.name": stringFromKyc(jsonRecord(witnessList[0]), ["name"]),
     "witness.1.aadhaar": stringFromKyc(jsonRecord(witnessList[0]), ["aadhaar"]),
@@ -770,7 +773,8 @@ function buildPaymentTableRows(payments: Record<string, unknown>[]) {
     const dateStr = typeof payment.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(payment.date)
       ? formatDateDots(new Date(payment.date))
       : escapeHtml(String(payment.date ?? ""));
-    const amount = payment.amount ? escapeHtml(formatIndianAmount(Number(payment.amount))) : "";
+    const parsedAmount = firstMoney(payment, ["amount", "amountInr", "value"]);
+    const amount = parsedAmount ? escapeHtml(formatIndianAmount(parsedAmount)) : "";
     const bank = escapeHtml(String(payment.bank ?? ""));
     rows.push(`<tr><td>${chequeNo}</td><td>${dateStr}</td><td>${amount}</td><td>${bank}</td></tr>`);
   }
@@ -881,6 +885,23 @@ function stringFromKyc(record: Record<string, unknown>, keys: string[]) {
 
 function formatNumber(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function firstMoney(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = parseMoney(record[key]);
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function parseMoney(value: unknown) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value !== "string") return null;
+  const normalized = value.replace(/[₹,\s]/g, "").replace(/\/-$/, "").trim();
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function formatIndianAmount(value: number) {

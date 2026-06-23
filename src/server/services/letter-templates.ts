@@ -70,7 +70,7 @@ export function ambeyAllotmentTemplate() {
 <section data-ambey-page="5" data-top="760">
 <h2><u>{{firm.nameUpper}}, {{firm.address}}</u><br>PLOT BUYERS' AGREEMENT {{project.nameUpper}}</h2>
 <p class="regulatory-note"><em><u>This residential Housing Project has been approved by issuing the License to Develop Colony by The Competent Authority cum Additional Deputy Commissioner (General), {{project.city}}, vide License No. BNL-UDC-2025/344 dated 13.03.2025 and also approved by issuing the License to Develop Colony by Municipal Corporation, {{project.city}}, vide License No. 235/B dated 22.04.2026. Further said colony has been approved by Punjab Real Estate Regulatory Authority (RERA) vide Registration No. PBREAR-BNL06-PR1384-062026 dated 11.06.2026.</u></em></p>
-<p class="center stamp-line">(Stamp Duty Rs. {{stamp.amount}} having E-Stamp No. {{stamp.3.estampNo}} dated {{ownership.effectiveDateDots}})</p>
+<p class="center stamp-line">(Stamp Duty Rs. {{stamp.amount}} having E-Stamp No. {{stamp.3.estampNo}} dated {{stamp.3.date}})</p>
 <p class="agreement-opening">THIS AGREEMENT made at {{agreement.place}} on this {{ownership.effectiveDayOrdinal}} day of {{ownership.effectiveMonth}}, {{ownership.effectiveYear}}.</p>
 <p class="center">BETWEEN</p>
 <p class="agreement-party"><strong>{{firm.nameUpper}}**</strong>, {{firm.address}} (hereinafter referred to as the 'Firm', which expression shall unless excluded by or repugnant to the subject or context be deemed to include its executors and authorized vide its permitted assigns) through it's duly Authorized Signatory vide authority letter dated {{firm.signatory.authorizationDate}} of the One Part;</p>
