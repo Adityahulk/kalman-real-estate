@@ -22,18 +22,32 @@ export function defaultLetterBody(type: string): string {
 export async function ensureProjectLetterTemplates(tenantId: string, projectId: string) {
   const types = ["allotment_letter", "transfer_letter", "registry_status_letter"] as const;
   for (const type of types) {
+    const systemDefaultName = `${humanizeTemplateType(type)} default`;
     const existing = await prisma.documentTemplate.findFirst({
       where: { tenantId, projectId, type, active: true },
-      select: { id: true },
+      select: { id: true, name: true, body: true },
     });
-    if (existing) continue;
+    const currentBody = defaultLetterBody(type);
+    if (existing) {
+      // Self-heal: a project's template body is frozen at the build that first created it, so
+      // older projects keep stale HTML and render differently from newer ones. Refresh ONLY the
+      // system default (identified by its reserved name) when the code's template has changed.
+      // User-customized templates always carry a different, user-typed name and are left untouched.
+      if (existing.name === systemDefaultName && existing.body !== currentBody) {
+        await prisma.documentTemplate.update({
+          where: { id: existing.id },
+          data: { body: currentBody, variables: { fields: [] } as Prisma.InputJsonValue },
+        });
+      }
+      continue;
+    }
     await prisma.documentTemplate.create({
       data: {
         tenantId,
         projectId,
-        name: `${humanizeTemplateType(type)} default`,
+        name: systemDefaultName,
         type,
-        body: defaultLetterBody(type),
+        body: currentBody,
         variables: { fields: [] } as Prisma.InputJsonValue,
         active: true,
       },

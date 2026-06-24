@@ -193,6 +193,7 @@ export async function renderDocumentDraft(context: RequestContext, id: string) {
     number: document.number,
     tenantName: tenant?.name ?? "WIDESTATE OS",
     html,
+    isLetterDraft: true,
   });
   return persistRenderedDocument(context, document, pdf);
 }

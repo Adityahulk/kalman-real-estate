@@ -30,6 +30,7 @@ async function processDocument(job: DocumentJob) {
         number: document.number,
         tenantName: tenant.name,
         html: document.editableHtml,
+        isLetterDraft: true,
       })
     : await buildGeneratedDocumentPdf({
         title: document.type.replaceAll("_", " ").toUpperCase(),

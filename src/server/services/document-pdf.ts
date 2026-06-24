@@ -46,8 +46,12 @@ export async function buildGeneratedDocumentPdfFromHtml(input: {
   number?: string | null;
   tenantName: string;
   html: string;
+  // True when the HTML is a letter draft (editor `editableHtml`). Forces the real HTML renderer even
+  // if the draft was built from a stale template that lacks the `data-template` marker — otherwise it
+  // would fall through to the plain-text `htmlToLines` path and produce structureless garbage.
+  isLetterDraft?: boolean;
 }) {
-  if (isLetterStudioHtml(input.html)) {
+  if (input.isLetterDraft || isLetterStudioHtml(input.html)) {
     // Prefer exact Chromium rendering, but do not block production document generation when the
     // server is missing Chromium/Puppeteer. Fall back to the lightweight renderer so every tenant
     // can still generate a usable PDF.

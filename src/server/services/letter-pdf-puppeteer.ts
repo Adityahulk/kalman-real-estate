@@ -9,9 +9,10 @@ import { PDFDocument } from "pdf-lib";
 // screen-only affordances (shadow/outer border/gap) and plus paged rules so each <section> is one page.
 // Keep this in sync with globals.css `.letter-paper-editor`.
 const LETTER_PRINT_CSS = `
+  @page { margin: 0; }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #fff; }
-  .letter-paper-editor { color: #111827; font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 1.5; }
+  .letter-paper-editor { color: #111827; font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 1.5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .letter-paper-editor section[data-ambey-page],
   .letter-paper-editor section[data-letter-page] {
     position: relative;
@@ -19,6 +20,7 @@ const LETTER_PRINT_CSS = `
     min-height: 1110px;
     padding: 74px 86px 82px;
     background: #fff;
+    overflow: visible;
     break-after: page;
     page-break-after: always;
   }
@@ -227,6 +229,7 @@ async function renderOnce(bodyHtml: string): Promise<Buffer> {
       );
     }
     const page = await browser.newPage();
+    await page.setViewport({ width: 860, height: 1110 });
     await page.setContent(wrapDocument(bodyHtml), { waitUntil: "load", timeout: 30000 });
 
     // Images are inlined as data URIs, but still decode asynchronously — wait so their height
@@ -247,7 +250,13 @@ async function renderOnce(bodyHtml: string): Promise<Buffer> {
     // Fallback for letters that aren't section-based: render the whole body as one tall page.
     if (!heights.length) {
       const bodyHeight = await page.evaluate(() => Math.ceil(document.body.scrollHeight));
-      const pdf = await page.pdf({ width: "860px", height: `${bodyHeight + 2}px`, printBackground: true, preferCSSPageSize: false });
+      const pdf = await page.pdf({
+        width: "860px",
+        height: `${bodyHeight + 2}px`,
+        printBackground: true,
+        preferCSSPageSize: false,
+        margin: { top: "0", right: "0", bottom: "0", left: "0" },
+      });
       return Buffer.from(pdf);
     }
 
@@ -262,7 +271,7 @@ async function renderOnce(bodyHtml: string): Promise<Buffer> {
         height: `${heights[i] + 2}px`,
         printBackground: true,
         preferCSSPageSize: false,
-        pageRanges: "1",
+        margin: { top: "0", right: "0", bottom: "0", left: "0" },
       });
       pages.push(Buffer.from(pdf));
     }
