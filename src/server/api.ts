@@ -91,7 +91,7 @@ export function apiError(error: unknown, context: Record<string, unknown> = {}) 
   if (error instanceof Error) {
     const status = namedErrorStatus(error.name);
     return NextResponse.json(
-      { ok: false, error: status >= 500 ? "Unexpected server error" : error.message },
+      { ok: false, error: status >= 500 && error.name !== "DocumentRenderError" ? "Unexpected server error" : error.message },
       { status },
     );
   }

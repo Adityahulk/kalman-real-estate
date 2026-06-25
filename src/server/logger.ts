@@ -72,6 +72,7 @@ export function namedErrorStatus(name: string) {
   if (name === "ForbiddenError") return 403;
   if (name === "NotFoundError") return 404;
   if (name === "ConflictError") return 409;
+  if (name === "DocumentRenderError") return 503;
   return 500;
 }
 

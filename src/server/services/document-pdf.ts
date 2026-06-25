@@ -60,7 +60,13 @@ export async function buildGeneratedDocumentPdfFromHtml(input: {
         console.warn("[letter-pdf] Falling back to approximate pdf-lib renderer because ALLOW_APPROXIMATE_LETTER_PDF=true.");
         return buildLetterStudioPdfFromHtml(input.html);
       }
-      throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      const renderError = new Error(
+        "Exact PDF generation needs Chromium on the server. Install Chromium and set PUPPETEER_EXECUTABLE_PATH if needed. "
+          + message,
+      );
+      renderError.name = "DocumentRenderError";
+      throw renderError;
     }
   }
 
