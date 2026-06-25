@@ -214,27 +214,49 @@ async function renderWithBrowser(browser: Browser, bodyHtml: string): Promise<Bu
       return Buffer.from(pdf);
     }
 
-    const pages: Buffer[] = [];
-    for (let i = 0; i < heights.length; i++) {
-      await page.evaluate((visibleIndex) => {
-        const sections = Array.from(document.querySelectorAll<HTMLElement>("section[data-ambey-page], section[data-letter-page]"));
-        sections.forEach((el, index) => { el.style.display = index === visibleIndex ? "" : "none"; });
-      }, i);
-      const pdf = await page.pdf({
-        width: "860px",
-        height: `${heights[i] + 2}px`,
-        printBackground: true,
-        preferCSSPageSize: false,
-        margin: { top: "0", right: "0", bottom: "0", left: "0" },
-      });
-      pages.push(Buffer.from(pdf));
-    }
+    // Render all sections in ONE pdf() call as a single tall page, then split with pdf-lib.
+    // Previously we called page.pdf() once per section (13× for a full letter) which peaks
+    // Chromium's memory budget on each call and reliably OOM-crashes on a 1 GB server.
+    // One call renders everything in a single pass; pdf-lib crops each section into its own page.
+    const totalHeight = heights.reduce((a, b) => a + b, 0);
 
+    // Make sure every section is visible for the combined render (earlier evaluate may have hidden some).
+    await page.evaluate(() => {
+      document.querySelectorAll<HTMLElement>("section[data-ambey-page], section[data-letter-page]")
+        .forEach((el) => { el.style.display = ""; });
+    });
+
+    const bigPdf = await page.pdf({
+      width: "860px",
+      height: `${totalHeight + 2}px`,
+      printBackground: true,
+      preferCSSPageSize: false,
+      margin: { top: "0", right: "0", bottom: "0", left: "0" },
+    });
+
+    // Crop the tall single page into N pages — one per section.
+    // PDF y-coordinates start from the bottom of the page, so section 0 (topmost) is at the
+    // highest y value. We walk top-to-bottom accumulating yFromTop and convert to PDF coords.
+    const source = await PDFDocument.load(bigPdf);
+    const [sourcePage] = source.getPages();
     const merged = await PDFDocument.create();
-    for (const buffer of pages) {
-      const doc = await PDFDocument.load(buffer);
-      const copied = await merged.copyPages(doc, doc.getPageIndices());
-      for (const copiedPage of copied) merged.addPage(copiedPage);
+
+    let yFromTop = 0;
+    for (const height of heights) {
+      const yFromBottom = totalHeight - yFromTop - height;
+      // Expand the crop 1px downward (lower bottom boundary) as a subpixel safety margin —
+      // getBoundingClientRect heights are ceil'd integers but rendering can bleed 1 subpixel.
+      const embeddedPage = await merged.embedPage(sourcePage, {
+        left: 0,
+        bottom: Math.max(0, yFromBottom - 1),
+        right: 860,
+        top: yFromBottom + height,
+      });
+      // The output page keeps the exact measured height; the 1px overshoot in the source
+      // is within the background padding and is never visible.
+      const outPage = merged.addPage([860, height]);
+      outPage.drawPage(embeddedPage, { x: 0, y: 0, width: 860, height });
+      yFromTop += height;
     }
     return Buffer.from(await merged.save());
 }
