@@ -52,15 +52,15 @@ export async function buildGeneratedDocumentPdfFromHtml(input: {
   isLetterDraft?: boolean;
 }) {
   if (input.isLetterDraft || isLetterStudioHtml(input.html)) {
-    // Prefer exact Chromium rendering, but do not block production document generation when the
-    // server is missing Chromium/Puppeteer. Fall back to the lightweight renderer so every tenant
-    // can still generate a usable PDF.
     try {
       return await renderLetterHtmlToPdf(input.html);
     } catch (error) {
       console.error("[letter-pdf] Chromium render failed:", error);
-      console.warn("[letter-pdf] Falling back to approximate pdf-lib renderer.");
-      return buildLetterStudioPdfFromHtml(input.html);
+      if (process.env.ALLOW_APPROXIMATE_LETTER_PDF === "true") {
+        console.warn("[letter-pdf] Falling back to approximate pdf-lib renderer because ALLOW_APPROXIMATE_LETTER_PDF=true.");
+        return buildLetterStudioPdfFromHtml(input.html);
+      }
+      throw error;
     }
   }
 
