@@ -102,6 +102,46 @@ async function main() {
     },
   });
 
+  // Additional role-based demo logins so every app role can be exercised in the demo. All firm-scoped
+  // users share the standard demo password (Kalman@12345) and are picked up by the membership loop below.
+  const extraFirmUsers = [
+    { email: "finance@saldhaland.example", name: "Finance Manager", role: "FINANCE_MANAGER", phone: "+91 98765 22222" },
+    { email: "marketing@saldhaland.example", name: "Marketing Head", role: "MARKETING_HEAD", phone: "+91 98765 33333" },
+    { email: "videographer@saldhaland.example", name: "Site Videographer", role: "VIDEOGRAPHER", phone: "+91 98765 44444" },
+    { email: "editor@saldhaland.example", name: "Content Editor", role: "EDITOR", phone: "+91 98765 55555" },
+    { email: "contractor@saldhaland.example", name: "Site Contractor", role: "CONTRACTOR", phone: "+91 98765 66666" },
+    { email: "viewer@saldhaland.example", name: "Read-only Viewer", role: "VIEWER", phone: "+91 98765 77777" },
+  ];
+  for (const u of extraFirmUsers) {
+    await prisma.user.upsert({
+      where: { email: u.email },
+      update: { passwordHash, status: "ACTIVE", role: u.role, name: u.name },
+      create: {
+        tenantId: tenant.id,
+        email: u.email,
+        passwordHash,
+        name: u.name,
+        phone: u.phone,
+        role: u.role,
+        status: "ACTIVE",
+      },
+    });
+  }
+
+  // Platform-level admin (not tied to any firm) — uses the company admin password (WideState@2026).
+  await prisma.user.upsert({
+    where: { email: "platformadmin@widestate.in" },
+    update: { tenantId: null, passwordHash: companyAdminPasswordHash, name: "Platform Admin", role: "PLATFORM_ADMIN", status: "ACTIVE" },
+    create: {
+      tenantId: null,
+      email: "platformadmin@widestate.in",
+      passwordHash: companyAdminPasswordHash,
+      name: "Platform Admin",
+      role: "PLATFORM_ADMIN",
+      status: "ACTIVE",
+    },
+  });
+
   const firmUsers = await prisma.user.findMany({
     where: { tenantId: tenant.id },
     select: { id: true, role: true },
@@ -439,8 +479,18 @@ async function main() {
   }
 
   console.log("Seeded WIDESTATE OS");
-  console.log("Login: owner@saldhaland.example / Kalman@12345");
-  console.log("First-firm onboarding: companyadmin@widestate.in / WideState@2026");
+  console.log("--- Demo logins (password Kalman@12345 unless noted) ---");
+  console.log("BUILDER_OWNER    : owner@saldhaland.example");
+  console.log("SITE_ENGINEER    : engineer@saldhaland.example");
+  console.log("FINANCE_MANAGER  : finance@saldhaland.example");
+  console.log("MARKETING_HEAD   : marketing@saldhaland.example");
+  console.log("VIDEOGRAPHER     : videographer@saldhaland.example");
+  console.log("EDITOR           : editor@saldhaland.example");
+  console.log("CONTRACTOR       : contractor@saldhaland.example");
+  console.log("VIEWER           : viewer@saldhaland.example");
+  console.log("PLOT_OWNER       : amandeep@example.com");
+  console.log("BUILDER_ADMIN    : companyadmin@widestate.in / WideState@2026");
+  console.log("PLATFORM_ADMIN   : platformadmin@widestate.in / WideState@2026");
 }
 
 main()
