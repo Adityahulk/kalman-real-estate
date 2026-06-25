@@ -33,12 +33,26 @@ const LETTER_PRINT_CSS = `
 `;
 
 function loadLetterEditorCss() {
-  const stylesheet = join(process.cwd(), "src/styles/globals.css");
-  if (!existsSync(stylesheet)) return "";
+  // The renderer needs the editor stylesheet at runtime. The Next standalone image does not ship
+  // raw source, so the Dockerfile copies globals.css to /app/src/styles. Probe a couple of likely
+  // locations so a layout change in either the repo or the image can't silently strip all styling.
+  const candidates = [
+    join(process.cwd(), "src/styles/globals.css"),
+    join(__dirname, "../../../src/styles/globals.css"),
+  ];
+  const stylesheet = candidates.find((path) => existsSync(path));
+  if (!stylesheet) {
+    console.error("[letter-pdf] globals.css not found at any of:", candidates,
+      "— PDFs will render UNSTYLED. Ensure the stylesheet is copied into the runtime image.");
+    return "";
+  }
   const css = readFileSync(stylesheet, "utf8");
   const start = css.indexOf("/* Letter Studio paper canvas */");
   const end = css.indexOf(".letter-template-editor-viewport", start);
-  if (start === -1 || end === -1) return "";
+  if (start === -1 || end === -1) {
+    console.error("[letter-pdf] Letter Studio CSS markers missing in globals.css — PDFs will render UNSTYLED.");
+    return "";
+  }
   return stripCssBlock(css.slice(start, end), "@media (max-width: 900px)");
 }
 

@@ -36,6 +36,12 @@ COPY --from=builder /app/public ./public
 COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
+# The letter PDF renderer reads src/styles/globals.css at runtime (loadLetterEditorCss in
+# letter-pdf-puppeteer.ts) so the generated PDF shares the editor's exact styling. The Next
+# standalone bundle does NOT include raw source files, so this stylesheet must be copied in
+# explicitly — without it the renderer emits unstyled PDFs (no red text, signatory position,
+# witness layout) for every tenant.
+COPY --from=builder --chown=nextjs:nodejs /app/src/styles/globals.css ./src/styles/globals.css
 
 USER nextjs
 EXPOSE 3000
