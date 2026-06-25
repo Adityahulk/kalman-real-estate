@@ -61,9 +61,13 @@ export async function buildGeneratedDocumentPdfFromHtml(input: {
         return buildLetterStudioPdfFromHtml(input.html);
       }
       const message = error instanceof Error ? error.message : String(error);
+      // Distinguish: launch errors already say "Could not launch Chromium"; anything else
+      // (e.g. "Target closed") is a runtime crash, usually OOM on a small server.
+      const isLaunchError = message.includes("Could not launch Chromium");
       const renderError = new Error(
-        "Exact PDF generation needs Chromium on the server. Install Chromium and set PUPPETEER_EXECUTABLE_PATH if needed. "
-          + message,
+        isLaunchError
+          ? message
+          : `PDF render failed (Chromium crashed during rendering — usually low memory on the server). Detail: ${message}`,
       );
       renderError.name = "DocumentRenderError";
       throw renderError;

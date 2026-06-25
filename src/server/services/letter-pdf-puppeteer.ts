@@ -106,10 +106,42 @@ function launchOptions(): LaunchOptions {
       "--disable-gpu",
       "--disable-crash-reporter",
       "--crash-dumps-dir=/tmp",
+      // Reduce memory footprint on small servers
+      "--disable-extensions",
+      "--disable-background-networking",
+      "--disable-sync",
+      "--disable-translate",
+      "--no-first-run",
+      "--hide-scrollbars",
+      "--mute-audio",
       ...(process.platform === "linux" ? ["--no-zygote", "--single-process"] : []),
     ],
     ...(executablePath ? { executablePath } : {}),
   };
+}
+
+// Hard ceiling on a single render. Without this, a Chromium crash (e.g. OOM on a small server)
+// leaves renderOnce hanging forever — and because renders are serialized, the whole queue deadlocks.
+const RENDER_DEADLINE_MS = 60_000;
+
+function withDeadline<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
+
+// browser.close() itself can hang if Chromium is already dead (the OOM case). A hung close
+// re-deadlocks the queue. Give it 5s then SIGKILL the child process directly.
+async function closeBrowserSafely(browser: Browser): Promise<void> {
+  const proc = browser.process();
+  let killed = false;
+  const guard = new Promise<void>((resolve) => setTimeout(() => { killed = true; resolve(); }, 5000));
+  await Promise.race([browser.close().catch(() => undefined), guard]);
+  if (killed) {
+    try { proc?.kill("SIGKILL"); } catch { /* already gone */ }
+  }
 }
 
 // Serialize renders so only one Chromium runs at a time (memory-safe on small servers).
@@ -140,15 +172,25 @@ async function renderOnce(bodyHtml: string): Promise<Buffer> {
           + `Underlying error: ${detail}`,
       );
     }
+    return await withDeadline(renderWithBrowser(browser, bodyHtml), RENDER_DEADLINE_MS, "PDF render");
+  } finally {
+    if (browser) await closeBrowserSafely(browser);
+  }
+}
+
+async function renderWithBrowser(browser: Browser, bodyHtml: string): Promise<Buffer> {
     const page = await browser.newPage();
     await page.setViewport({ width: 860, height: 1110 });
     await page.setContent(wrapDocument(bodyHtml), { waitUntil: "load", timeout: 30000 });
 
-    // Images are inlined as data URIs, but still decode asynchronously — wait so their height
-    // is included when we measure each section.
+    // Images are inlined as data URIs but decode asynchronously — wait so heights are correct.
+    // Cap each image at 5s so a broken URL can't hang the whole render.
     await page.evaluate(() => Promise.all(
       Array.from(document.images).map((img) =>
-        img.complete ? null : new Promise<void>((resolve) => { img.onload = img.onerror = () => resolve(); })),
+        img.complete ? null : new Promise<void>((resolve) => {
+          img.onload = img.onerror = () => resolve();
+          setTimeout(resolve, 5000);
+        })),
     ));
 
     // Each <section> is one editor "sheet" that grows with its content (min-height: 1110px).
@@ -195,7 +237,4 @@ async function renderOnce(bodyHtml: string): Promise<Buffer> {
       for (const copiedPage of copied) merged.addPage(copiedPage);
     }
     return Buffer.from(await merged.save());
-  } finally {
-    await browser?.close().catch(() => undefined);
-  }
 }
