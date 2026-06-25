@@ -72,8 +72,9 @@ function stripCssBlock(css: string, selector: string) {
   return css;
 }
 
-// `--single-process` / `--no-zygote` are memory-savers needed on the small Linux server, but they
-// crash Chromium on macOS — only apply them on Linux so local `npm run dev` works out of the box.
+// We intentionally do NOT pass `--single-process` / `--no-zygote`: they shrink memory but crash
+// Chromium during printToPDF on complex documents ("Target closed"). The standard multi-process
+// headless config is stable; `--disable-dev-shm-usage` keeps it safe inside Docker's tiny /dev/shm.
 // Common system-Chromium install locations, checked when no usable PUPPETEER_EXECUTABLE_PATH is set.
 const SYSTEM_CHROMIUM_PATHS = [
   "/usr/bin/chromium",
@@ -114,7 +115,6 @@ function launchOptions(): LaunchOptions {
       "--no-first-run",
       "--hide-scrollbars",
       "--mute-audio",
-      ...(process.platform === "linux" ? ["--no-zygote", "--single-process"] : []),
     ],
     ...(executablePath ? { executablePath } : {}),
   };
