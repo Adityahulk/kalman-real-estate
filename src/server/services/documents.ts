@@ -950,21 +950,17 @@ function resolveDocumentPlace({
 }) {
   const normalizedCity = city?.trim() ?? "";
   const normalizedState = state?.trim() ?? "";
-  const projectAddressParts = addressParts(projectAddress);
-  const firmAddressParts = addressParts(firmAddress);
-  const addressCity = projectAddressParts[0] || firmAddressParts[0] || "";
-  const lowerCity = normalizedCity.toLowerCase();
-  const cityLooksLikeAddressState = [...projectAddressParts.slice(1), ...firmAddressParts.slice(1)]
-    .some((part) => part.toLowerCase() === lowerCity);
-  if (normalizedCity && normalizedCity.toLowerCase() !== normalizedState.toLowerCase() && !cityLooksLikeAddressState) return normalizedCity;
+  const addressCity = lastAddressPart(projectAddress) || lastAddressPart(firmAddress);
+  if (normalizedCity && normalizedCity.toLowerCase() !== normalizedState.toLowerCase()) return normalizedCity;
   return addressCity || normalizedCity || "Barnala";
 }
 
-function addressParts(value: string) {
+function lastAddressPart(value: string) {
   return value
     .split(",")
     .map((part) => part.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .at(-1) ?? "";
 }
 
 function formatNumber(value: number) {

@@ -26,6 +26,7 @@ export const manualPlotSchema = z.object({
 export async function createManualPlot(context: RequestContext, projectId: string, input: z.infer<typeof manualPlotSchema>) {
   await prisma.project.findFirstOrThrow({ where: { id: projectId, tenantId: context.tenantId } });
   const result = await prisma.$transaction(async (tx) => {
+    await releaseArchivedPlotCodes(tx, context.tenantId, projectId, input.code);
     const plot = await tx.plot.create({
       data: {
         tenantId: context.tenantId,
@@ -94,18 +95,89 @@ export async function updateManualPlot(context: RequestContext, plotId: string, 
 
 export async function archiveManualPlot(context: RequestContext, plotId: string) {
   const before = await prisma.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
-  const plot = await prisma.plot.update({
-    where: { id: plotId },
-    data: { archivedAt: new Date() },
+  const result = await prisma.$transaction(async (tx) => {
+    const generatedDocuments = await tx.generatedDocument.findMany({
+      where: { tenantId: context.tenantId, recordType: "Plot", recordId: plotId },
+      select: { id: true, fileAssetId: true },
+    });
+    const generatedDocumentIds = generatedDocuments.map((document) => document.id);
+    const generatedFileIds = generatedDocuments.map((document) => document.fileAssetId).filter((id): id is string => Boolean(id));
+
+    if (generatedDocumentIds.length) {
+      await tx.generatedDocumentRevision.deleteMany({ where: { tenantId: context.tenantId, documentId: { in: generatedDocumentIds } } });
+      await tx.approval.deleteMany({ where: { tenantId: context.tenantId, recordType: "GeneratedDocument", recordId: { in: generatedDocumentIds } } });
+      await tx.generatedDocument.deleteMany({ where: { tenantId: context.tenantId, id: { in: generatedDocumentIds } } });
+    }
+    await tx.fileAsset.updateMany({
+      where: {
+        tenantId: context.tenantId,
+        deletedAt: null,
+        OR: [
+          { ownerType: "Plot", ownerId: plotId },
+          ...(generatedFileIds.length ? [{ id: { in: generatedFileIds } }] : []),
+        ],
+      },
+      data: {
+        deletedAt: new Date(),
+        deletedById: context.userId,
+        deleteReason: `Plot ${before.code} deleted.`,
+      },
+    });
+    await tx.ownershipRecord.deleteMany({ where: { tenantId: context.tenantId, plotId } });
+    await tx.registryRecord.deleteMany({ where: { tenantId: context.tenantId, plotId } });
+    await tx.checklistItem.deleteMany({
+      where: {
+        tenantId: context.tenantId,
+        OR: [
+          { plotId },
+          { parentType: "Plot", parentId: plotId },
+        ],
+      },
+    });
+    await tx.approval.deleteMany({ where: { tenantId: context.tenantId, recordType: "Plot", recordId: plotId } });
+    await tx.spatialLink.deleteMany({ where: { tenantId: context.tenantId, recordType: "Plot", recordId: plotId } });
+    const plot = await tx.plot.update({
+      where: { id: plotId },
+      data: {
+        code: deletedPlotCode(before.code, before.id),
+        archivedAt: new Date(),
+        archiveReason: "Deleted from ownership module.",
+        currentOwnerId: null,
+        status: PlotStatus.COMPANY_OWNED,
+      },
+    });
+    return { plot, generatedDocumentCount: generatedDocumentIds.length, generatedFileCount: generatedFileIds.length };
   });
   await writeAuditEvent(context, {
     action: AuditAction.DELETE,
     entityType: "Plot",
-    entityId: plot.id,
+    entityId: result.plot.id,
     before: before as unknown as Prisma.InputJsonValue,
-    after: plot as unknown as Prisma.InputJsonValue,
+    after: result as unknown as Prisma.InputJsonValue,
   });
-  return plot;
+  return result.plot;
+}
+
+async function releaseArchivedPlotCodes(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  projectId: string,
+  code: string,
+) {
+  const archivedPlots = await tx.plot.findMany({
+    where: { tenantId, projectId, code, archivedAt: { not: null } },
+    select: { id: true, code: true },
+  });
+  for (const plot of archivedPlots) {
+    await tx.plot.update({
+      where: { id: plot.id },
+      data: { code: deletedPlotCode(plot.code, plot.id) },
+    });
+  }
+}
+
+function deletedPlotCode(code: string, id: string) {
+  return `${code}__deleted__${id.slice(-8)}`;
 }
 
 export const manualSiteAssetSchema = z.object({
