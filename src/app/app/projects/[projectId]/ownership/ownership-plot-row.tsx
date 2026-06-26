@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Eye, FileText, Loader2, Map, Pencil, Trash2, X } from "lucide-react";
+import { Check, Download, Eye, FileText, Loader2, Map, Pencil, Trash2, Upload, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { FileUploader } from "@/components/file-uploader";
@@ -14,6 +14,8 @@ type PlotDocument = {
   createdAt?: string;
 };
 
+export type SignedFileInfo = { id: string };
+
 export function OwnershipPlotRow({
   href,
   plotId,
@@ -23,6 +25,7 @@ export function OwnershipPlotRow({
   development,
   allotmentStatus,
   document,
+  signedFile,
   cadSource,
 }: {
   href: string;
@@ -33,6 +36,7 @@ export function OwnershipPlotRow({
   development: number | null;
   allotmentStatus: string;
   document: PlotDocument | null;
+  signedFile: SignedFileInfo | null;
   cadSource: { id: string; originalName: string; version: number } | null;
 }) {
   const router = useRouter();
@@ -54,12 +58,10 @@ export function OwnershipPlotRow({
   }
   const waiting = Boolean(document && ["DRAFT", "GENERATED", "UNDER_REVIEW"].includes(status));
   const approvalReady = Boolean(waiting && document?.fileAssetId);
-  const canUploadSignedLetter = Boolean(
-    document &&
-    document.type?.toLowerCase().includes("allotment") &&
-    document.fileAssetId &&
-    status !== "REJECTED",
-  );
+  // View PDF shows signed copy if available, otherwise generated PDF
+  const viewPdfFileId = signedFile?.id ?? document?.fileAssetId ?? null;
+  const hasGeneratedPdf = Boolean(document?.fileAssetId);
+  const hasSignedCopy = Boolean(signedFile);
 
   async function decide(nextStatus: "APPROVED" | "REJECTED") {
     if (!document || loading) return;
@@ -119,36 +121,19 @@ export function OwnershipPlotRow({
           {document ? (
             <div className="mt-2 text-xs text-slate-500">
               {document.number ?? "Letter draft"}{document.createdAt ? ` · ${new Date(document.createdAt).toLocaleDateString("en-IN")}` : ""}
+              {hasSignedCopy ? <span className="ml-1 text-emerald-600">· Signed copy uploaded</span> : null}
             </div>
           ) : (
             <div className="mt-2 text-xs text-slate-500">No allotment letter has been generated yet.</div>
           )}
 
-          {(document?.fileAssetId || canUploadSignedLetter || approvalReady) ? (
+          {(viewPdfFileId || approvalReady) ? (
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              {document?.fileAssetId ? (
-                <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download?disposition=inline&proxy=1`} target="_blank" rel="noreferrer">
+              {viewPdfFileId ? (
+                <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${viewPdfFileId}/download?disposition=inline&proxy=1`} target="_blank" rel="noreferrer" title={hasSignedCopy ? "View signed copy" : "View generated PDF"}>
                   <Eye size={14} />
                   View PDF
                 </a>
-              ) : null}
-              {canUploadSignedLetter ? (
-                <FileUploader
-                  compact
-                  label="Upload signed"
-                  ownerType="Plot"
-                  ownerId={plotId}
-                  visibility="OWNER_VISIBLE"
-                  accept="application/pdf,image/*"
-                  refreshOnUpload
-                  metadata={{
-                    documentType: "ALLOTMENT_LETTER",
-                    documentNo: document?.number ?? undefined,
-                    documentDate: document?.createdAt ? new Date(document.createdAt).toISOString() : undefined,
-                    notes: "Signed version of allotment letter",
-                    categoryKey: "signed-allotment-letter",
-                  }}
-                />
               ) : null}
               {approvalReady ? (
                 <>
@@ -161,6 +146,38 @@ export function OwnershipPlotRow({
                     Reject
                   </button>
                 </>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* Download actions: generated PDF, signed PDF, upload new signed copy */}
+          {hasGeneratedPdf && document ? (
+            <div className="mt-2 flex flex-wrap items-center gap-1">
+              <a className="btn-outline h-7 px-2 text-[11px] text-slate-500" href={`/api/v1/files/${document.fileAssetId}/download`} title="Download generated PDF" onClick={(event) => event.stopPropagation()}>
+                <Download size={12} /> Generated
+              </a>
+              {hasSignedCopy && signedFile ? (
+                <a className="btn-outline h-7 px-2 text-[11px] text-emerald-600" href={`/api/v1/files/${signedFile.id}/download`} title="Download signed copy" onClick={(event) => event.stopPropagation()}>
+                  <Download size={12} /> Signed
+                </a>
+              ) : null}
+              {status !== "REJECTED" ? (
+                <FileUploader
+                  compact
+                  label={hasSignedCopy ? "Re-upload" : "Upload signed"}
+                  ownerType="Plot"
+                  ownerId={plotId}
+                  visibility="OWNER_VISIBLE"
+                  accept="application/pdf,image/*"
+                  refreshOnUpload
+                  metadata={{
+                    documentType: "ALLOTMENT_LETTER",
+                    documentNo: document.number ?? undefined,
+                    documentDate: document.createdAt ? new Date(document.createdAt).toISOString() : undefined,
+                    notes: "Signed version of allotment letter",
+                    categoryKey: "signed-allotment-letter",
+                  }}
+                />
               ) : null}
             </div>
           ) : null}

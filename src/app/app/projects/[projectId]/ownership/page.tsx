@@ -5,7 +5,7 @@ import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
 import { BackButton } from "@/components/back-button";
 import { sortByPlotCode } from "@/lib/plot-code-sort";
-import { OwnershipPlotRow } from "./ownership-plot-row";
+import { OwnershipPlotRow, type SignedFileInfo } from "./ownership-plot-row";
 
 export const dynamic = "force-dynamic";
 
@@ -86,6 +86,21 @@ export default async function ProjectOwnershipPage({
   const letterByPlot = new Map<string, typeof generatedLetters[number]>();
   for (const letter of generatedLetters) {
     if (!letterByPlot.has(letter.recordId)) letterByPlot.set(letter.recordId, letter);
+  }
+  const signedFiles = await prisma.fileAsset.findMany({
+    where: {
+      tenantId: session.tenantId,
+      ownerType: "Plot",
+      ownerId: { in: plots.map((plot) => plot.id) },
+      categoryKey: "signed-allotment-letter",
+      deletedAt: null,
+    },
+    select: { id: true, ownerId: true, createdAt: true },
+    orderBy: { createdAt: "desc" },
+  });
+  const signedByPlot = new Map<string, SignedFileInfo>();
+  for (const file of signedFiles) {
+    if (file.ownerId && !signedByPlot.has(file.ownerId)) signedByPlot.set(file.ownerId, { id: file.id });
   }
   const filteredPlots = sortByPlotCode(plots);
 
@@ -177,6 +192,7 @@ export default async function ProjectOwnershipPage({
                     development={development}
                     allotmentStatus={plot.status === "COMPANY_OWNED" ? "Available for allotment" : plot.status.replaceAll("_", " ").toLowerCase().replace(/^\w/, (letter) => letter.toUpperCase())}
                     document={letter ? { id: letter.id, status: letter.status, fileAssetId: letter.fileAssetId, type: letter.type, number: letter.number, createdAt: letter.createdAt.toISOString() } : null}
+                    signedFile={signedByPlot.get(plot.id) ?? null}
                     cadSource={cadLinkByPlot.get(plot.id)?.entity.scene.cadFile ?? null}
                   />
                 );

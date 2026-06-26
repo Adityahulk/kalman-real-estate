@@ -45,7 +45,7 @@ export function PlotHistoryTable({
 
   async function cleanUpHistory() {
     if (deletingId || cleaning || !auditCount) return;
-    if (!globalThis.window.confirm("Clean up plot history logs? This removes audit log lines only. Plot details, ownership, documents, and registry records will stay unchanged.")) return;
+    if (!globalThis.window.confirm("Clean up plot history? This will delete all allotment/transfer records, generated letters, signed letters, and supporting documents. The plot will revert to company inventory. Plot details (area, boundaries, etc.) are kept.")) return;
     setCleaning(true);
     const response = await fetch(`/api/v1/ownership/plots/${plotId}/audit`, { method: "DELETE" });
     setCleaning(false);
@@ -67,7 +67,7 @@ export function PlotHistoryTable({
           className="btn-outline ml-auto h-8 border-rose-300 px-3 text-xs text-rose-600 hover:bg-rose-50"
           onClick={() => void cleanUpHistory()}
           disabled={cleaning || deletingId !== null || !auditCount}
-          title={auditCount ? "Remove plot audit log lines" : "No audit log lines to clean"}
+          title={auditCount ? "Reset plot: remove allotments, letters, and supporting documents" : "No history to clean"}
         >
           {cleaning ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />}
           Clean Up

@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 import {
   CheckCircle2,
   ChevronDown,
+  Download,
+  Eye,
   FileText,
   GitBranch,
   History,
@@ -62,13 +64,30 @@ export default async function ProjectPlotWorkspacePage({
   const latestPlotCadPreviewId = workspace.childCadFiles.find((file) => file.analysis?.previewArtifactKey)?.id ?? null;
   const registryDocuments = workspace.plotFiles.filter((file) => file.documentType === "REGISTRY_RECEIPT" || file.documentType === "REGISTRY_DEED");
   const ownershipLetters = workspace.generatedDocuments.filter((document) => document.type.includes("allotment") || document.type.includes("transfer"));
-  const latestSignedLetterUploadTargetId = ownershipLetters
-    .filter((document) => document.type.includes("allotment") && document.fileAssetId && document.status !== "REJECTED")
-    .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0]?.id ?? null;
   const latestAllotmentRecord = plot.ownershipRecords.find((record) => record.kind === "ALLOTMENT") ?? null;
+  // Allotment supporting documents: KYC files + payment files + files from ownership record extraDetails
+  const allotmentExtraFileIds = new Set<string>();
+  if (latestAllotmentRecord) {
+    const extra = latestAllotmentRecord.extraDetails as Record<string, unknown> | null;
+    if (extra) {
+      const allottee = extra.allottee as Record<string, unknown> | undefined;
+      const docs = Array.isArray(allottee?.documents) ? allottee.documents : [];
+      for (const doc of docs) {
+        const files = Array.isArray((doc as Record<string, unknown>)?.files) ? (doc as Record<string, unknown>).files as Array<Record<string, unknown>> : [];
+        for (const file of files) if (typeof file.id === "string") allotmentExtraFileIds.add(file.id);
+      }
+      const payments = Array.isArray(extra.payments) ? extra.payments : [];
+      for (const payment of payments) {
+        const files = Array.isArray((payment as Record<string, unknown>)?.files) ? (payment as Record<string, unknown>).files as Array<Record<string, unknown>> : [];
+        for (const file of files) if (typeof file.id === "string") allotmentExtraFileIds.add(file.id);
+      }
+    }
+  }
   const allotmentSupportFiles = [
     ...workspace.ownerFiles.filter((file) => file.categoryKey === "allottee-kyc"),
-    ...workspace.plotFiles.filter((file) => file.categoryKey === "allotment-payment"),
+    ...workspace.plotFiles.filter((file) => file.categoryKey === "allotment-payment" || file.categoryKey === "allotment-extra"),
+    ...workspace.plotFiles.filter((file) => allotmentExtraFileIds.has(file.id) && file.categoryKey !== "allotment-payment" && file.categoryKey !== "allotment-extra"),
+    ...workspace.ownerFiles.filter((file) => allotmentExtraFileIds.has(file.id) && file.categoryKey !== "allottee-kyc"),
   ];
   const developmentPct = plot.checklistItems.length
     ? Math.round(plot.checklistItems.reduce((total, item) => total + item.progressPct, 0) / plot.checklistItems.length)
@@ -153,7 +172,7 @@ export default async function ProjectPlotWorkspacePage({
 
             <AccordionRow label="Status" value={allotmentStatus}>
               <div className="overflow-x-auto rounded-lg border border-slate-200">
-                <OwnershipLetterRows documents={ownershipLetters} plotId={plot.id} latestSignedLetterUploadTargetId={latestSignedLetterUploadTargetId} />
+                <OwnershipLetterRows documents={ownershipLetters} plotId={plot.id} signedFiles={signedAllotmentFiles} />
               </div>
             </AccordionRow>
 
@@ -205,8 +224,25 @@ export default async function ProjectPlotWorkspacePage({
               <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-5 py-3">Letter</th><th className="px-5 py-3">Status</th><th className="px-5 py-3">Date</th><th className="px-5 py-3">Download</th></tr></thead>
               <tbody className="divide-y divide-slate-100">
                 {ownershipLetters.map((document) => {
-                  const canUploadSignedLetter = document.id === latestSignedLetterUploadTargetId;
-                  return <tr key={document.id}><td className="px-5 py-3 font-medium">{document.number ?? document.type.replaceAll("_", " ")}</td><td className="px-5 py-3">{document.status.replaceAll("_", " ")}</td><td className="px-5 py-3">{document.createdAt.toLocaleDateString("en-IN")}</td><td className="px-5 py-3"><div className="flex flex-wrap items-center gap-2">{document.fileAssetId ? <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`}>Download</a> : <span className="text-slate-500">PDF not generated</span>}{canUploadSignedLetter ? <FileUploader compact label="Upload signed letter" ownerType="Plot" ownerId={plot.id} visibility="OWNER_VISIBLE" accept="application/pdf,image/*" metadata={{ categoryKey: "signed-allotment-letter", documentType: "ALLOTMENT_LETTER", documentNo: document.number ?? undefined, documentDate: document.createdAt.toISOString(), notes: "Signed version of allotment letter" }} refreshOnUpload /> : null}</div></td></tr>;
+                  const matchedSigned = signedAllotmentFiles.find((file) => file.documentNo === document.number) ?? (document.type.includes("allotment") ? signedAllotmentFiles[0] : null);
+                  const viewFileId = matchedSigned?.id ?? document.fileAssetId;
+                  const canUpload = document.type.includes("allotment") && document.fileAssetId && document.status !== "REJECTED";
+                  return <tr key={document.id}>
+                    <td className="px-5 py-3 font-medium">{document.number ?? document.type.replaceAll("_", " ")}</td>
+                    <td className="px-5 py-3">
+                      {document.status.replaceAll("_", " ")}
+                      {matchedSigned ? <span className="ml-1 text-xs text-emerald-600">(Signed)</span> : null}
+                    </td>
+                    <td className="px-5 py-3">{document.createdAt.toLocaleDateString("en-IN")}</td>
+                    <td className="px-5 py-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {viewFileId ? <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${viewFileId}/download?disposition=inline&proxy=1`} target="_blank" rel="noreferrer"><Eye size={14} /> View PDF</a> : <span className="text-slate-500">PDF not generated</span>}
+                        {document.fileAssetId ? <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`} title="Download generated PDF"><Download size={14} /> Generated</a> : null}
+                        {matchedSigned ? <a className="btn-outline h-8 px-3 text-xs text-emerald-600" href={`/api/v1/files/${matchedSigned.id}/download`} title="Download signed copy"><Download size={14} /> Signed</a> : null}
+                        {canUpload ? <FileUploader compact label={matchedSigned ? "Re-upload signed" : "Upload signed"} ownerType="Plot" ownerId={plot.id} visibility="OWNER_VISIBLE" accept="application/pdf,image/*" metadata={{ categoryKey: "signed-allotment-letter", documentType: "ALLOTMENT_LETTER", documentNo: document.number ?? undefined, documentDate: document.createdAt.toISOString(), notes: "Signed version of allotment letter" }} refreshOnUpload /> : null}
+                      </div>
+                    </td>
+                  </tr>;
                 })}
               </tbody>
             </table>
@@ -611,11 +647,11 @@ function OwnerHistoryRows({
 function OwnershipLetterRows({
   documents,
   plotId,
-  latestSignedLetterUploadTargetId,
+  signedFiles,
 }: {
   documents: Awaited<ReturnType<typeof getPlotWorkspace>>["generatedDocuments"];
   plotId: string;
-  latestSignedLetterUploadTargetId: string | null;
+  signedFiles: Awaited<ReturnType<typeof getPlotWorkspace>>["plotFiles"];
 }) {
   return (
     <>
@@ -624,14 +660,26 @@ function OwnershipLetterRows({
           <tr><th className="px-4 py-3">Letter</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Date</th><th className="px-4 py-3">Download</th></tr>
         </thead>
         <tbody className="divide-y divide-slate-100 bg-white">
-          {documents.map((document) => (
-            <tr key={document.id}>
-              <td className="px-4 py-3 font-medium">{document.number ?? document.type.replaceAll("_", " ")}</td>
-              <td className="px-4 py-3">{document.status.replaceAll("_", " ")}</td>
-              <td className="whitespace-nowrap px-4 py-3">{document.createdAt.toLocaleDateString("en-IN")}</td>
-              <td className="px-4 py-3"><div className="flex flex-wrap items-center gap-2">{document.fileAssetId ? <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`}>Download</a> : <span className="text-slate-500">PDF not generated</span>}{document.id === latestSignedLetterUploadTargetId ? <FileUploader compact label="Upload signed letter" ownerType="Plot" ownerId={plotId} visibility="OWNER_VISIBLE" accept="application/pdf,image/*" metadata={{ categoryKey: "signed-allotment-letter", documentType: "ALLOTMENT_LETTER", documentNo: document.number ?? undefined, documentDate: document.createdAt.toISOString(), notes: "Signed version of allotment letter" }} refreshOnUpload /> : null}</div></td>
-            </tr>
-          ))}
+          {documents.map((document) => {
+            const matchedSigned = signedFiles.find((file) => file.documentNo === document.number) ?? (document.type.includes("allotment") ? signedFiles[0] : null);
+            const viewFileId = matchedSigned?.id ?? document.fileAssetId;
+            const canUpload = document.type.includes("allotment") && document.fileAssetId && document.status !== "REJECTED";
+            return (
+              <tr key={document.id}>
+                <td className="px-4 py-3 font-medium">{document.number ?? document.type.replaceAll("_", " ")}</td>
+                <td className="px-4 py-3">{document.status.replaceAll("_", " ")}{matchedSigned ? <span className="ml-1 text-xs text-emerald-600">(Signed)</span> : null}</td>
+                <td className="whitespace-nowrap px-4 py-3">{document.createdAt.toLocaleDateString("en-IN")}</td>
+                <td className="px-4 py-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {viewFileId ? <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${viewFileId}/download?disposition=inline&proxy=1`} target="_blank" rel="noreferrer"><Eye size={14} /> View PDF</a> : <span className="text-slate-500">PDF not generated</span>}
+                    {document.fileAssetId ? <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`} title="Download generated PDF"><Download size={14} /> Generated</a> : null}
+                    {matchedSigned ? <a className="btn-outline h-8 px-3 text-xs text-emerald-600" href={`/api/v1/files/${matchedSigned.id}/download`} title="Download signed copy"><Download size={14} /> Signed</a> : null}
+                    {canUpload ? <FileUploader compact label={matchedSigned ? "Re-upload signed" : "Upload signed"} ownerType="Plot" ownerId={plotId} visibility="OWNER_VISIBLE" accept="application/pdf,image/*" metadata={{ categoryKey: "signed-allotment-letter", documentType: "ALLOTMENT_LETTER", documentNo: document.number ?? undefined, documentDate: document.createdAt.toISOString(), notes: "Signed version of allotment letter" }} refreshOnUpload /> : null}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       {!documents.length ? <div className="bg-white p-4 text-sm text-slate-500">No allotment or transfer letters yet.</div> : null}
