@@ -104,7 +104,7 @@ export function ambeyAllotmentTemplate() {
 <section data-ambey-page="7" data-top="760" class="agreement-page">
 <p><strong>DETAILS OF PAYMENTS RECEIVED:</strong></p>
 <table class="payments">
-<tr><th>Cheque No./<br>RTGS/NEFT</th><th>Date of Payment</th><th>Amount</th><th>Drawn on Bank</th></tr>
+<tr><th>Cheque No./<br>RTGS/NEFT</th><th>Date of Cheque</th><th>Amount</th><th>Drawn on Bank</th></tr>
 </table>
 <p>The allottee / vendee shall pay to the promoters / colonizers on prorata basis, the price of said plot, if the dimensions of the said plot increase.</p>
 <p>The colonizers /promoters promise to adjust on prorate basis, the price of plot, if the dimensions of the said plot and hence the area decreases.</p>
@@ -188,7 +188,7 @@ export function ambeyAllotmentTemplate() {
 </div>
 </div>
 <p class="closing-firm-title"><strong>SIGNED AND DELIVERED BY THE WITHIN NAMED {{firm.signatory.name}} {{firm.signatory.relation}}</strong></p>
-<p class="closing-firm-note">For and on behalf of Firm {{firm.name}}, {{firm.address}} at {{document.place}} on {{ownership.effectiveDateDots}}.</p>
+<p class="closing-firm-note">For and on behalf of Firm {{firm.name}} {{project.cityState}} at {{document.place}} on {{ownership.effectiveDateDots}}.</p>
 </section>
 </div>`;
 }

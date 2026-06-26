@@ -12,6 +12,8 @@ export const letterSystemFields = [
   { category: "Project", label: "Project name", value: "project.name" },
   { category: "Project", label: "Project name uppercase", value: "project.nameUpper" },
   { category: "Project", label: "Project city", value: "project.city" },
+  { category: "Project", label: "Project city and state", value: "project.cityState" },
+  { category: "Project", label: "Project state", value: "project.state" },
   { category: "Project", label: "Project address", value: "project.fullAddress" },
   { category: "Project", label: "Project approval authority", value: "project.approvalAuthority" },
   { category: "Project", label: "Project revenue estate", value: "project.revenueEstate" },

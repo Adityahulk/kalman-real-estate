@@ -54,7 +54,7 @@ type StoredFileRef = {
 };
 
 type PaymentEntry = {
-  mode: "Cash" | "Cheque" | "Bank transfer" | "UPI" | "Other";
+  mode: "Cheque" | "RTGS" | "NEFT";
   amount: string;
   reference: string;
   date?: string;
@@ -124,6 +124,12 @@ function normalizeWitnessEntry(entry: Partial<WitnessEntry> & { aadhaar?: string
     phone: entry.phone ?? entry.contact ?? entry.mobile ?? entry.aadhaar ?? "",
     address: entry.address ?? "",
   };
+}
+
+function normalizePaymentMode(value: unknown): PaymentEntry["mode"] {
+  if (value === "RTGS" || value === "NEFT" || value === "Cheque") return value;
+  if (value === "Bank transfer") return "RTGS";
+  return "Cheque";
 }
 
 export function ProjectSiteInfoForm({
@@ -247,7 +253,7 @@ export function ProjectAllotmentFlow({
   const [oldPlotCode, setOldPlotCode] = useState(initialData?.oldPlotCode ?? "");
   const [newPlotCode, setNewPlotCode] = useState(initialData?.newPlotCode ?? "");
   const [paymentEntries, setPaymentEntries] = useState<PaymentEntry[]>(
-    initialData?.paymentEntries?.length ? initialData.paymentEntries : [{ mode: "Cash", amount: "", reference: "", files: [], uploadedFiles: [] }],
+    initialData?.paymentEntries?.length ? initialData.paymentEntries.map((entry) => ({ ...entry, mode: normalizePaymentMode(entry.mode) })) : [{ mode: "Cheque", amount: "", reference: "", files: [], uploadedFiles: [] }],
   );
   const [effectiveAt, setEffectiveAt] = useState(initialData?.effectiveAt ?? new Date().toISOString().slice(0, 10));
   const [stamps, setStamps] = useState<StampEntry[]>(initialData?.stamps?.length ? initialData.stamps : [
@@ -292,7 +298,7 @@ export function ProjectAllotmentFlow({
     try {
       const saved = JSON.parse(window.sessionStorage.getItem(restoreKey) ?? "{}") as Partial<{
         plotId: string; name: string; address: string; phone: string; allotmentNumber: string; selectedAuthorizedPerson: string; signatoryRelation: string; authorizationDate: string; totalAreaPrice: string; perUnitPrice: string;
-        paymentEntries: Array<Pick<PaymentEntry, "mode" | "amount" | "reference" | "uploadedFiles">>;
+        paymentEntries: Array<Pick<PaymentEntry, "mode" | "amount" | "reference" | "date" | "bank" | "uploadedFiles">>;
         effectiveAt: string; stamps: StampEntry[]; witnesses: WitnessEntry[]; allotteeDocuments: Array<Pick<AllotteeDocumentEntry, "kind" | "number" | "uploadedFiles">>;
         extraFields: AdditionalFieldEntry[]; letterFields: Record<string, string>; letterFieldUploadedFiles: Record<string, StoredFileRef[]>;
       }>;
@@ -306,7 +312,7 @@ export function ProjectAllotmentFlow({
       if (saved.authorizationDate) setAuthorizationDate(saved.authorizationDate);
       if (saved.totalAreaPrice) setTotalAreaPrice(saved.totalAreaPrice);
       if (saved.perUnitPrice) setPerUnitPrice(saved.perUnitPrice);
-      if (Array.isArray(saved.paymentEntries) && saved.paymentEntries.length) setPaymentEntries(saved.paymentEntries.map((entry) => ({ ...entry, files: [], uploadedFiles: entry.uploadedFiles ?? [] })));
+      if (Array.isArray(saved.paymentEntries) && saved.paymentEntries.length) setPaymentEntries(saved.paymentEntries.map((entry) => ({ ...entry, mode: normalizePaymentMode(entry.mode), files: [], uploadedFiles: entry.uploadedFiles ?? [] })));
       if (saved.effectiveAt) setEffectiveAt(saved.effectiveAt);
       if (Array.isArray(saved.stamps) && saved.stamps.length) setStamps(saved.stamps);
       if (Array.isArray(saved.witnesses) && saved.witnesses.length) setWitnesses(saved.witnesses.map((entry) => normalizeWitnessEntry(entry)));
@@ -702,19 +708,19 @@ export function ProjectAllotmentFlow({
           <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">Final total price: INR {calculatedPrice.toLocaleString("en-IN")}{!totalAreaPrice && calculatedFromUnitPrice ? " (calculated from per-unit price and plot area)" : ""} · Payment entries: INR {paymentTotal.toLocaleString("en-IN")}</div>
           <div className="space-y-3">
             {paymentEntries.map((entry, index) => <div className="grid gap-2 rounded-lg border border-slate-200 p-3 md:grid-cols-[1fr_1fr_1.4fr_auto]" key={index}>
-              <label><span className="label">Mode</span><select className="input" value={entry.mode} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, mode: event.target.value as PaymentEntry["mode"], reference: "" } : item))}><option>Cash</option><option>Cheque</option><option>Bank transfer</option><option>UPI</option><option>Other</option></select></label>
+              <label><span className="label">Mode</span><select className="input" value={entry.mode} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, mode: event.target.value as PaymentEntry["mode"], reference: "" } : item))}><option>Cheque</option><option>RTGS</option><option>NEFT</option></select></label>
               <label><span className="label">Amount</span><input className="input" inputMode="decimal" value={entry.amount} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, amount: event.target.value } : item))} /></label>
-              <label><span className="label">{entry.mode === "Cheque" ? "Cheque number" : entry.mode === "Bank transfer" ? "Bank details / reference" : "Reference (optional)"}</span><input className="input" value={entry.reference} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, reference: event.target.value } : item))} /></label>
+              <label><span className="label">Cheque No./RTGS/NEFT</span><input className="input" value={entry.reference} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, reference: event.target.value } : item))} /></label>
               <button className="btn-outline self-end px-3" type="button" aria-label="Remove payment entry" disabled={paymentEntries.length === 1} onClick={() => setPaymentEntries((entries) => entries.filter((_, itemIndex) => itemIndex !== index))}><X size={16} /></button>
               <div className="md:col-span-4 grid gap-2 md:grid-cols-2">
-                <label><span className="label">{entry.mode === "Cheque" ? "Date of cheque" : "Date of payment"}</span><input className="input" type="date" value={entry.date ?? ""} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, date: event.target.value } : item))} /></label>
-                {entry.mode === "Cheque" || entry.mode === "Bank transfer" ? <label><span className="label">Drawn on bank</span><input className="input" value={entry.bank ?? ""} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, bank: event.target.value } : item))} /></label> : null}
+                <label><span className="label">Date of Cheque</span><input className="input" type="date" value={entry.date ?? ""} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, date: event.target.value } : item))} /></label>
+                <label><span className="label">Drawn on Bank</span><input className="input" value={entry.bank ?? ""} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, bank: event.target.value } : item))} /></label>
               </div>
               <label className="md:col-span-4"><span className="label">Upload files</span><input className="input pt-2" type="file" multiple onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, files: Array.from(event.target.files ?? []) } : item))} /></label>
               {displayFileNames(entry.files, entry.uploadedFiles) ? <div className="md:col-span-4 text-xs text-slate-500">{displayFileNames(entry.files, entry.uploadedFiles)}</div> : null}
             </div>)}
           </div>
-          <button className="btn-outline w-fit" type="button" onClick={() => setPaymentEntries((entries) => [...entries, { mode: "Cash", amount: "", reference: "", files: [] }])}><Plus size={16} />Add payment entry</button>
+          <button className="btn-outline w-fit" type="button" onClick={() => setPaymentEntries((entries) => [...entries, { mode: "Cheque", amount: "", reference: "", files: [] }])}><Plus size={16} />Add payment entry</button>
         </div>
       </FormSection>
 

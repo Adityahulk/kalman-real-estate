@@ -411,6 +411,7 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
   const firmNameUpper = firmName.toUpperCase();
   const projectName = plot.project.name;
   const projectAddress = plot.project.address ?? [plot.project.city].filter(Boolean).join(", ");
+  const projectCityState = [plot.project.city, plot.project.state].map((part) => part?.trim()).filter(Boolean).join(", ");
   const documentPlace = resolveDocumentPlace({
     city: plot.project.city,
     state: plot.project.state,
@@ -511,6 +512,8 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "project.name": plot.project.name,
     "project.nameUpper": projectName.toUpperCase(),
     "project.city": plot.project.city,
+    "project.cityState": projectCityState,
+    "project.state": plot.project.state ?? "",
     "project.address": plot.project.address ?? "",
     "project.fullAddress": projectAddress,
     "project.approvalAuthority": stringFromKyc(jsonRecord(plot.project as unknown as Record<string, unknown>), ["approvalAuthority"]) || "Competent Authority cum Deputy Director, Local Body Government, Patiala under PAPRA Act 1995",

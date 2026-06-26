@@ -163,7 +163,7 @@ function buildInitialAllotmentData(
           files: [],
           uploadedFiles: extractStoredFiles(payment.files),
         }))
-      : [{ mode: "Cash" as const, amount: "", reference: "", files: [], uploadedFiles: [] }],
+      : [{ mode: "Cheque" as const, amount: "", reference: "", files: [], uploadedFiles: [] }],
     effectiveAt: typeof extra.eStampDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(extra.eStampDate) ? extra.eStampDate : new Date().toISOString().slice(0, 10),
     stamps: stamps.length
       ? stamps.map((stamp) => ({ number: typeof stamp.number === "string" ? stamp.number : "", dated: typeof stamp.dated === "string" ? stamp.dated : new Date().toISOString().slice(0, 10) }))
@@ -224,9 +224,10 @@ function firstString(record: Record<string, unknown>, keys: string[]) {
   return "";
 }
 
-function normalizePaymentMode(value: unknown) {
-  const text = typeof value === "string" ? value : "Cash";
-  return ["Cash", "Cheque", "Bank transfer", "UPI", "Other"].includes(text) ? text as "Cash" | "Cheque" | "Bank transfer" | "UPI" | "Other" : "Other";
+function normalizePaymentMode(value: unknown): "Cheque" | "RTGS" | "NEFT" {
+  if (value === "RTGS" || value === "NEFT" || value === "Cheque") return value;
+  if (value === "Bank transfer") return "RTGS";
+  return "Cheque";
 }
 
 function normalizeDocumentKind(value: unknown) {
