@@ -27,9 +27,11 @@ export function PlotHistoryTable({
 }) {
   const router = useRouter();
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [cleaning, setCleaning] = useState(false);
+  const auditCount = items.filter((item) => item.auditId).length;
 
   async function deleteEntry(auditId: string) {
-    if (deletingId) return;
+    if (deletingId || cleaning) return;
     if (!globalThis.window.confirm("Delete this history entry? This only removes the log line, not the underlying record.")) return;
     setDeletingId(auditId);
     const response = await fetch(`/api/v1/audit-events/${auditId}`, { method: "DELETE" });
@@ -41,12 +43,35 @@ export function PlotHistoryTable({
     }
   }
 
+  async function cleanUpHistory() {
+    if (deletingId || cleaning || !auditCount) return;
+    if (!globalThis.window.confirm("Clean up plot history logs? This removes audit log lines only. Plot details, ownership, documents, and registry records will stay unchanged.")) return;
+    setCleaning(true);
+    const response = await fetch(`/api/v1/ownership/plots/${plotId}/audit`, { method: "DELETE" });
+    setCleaning(false);
+    if (response.ok) {
+      router.refresh();
+    } else {
+      globalThis.window.alert("Could not clean up plot history.");
+    }
+  }
+
   return (
     <div className="card overflow-hidden p-0">
-      <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-4">
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-5 py-4">
         <History size={18} />
         <h2 className="font-semibold">Plot history</h2>
         <span className="chip bg-slate-100 text-slate-700">{items.length}</span>
+        <button
+          type="button"
+          className="btn-outline ml-auto h-8 border-rose-300 px-3 text-xs text-rose-600 hover:bg-rose-50"
+          onClick={() => void cleanUpHistory()}
+          disabled={cleaning || deletingId !== null || !auditCount}
+          title={auditCount ? "Remove plot audit log lines" : "No audit log lines to clean"}
+        >
+          {cleaning ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />}
+          Clean Up
+        </button>
       </div>
       {items.length ? (
         <div className="overflow-x-auto">

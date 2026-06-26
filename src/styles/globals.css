@@ -271,12 +271,39 @@
   text-align: justify;
   text-justify: inter-word;
 }
-.letter-paper-editor .roman-item,
-.letter-paper-editor .consent-indent {
-  padding-left: 38px;
-  text-indent: -24px;
+.letter-paper-editor .roman-item {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: start;
+  padding-left: 26px;
+  text-indent: 0;
   line-height: 1.62;
   margin-bottom: 22px;
+}
+.letter-paper-editor .roman-label,
+.letter-paper-editor .roman-text {
+  display: block;
+}
+.letter-paper-editor .roman-label {
+  text-align: right;
+  white-space: nowrap;
+}
+.letter-paper-editor .consent-indent {
+  padding-left: 0;
+  text-indent: 36px;
+  line-height: 1.62;
+  margin-bottom: 22px;
+  text-align: justify;
+  text-justify: inter-word;
+}
+.letter-paper-editor .consent-block {
+  padding-left: 0;
+  text-indent: 0;
+  line-height: 1.62;
+  margin-bottom: 22px;
+  text-align: justify;
+  text-justify: inter-word;
 }
 .letter-paper-editor .verification-title {
   margin-top: 56px;
@@ -304,6 +331,9 @@
 }
 .letter-paper-editor .consent-subject {
   margin-bottom: 34px;
+  line-height: 1.65;
+  text-align: justify;
+  text-justify: inter-word;
 }
 .letter-paper-editor .salutation {
   margin-bottom: 34px;
@@ -311,7 +341,14 @@
 .letter-paper-editor .consent-plot-lines {
   color: #dc2626;
   line-height: 1.55;
-  margin-bottom: 22px;
+  margin-top: 4px;
+  margin-bottom: 30px;
+}
+.letter-paper-editor .consent-layout-label {
+  margin-bottom: 8px;
+}
+.letter-paper-editor .red-text {
+  color: #dc2626;
 }
 .letter-paper-editor .consent-signoff {
   margin-top: 56px;

@@ -43,9 +43,9 @@ export function ambeyAllotmentTemplate() {
 <p class="center stamp-line">(Stamp Duty Rs. {{stamp.amount}} having E-Stamp No. {{stamp.estampNo}} dated {{stamp.date}})</p>
 <h1><u>SELF DECLARATION</u></h1>
 <p class="declaration-intro">I, <u><strong>{{owner.nameWithRelation}} resident of {{owner.address}}</strong></u>, allottee of Plot No. {{plot.code}}, measuring {{plot.areaSqyd}} Sqyds. in {{project.name}}, {{project.fullAddress}} and I undertake as under:</p>
-<p class="roman-item">(i) I am allottee of a plot situated in {{project.name}} Residential Colony at {{project.fullAddress}} is developed by {{firm.name}}, {{firm.address}};</p>
-<p class="roman-item">(ii) I undertake that if the colonizer ({{firm.name}}) change or increase the layout plan of the colony then I will not raise any objection, it will be on the sole discretion of the firm/colonizer to develop the colony.</p>
-<p class="roman-item">(iii) I further undertake that if the colonizer ({{firm.name}}) can increase / extend the area of the colony and provide approach road, water & sewage supply etc. from their approved colony named {{project.name}}, then I will not raise any objection.</p>
+<p class="roman-item"><span class="roman-label">(i)</span><span class="roman-text">I am allottee of a plot situated in {{project.name}} Residential Colony at {{project.fullAddress}} is developed by {{firm.name}}, {{firm.address}};</span></p>
+<p class="roman-item"><span class="roman-label">(ii)</span><span class="roman-text">I undertake that if the colonizer ({{firm.name}}) change or increase the layout plan of the colony then I will not raise any objection, it will be on the sole discretion of the firm/colonizer to develop the colony.</span></p>
+<p class="roman-item"><span class="roman-label">(iii)</span><span class="roman-text">I further undertake that if the colonizer ({{firm.name}}) can increase / extend the area of the colony and provide approach road, water & sewage supply etc. from their approved colony named {{project.name}}, then I will not raise any objection.</span></p>
 <p class="right">Executant</p>
 <p class="verification-title"><u><strong>Verification</strong></u></p>
 <p class="verification-body">Verified the contents of my undertaking are true and correct to the best of my knowledge and belief, nothing has been concealed or mis-stated therein.<br>Date:</p>
@@ -56,13 +56,13 @@ export function ambeyAllotmentTemplate() {
 <section data-ambey-page="4" data-top="700">
 <p class="center stamp-line">(Stamp Duty Rs. {{stamp.amount}} having E-Stamp No. {{stamp.2.estampNo}} dated {{stamp.2.date}})</p>
 <h1><u>CONSENT IN FAVOUR OF {{firm.nameUpper}}, {{project.city}}</u></h1>
-<p class="consent-subject">Subject : Consent for change / Revision / Addition in layout plan of {{project.name}} space having Hadbast No. 55, vide Jamabandi for the year 2019-20, of Village {{project.city}}-A, B, C & D, Tehsil & Distt. {{project.city}}.</p>
+<p class="consent-subject">Subject : Consent for change / Revision / Addition in layout plan of {{project.name}} space having Hadbast No. 55, vide Jamabandi for the year 2019-20, of Village Barnala-A, B, C &amp; D, Tehsil &amp; Distt. Barnala.</p>
 <p class="salutation">Dear Sir/Madam</p>
-<p class="consent-indent">We, the undersigned allottee(s) of Plot No. {{plot.code}} in the project “<strong>{{project.name}}</strong>”, which is registered with Punjab RERA vide Registration No. <strong>{{rera.number}}</strong>, hereby state that the project was earlier approved as per Layout Plan No. <strong>TB/BARNALA/SA/24/01 Dated 09/12/2024</strong>. And License to Develop Colony No. <strong>BNL-UD-LDC-2025/344 Dated 13/03/2025</strong>.</p>
+<p class="consent-indent">We, the undersigned allottee(s) of <span class="red-text">Plot No.</span> {{plot.code}} in the project “<strong>{{project.name}}</strong>”, which is registered with Punjab RERA vide Registration No. <strong>{{rera.number}}</strong>, hereby state that the project was earlier approved as per Layout Plan No. <strong>TB/BARNALA/SA/24/01 Dated 09/12/2024</strong>. And License to Develop Colony No. <strong>BNL-UD-LDC-2025/344 Dated 13/03/2025</strong>.</p>
 <p class="consent-indent">We have been informed by the promoter that the layout plan has been revised and approved vide Revised Layout Plan No. <strong>TB/BARNALA/SA/25/01</strong> <strong>Dated 11/11/2025</strong> and License to Develop Colony No. <strong>235/B</strong> <strong>Dated. 22/04/2026.</strong></p>
-<p>As per the revised layout:</p>
+<p class="consent-layout-label">As per the revised layout:</p>
 <p class="consent-plot-lines">* Old Plot Number: {{plot.oldCode}}<br>* New Plot Number: {{plot.newCode}}</p>
-<p class="consent-indent">At the time of booking of <strong>Plot No.{{plot.code}} </strong>We were shown all documents of above-mentioned Residential Colony like Layout plan, etc. As we are aware that said layout plan is always subject to certain practical changes on site, which are required to be amended or revised for the exact measurements of the plots and for the betterment of the colony. As such by virtue of this letter, I/We do hereby accord and grant our unconditional consent for changes/revision or amendment in the layout plan of the Residential colony. Moreover, if the developer extends the expansion of existing Colony, the same shall be deemed to have been done with my/our consent. Hence, I/We shall not dispute the said changes/revision /amendment/addition of the layout plan of the Residential colony at any stage and grant unconditional consent regarding for any changes/revision /amendment/addition of the commercial colony.</p>
+<p class="consent-block">At the time of booking of <span class="red-text">Plot No.{{plot.code}}</span> We were shown all documents of above-mentioned Residential Colony like Layout plan, etc. As we are aware that said layout plan is always subject to certain practical changes on site, which are required to be amended or revised for the exact measurements of the plots and for the betterment of the colony. As such by virtue of this letter, I/We do hereby accord and grant our unconditional consent for changes/revision or amendment in the layout plan of the Residential colony. Moreover, if the developer extends the expansion of existing Colony, the same shall be deemed to have been done with my/our consent. Hence, I/We shall not dispute the said changes/revision /amendment/addition of the layout plan of the Residential colony at any stage and grant unconditional consent regarding for any changes/revision /amendment/addition of the commercial colony.</p>
 <p>Thanking you and assuring you all the assistance.</p>
 <p class="right consent-signoff"><strong>(Allottee/ Allottees)</strong></p>
 </section>
@@ -79,7 +79,7 @@ export function ambeyAllotmentTemplate() {
 <div class="photo-box right-mid framed-photo">Please affix<br>photograph of<br>allottee /<br>purchaser</div>
 <p class="buyer-block"><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.addressMultilineHtml}}</u><br><u>Aadhaar No. {{owner.aadhaarNo}}</u><br><u>Pan No. {{owner.panNo}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>
 <p class="buyer-note"><em>(hereinafter referred to as the *Allottee' which expression shall, unless excluded by or repugnant to the subject or context be deemed to include his/their heirs, executors, administrators, legal representatives, nominees, and assigns of the Other Part.</em></p>
-<p><strong>AND WHEREAS</strong> M/S. {{firm.nameUpper}}, entered into arrangements / collaborations with the Land Owners to develop, market and sell Plots in the said Residential Housing Project under the Brand Name "{{project.name}}" in the revenue estate of {{project.revenueEstate}} situated on {{project.fullAddress}} being developed on the aforesaid land (hereinafter referred to as then "Said Colony').</p>
+<p><strong>AND WHEREAS</strong> M/S. {{firm.nameUpper}}, entered into arrangements / collaborations with the Land Owners to develop, market and sell Plots in the said Residential Housing Project under the Brand Name "{{project.name}}" in the <strong>revenue estate of Hadbast No. 55, Village Barnala A, B, C &amp; D situated at Near Gaushalla, Raikot Road, Barnala, Distt. Barnala, Punjab 148101</strong> being developed on the aforesaid land (hereinafter referred to as then "Said Colony').</p>
 <p><strong>AND WHEREAS</strong> The Firm by virtue of the said sale by {{firm.nameUpper}} is entitled to and is competent to construct, develop, market and sell plots in the said colony, receive monies, give receipts, execute conveyance, other documents etc. as may be necessary and expedient to give effect to the aforesaid purpose, for the purpose of construction and sale of plots.</p>
 </section>
 
@@ -91,7 +91,7 @@ export function ambeyAllotmentTemplate() {
 <p><strong>AND WHEREAS</strong> the Allottee represents and confirms that the Allottee has satisfied himself about the competence of the Firm to execute this Agreement, seen all relevant documents, title deeds, License(s), approved layout plan etc., and has also familiarized himself / herself with the dimensions and other details of the said plot and also understood all limitations and obligations of the Firm and the Allottee in respect thereof and the Allottee has confirmed that his investigations are completed in all respects.</p>
 <p><strong>NOW THIS AGREEMENT WITNESSETH AND IT IS HERE BY AGREED AND DECLARED BY AND BETWEEN THE PARTIES HERETO AS FOLLOWS:</strong></p>
 <p class="clause-heading-only"><span class="clause-heading-number"><strong>1.</strong></span><span class="clause-heading-text"><strong>DETAILS OF PRICE PAYABLE FOR THE SAID PLOT</strong></span></p>
-<p class="clause-follow">The Allottee has agreed to purchase from the Firm and the Firm has agreed to sell to the Allottee, the Said Plot in the Said Colony as per details given below at the rate of Rs. {{plot.bspRate}}/- per Sq yds. being the Basic Selling Price (hereinafter referred to as 'BSP') exclusive of other payments as below:-</p>
+<p class="clause-follow">The Allottee has agreed to purchase from the Firm and the Firm has agreed to sell to the Allottee, the Said Plot in the Said Colony as per details given below at the rate of <u><strong>Rs. {{plot.bspRate}}/- per Sq yds.</strong></u> being the Basic Selling Price (hereinafter referred to as 'BSP') exclusive of other payments as below:-</p>
 <p><u><strong>DETAILS OF PRICING:</strong></u></p>
 <table class="pricing-table">
 <tr><td>Plot No.</td><td>:</td><td><strong>{{plot.code}}</strong></td></tr>
@@ -158,8 +158,8 @@ export function ambeyAllotmentTemplate() {
 </section>
 
 <section data-ambey-page="13" data-top="760">
-<p class="closing-intro">IN WITNESS WHEREOF, the parties hereto have set and subscribed their respective hands at the places and on the day, month and year mentioned under their respective signatures</p>
-<p class="closing-title"><strong>SIGNED AND DELIVERED BY THE WITH IN NAMED</strong><br>Allottee (including joint allottees)</p>
+<p class="closing-intro"><strong>IN WITNESS WHEREOF</strong>, the parties hereto have set and subscribed their respective hands at the places and on the day, month and year mentioned under their respective signatures</p>
+<p class="closing-title"><u><strong>SIGNED AND DELIVERED BY THE WITH IN NAMED</strong></u><br>Allottee (including joint allottees)</p>
 <table class="signature-lines">
 <tr><td>(1) NAME: {{owner.nameWithRelation}}</td><td>SIGNATURE</td></tr>
 <tr><td>(2) NAME: ________________________</td><td>SIGNATURE</td></tr>
