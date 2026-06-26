@@ -46,6 +46,7 @@ const AUTOFILL_OPTIONS = [
     { label: "Buyer name", value: "owner.name" },
     { label: "Buyer phone", value: "owner.phone" },
     { label: "Buyer address", value: "owner.address" },
+    { label: "Buyer address multiline", value: "owner.addressMultilineHtml" },
     { label: "Father's name", value: "owner.fatherName" },
     { label: "Aadhaar number", value: "owner.aadhaarNo" },
     { label: "PAN number", value: "owner.panNo" },

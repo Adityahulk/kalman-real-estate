@@ -169,8 +169,12 @@ function buildInitialAllotmentData(
       ? stamps.map((stamp) => ({ number: typeof stamp.number === "string" ? stamp.number : "", dated: typeof stamp.dated === "string" ? stamp.dated : new Date().toISOString().slice(0, 10) }))
       : [{ number: typeof extra.eStampNumber === "string" ? extra.eStampNumber : "", dated: typeof extra.eStampDate === "string" ? extra.eStampDate : new Date().toISOString().slice(0, 10) }],
     witnesses: witnesses.length
-      ? witnesses.map((witness) => ({ name: typeof witness.name === "string" ? witness.name : "", aadhaar: typeof witness.aadhaar === "string" ? witness.aadhaar : "", address: typeof witness.address === "string" ? witness.address : "" }))
-      : [{ name: "", aadhaar: "", address: "" }],
+      ? witnesses.map((witness) => ({
+          name: typeof witness.name === "string" ? witness.name : "",
+          phone: firstString(witness, ["phone", "contact", "mobile", "aadhaar"]),
+          address: typeof witness.address === "string" ? witness.address : "",
+        }))
+      : [{ name: "", phone: "", address: "" }],
     allotteeDocuments: documents.length
       ? documents.map((document) => ({
           kind: normalizeDocumentKind(document.kind),
@@ -211,6 +215,13 @@ function extractStoredFiles(value: unknown) {
     .map(recordOf)
     .filter((file) => typeof file.id === "string" && typeof file.fileName === "string")
     .map((file) => ({ id: String(file.id), fileName: String(file.fileName) }));
+}
+
+function firstString(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    if (typeof record[key] === "string") return record[key] as string;
+  }
+  return "";
 }
 
 function normalizePaymentMode(value: unknown) {

@@ -399,7 +399,9 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
   const aadhaarNo = stringFromKyc(ownerKyc, ["aadhaarNo", "aadharNo", "aadhaar", "aadhar"]);
   const panNo = stringFromKyc(ownerKyc, ["panNo", "pan"]);
   const ownerNameWithRelation = [plot.currentOwner?.name ?? "", fatherName ? `s/o ${fatherName}` : ""].filter(Boolean).join(" ");
-  const ownerAddress = plot.currentOwner?.address ?? "";
+  const ownerAddressRaw = plot.currentOwner?.address ?? "";
+  const ownerAddress = normalizeAddressInline(ownerAddressRaw);
+  const ownerAddressMultilineHtml = addressMultilineHtml(ownerAddressRaw);
   const areaSqft = plot.areaSqft ? Number(plot.areaSqft) : null;
   const areaSqyd = areaSqft ? areaSqft / 9 : null;
   const priceInr = ownership?.amountInr ? Number(ownership.amountInr) : plot.priceInr ? Number(plot.priceInr) : null;
@@ -409,6 +411,12 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
   const firmNameUpper = firmName.toUpperCase();
   const projectName = plot.project.name;
   const projectAddress = plot.project.address ?? [plot.project.city].filter(Boolean).join(", ");
+  const documentPlace = resolveDocumentPlace({
+    city: plot.project.city,
+    state: plot.project.state,
+    projectAddress,
+    firmAddress: tenant.address ?? tenant.region ?? "",
+  });
   const boundaries = jsonRecord(plot.boundaries);
   const extraDetails = jsonRecord(ownership?.extraDetails);
   const pricing = jsonRecord(extraDetails.pricing);
@@ -542,6 +550,7 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "owner.mobileNo": plot.currentOwner?.phone ?? "",
     "owner.email": plot.currentOwner?.email ?? "",
     "owner.address": ownerAddress,
+    "owner.addressMultilineHtml": ownerAddressMultilineHtml,
     "owner.addressUpper": ownerAddress.toUpperCase(),
     "owner.aadhaarNo": aadhaarNo,
     "owner.panNo": panNo,
@@ -563,9 +572,13 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "payment.tableRows": paymentTableRows,
     "witness.1.name": stringFromKyc(jsonRecord(witnessList[0]), ["name"]),
     "witness.1.aadhaar": stringFromKyc(jsonRecord(witnessList[0]), ["aadhaar"]),
+    "witness.1.phone": stringFromKyc(jsonRecord(witnessList[0]), ["phone", "contact", "mobile", "aadhaar"]),
+    "witness.1.contact": stringFromKyc(jsonRecord(witnessList[0]), ["phone", "contact", "mobile", "aadhaar"]),
     "witness.1.address": stringFromKyc(jsonRecord(witnessList[0]), ["address"]),
     "witness.2.name": stringFromKyc(jsonRecord(witnessList[1]), ["name"]),
     "witness.2.aadhaar": stringFromKyc(jsonRecord(witnessList[1]), ["aadhaar"]),
+    "witness.2.phone": stringFromKyc(jsonRecord(witnessList[1]), ["phone", "contact", "mobile", "aadhaar"]),
+    "witness.2.contact": stringFromKyc(jsonRecord(witnessList[1]), ["phone", "contact", "mobile", "aadhaar"]),
     "witness.2.address": stringFromKyc(jsonRecord(witnessList[1]), ["address"]),
     "files.allotteeDocuments": allotteeFileNames.join(", "),
     "files.paymentDocuments": paymentFileNames.join(", "),
@@ -587,8 +600,9 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "stamp.3.estampNo": stampNo(2),
     "stamp.3.date": stampDateDots(2),
     "possession.date": "",
-    "agreement.place": plot.project.city || "Barnala",
-    "witness.place": plot.project.city || "Barnala",
+    "agreement.place": documentPlace,
+    "witness.place": documentPlace,
+    "document.place": documentPlace,
   };
   for (const [key, value] of Object.entries(customLetterFields)) variables[`manual.${key}`] = typeof value === "string" ? value : String(value ?? "");
   for (const [key, value] of Object.entries(customLetterFiles)) {
@@ -730,7 +744,7 @@ function appendSupportingDocumentPages(html: string, pages: string[]) {
 }
 
 // Keys whose value is HTML built server-side (already safe) and must be inserted unescaped.
-const RAW_HTML_KEYS = new Set(["payment.tableRows"]);
+const RAW_HTML_KEYS = new Set(["payment.tableRows", "owner.addressMultilineHtml"]);
 
 function renderTemplate(template: string, variables: Record<string, string>, fileVariables: Record<string, string> = {}) {
   const missingVariables: string[] = [];
@@ -901,6 +915,53 @@ function stringFromKyc(record: Record<string, unknown>, keys: string[]) {
     if (typeof value === "number") return String(value);
   }
   return "";
+}
+
+function addressLines(value: string) {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function normalizeAddressInline(value: string) {
+  return addressLines(value).join(", ");
+}
+
+function addressMultilineHtml(value: string) {
+  const lines = addressLines(value);
+  if (!lines.length) return "";
+  return lines.map((line) => escapeHtml(line)).join("<br>");
+}
+
+function resolveDocumentPlace({
+  city,
+  state,
+  projectAddress,
+  firmAddress,
+}: {
+  city: string | null;
+  state: string | null;
+  projectAddress: string;
+  firmAddress: string;
+}) {
+  const normalizedCity = city?.trim() ?? "";
+  const normalizedState = state?.trim() ?? "";
+  const projectAddressParts = addressParts(projectAddress);
+  const firmAddressParts = addressParts(firmAddress);
+  const addressCity = projectAddressParts[0] || firmAddressParts[0] || "";
+  const lowerCity = normalizedCity.toLowerCase();
+  const cityLooksLikeAddressState = [...projectAddressParts.slice(1), ...firmAddressParts.slice(1)]
+    .some((part) => part.toLowerCase() === lowerCity);
+  if (normalizedCity && normalizedCity.toLowerCase() !== normalizedState.toLowerCase() && !cityLooksLikeAddressState) return normalizedCity;
+  return addressCity || normalizedCity || "Barnala";
+}
+
+function addressParts(value: string) {
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
 }
 
 function formatNumber(value: number) {

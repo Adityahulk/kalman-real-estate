@@ -3,7 +3,7 @@ export function ambeyAllotmentTemplate() {
 <section data-ambey-page="1" data-top="700">
 <h1><u>Allotment Letter</u></h1>
 <p class="right meta-block"><strong>Allotment No.: {{document.number}}</strong><br><strong>({{rera.number}})</strong><br>Date: {{document.date}}</p>
-<p class="recipient-block">To<br><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.address}}</u><br><u>Aadhaar No. {{owner.aadhaarNo}}</u><br><u>Pan No. {{owner.panNo}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>
+<p class="recipient-block">To<br><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.addressMultilineHtml}}</u><br><u>Aadhaar No. {{owner.aadhaarNo}}</u><br><u>Pan No. {{owner.panNo}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>
 <p class="subject-line"><strong>Subject :-</strong> <strong>Allotment Letter of Residential Plot No. {{plot.code}} ({{plot.areaSqydApprox}}) of {{project.name}}, {{project.fullAddress}}</strong></p>
 <p>We thank you for your application addressed to "{{firm.name}}" (Firm) and for the payments required for the purpose of allotment.</p>
 <p>It is indeed our pleasure to inform you that the unit booked by you via the application form has now been allotment to you subject to terms and conditions as stated in the Application Form.</p>
@@ -77,7 +77,7 @@ export function ambeyAllotmentTemplate() {
 <p class="agreement-note"><em>**M/s. {{firm.name}}, {{firm.address}} a partnership firm duly registered under the Indian Partnership Act, 1932 acting through its partner {{firm.signatory.name}} {{firm.signatory.relation}} authorized vide authority letter dated {{firm.signatory.authorizationDate}}.</em></p>
 <p class="center">AND</p>
 <div class="photo-box right-mid framed-photo">Please affix<br>photograph of<br>allottee /<br>purchaser</div>
-<p class="buyer-block"><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.address}}</u><br><u>Aadhaar No. {{owner.aadhaarNo}}</u><br><u>Pan No. {{owner.panNo}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>
+<p class="buyer-block"><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.addressMultilineHtml}}</u><br><u>Aadhaar No. {{owner.aadhaarNo}}</u><br><u>Pan No. {{owner.panNo}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>
 <p class="buyer-note"><em>(hereinafter referred to as the *Allottee' which expression shall, unless excluded by or repugnant to the subject or context be deemed to include his/their heirs, executors, administrators, legal representatives, nominees, and assigns of the Other Part.</em></p>
 <p><strong>AND WHEREAS</strong> M/S. {{firm.nameUpper}}, entered into arrangements / collaborations with the Land Owners to develop, market and sell Plots in the said Residential Housing Project under the Brand Name "{{project.name}}" in the revenue estate of {{project.revenueEstate}} situated on {{project.fullAddress}} being developed on the aforesaid land (hereinafter referred to as then "Said Colony').</p>
 <p><strong>AND WHEREAS</strong> The Firm by virtue of the said sale by {{firm.nameUpper}} is entitled to and is competent to construct, develop, market and sell plots in the said colony, receive monies, give receipts, execute conveyance, other documents etc. as may be necessary and expedient to give effect to the aforesaid purpose, for the purpose of construction and sale of plots.</p>
@@ -104,7 +104,7 @@ export function ambeyAllotmentTemplate() {
 <section data-ambey-page="7" data-top="760" class="agreement-page">
 <p><strong>DETAILS OF PAYMENTS RECEIVED:</strong></p>
 <table class="payments">
-<tr><th>Cheque No./<br>RTGS/NEFT</th><th>Date of Cheque</th><th>Amount</th><th>Drawn on Bank</th></tr>
+<tr><th>Cheque No./<br>RTGS/NEFT</th><th>Date of Payment</th><th>Amount</th><th>Drawn on Bank</th></tr>
 </table>
 <p>The allottee / vendee shall pay to the promoters / colonizers on prorata basis, the price of said plot, if the dimensions of the said plot increase.</p>
 <p>The colonizers /promoters promise to adjust on prorate basis, the price of plot, if the dimensions of the said plot and hence the area decreases.</p>
@@ -172,7 +172,7 @@ export function ambeyAllotmentTemplate() {
 <div class="closing-witness-entry">
 <p class="closing-witness-line"><span class="closing-witness-label">i) Name:</span><span class="closing-witness-fill">{{witness.1.name}}</span></p>
 <p class="closing-witness-line"><span class="closing-witness-label">Address:</span><span class="closing-witness-fill">{{witness.1.address}}</span></p>
-<p class="closing-witness-line"><span class="closing-witness-label">Contact:</span><span class="closing-witness-fill">&nbsp;</span></p>
+<p class="closing-witness-line"><span class="closing-witness-label">Contact:</span><span class="closing-witness-fill">{{witness.1.phone}}</span></p>
 <p class="closing-witness-line"><span class="closing-witness-label">Signature:</span><span class="closing-witness-fill">&nbsp;</span></p>
 </div>
 <div class="closing-photo-box"></div>
@@ -181,14 +181,14 @@ export function ambeyAllotmentTemplate() {
 <div class="closing-witness-entry">
 <p class="closing-witness-line"><span class="closing-witness-label">ii) Name:</span><span class="closing-witness-fill">{{witness.2.name}}</span></p>
 <p class="closing-witness-line"><span class="closing-witness-label">Address:</span><span class="closing-witness-fill">{{witness.2.address}}</span></p>
-<p class="closing-witness-line"><span class="closing-witness-label">Contact:</span><span class="closing-witness-fill">&nbsp;</span></p>
+<p class="closing-witness-line"><span class="closing-witness-label">Contact:</span><span class="closing-witness-fill">{{witness.2.phone}}</span></p>
 <p class="closing-witness-line"><span class="closing-witness-label">Signature:</span><span class="closing-witness-fill">&nbsp;</span></p>
 </div>
 <div class="closing-photo-box"></div>
 </div>
 </div>
 <p class="closing-firm-title"><strong>SIGNED AND DELIVERED BY THE WITHIN NAMED {{firm.signatory.name}} {{firm.signatory.relation}}</strong></p>
-<p class="closing-firm-note">For and on behalf of Firm {{firm.name}} {{project.city}} at {{witness.place}} on {{ownership.effectiveDateDots}}.</p>
+<p class="closing-firm-note">For and on behalf of Firm {{firm.name}}, {{firm.address}} at {{document.place}} on {{ownership.effectiveDateDots}}.</p>
 </section>
 </div>`;
 }

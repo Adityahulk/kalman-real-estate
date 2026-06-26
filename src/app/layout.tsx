@@ -2,6 +2,7 @@ import "../styles/globals.css";
 import "ol/ol.css";
 import type { Metadata } from "next";
 import { ClientErrorLogger } from "@/components/client-error-logger";
+import { AppErrorToast } from "@/components/app-error-toast";
 
 export const metadata: Metadata = {
   title: {
@@ -18,6 +19,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         <ClientErrorLogger />
+        <AppErrorToast />
         {children}
       </body>
     </html>

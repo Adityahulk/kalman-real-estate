@@ -77,7 +77,7 @@ type StampEntry = {
 
 type WitnessEntry = {
   name: string;
-  aadhaar: string;
+  phone: string;
   address: string;
 };
 
@@ -117,6 +117,14 @@ type ManualLetterField = {
   label: string;
   inputType?: "TEXT" | "FILE";
 };
+
+function normalizeWitnessEntry(entry: Partial<WitnessEntry> & { aadhaar?: string; contact?: string; mobile?: string } = {}): WitnessEntry {
+  return {
+    name: entry.name ?? "",
+    phone: entry.phone ?? entry.contact ?? entry.mobile ?? entry.aadhaar ?? "",
+    address: entry.address ?? "",
+  };
+}
 
 export function ProjectSiteInfoForm({
   project,
@@ -247,7 +255,9 @@ export function ProjectAllotmentFlow({
     { number: "", dated: new Date().toISOString().slice(0, 10) },
     { number: "", dated: new Date().toISOString().slice(0, 10) },
   ]);
-  const [witnesses, setWitnesses] = useState<WitnessEntry[]>(initialData?.witnesses?.length ? initialData.witnesses : [{ name: "", aadhaar: "", address: "" }]);
+  const [witnesses, setWitnesses] = useState<WitnessEntry[]>(
+    initialData?.witnesses?.length ? initialData.witnesses.map((entry) => normalizeWitnessEntry(entry)) : [normalizeWitnessEntry()],
+  );
   const [extraFields, setExtraFields] = useState<AdditionalFieldEntry[]>(initialData?.extraFields ?? []);
   const [letterFields, setLetterFields] = useState<Record<string, string>>(initialData?.letterFields ?? {});
   const [letterFieldFiles, setLetterFieldFiles] = useState<Record<string, File[]>>({});
@@ -299,7 +309,7 @@ export function ProjectAllotmentFlow({
       if (Array.isArray(saved.paymentEntries) && saved.paymentEntries.length) setPaymentEntries(saved.paymentEntries.map((entry) => ({ ...entry, files: [], uploadedFiles: entry.uploadedFiles ?? [] })));
       if (saved.effectiveAt) setEffectiveAt(saved.effectiveAt);
       if (Array.isArray(saved.stamps) && saved.stamps.length) setStamps(saved.stamps);
-      if (Array.isArray(saved.witnesses) && saved.witnesses.length) setWitnesses(saved.witnesses);
+      if (Array.isArray(saved.witnesses) && saved.witnesses.length) setWitnesses(saved.witnesses.map((entry) => normalizeWitnessEntry(entry)));
       if (Array.isArray(saved.allotteeDocuments) && saved.allotteeDocuments.length) setAllotteeDocuments(saved.allotteeDocuments.map((entry) => ({ ...entry, files: [], uploadedFiles: entry.uploadedFiles ?? [] })));
       if (Array.isArray(saved.extraFields)) {
         setExtraFields(saved.extraFields.map((field) => ({
@@ -509,9 +519,9 @@ export function ProjectAllotmentFlow({
             eStampDate: stamps.find((entry) => entry.dated)?.dated || undefined,
             witnessDetails: witnesses.filter((entry) => entry.name).map((entry) => entry.name).join(", ") || undefined,
             stamps: stamps.filter((entry) => entry.number || entry.dated),
-            witnesses: witnesses.filter((entry) => entry.name || entry.aadhaar || entry.address).map((entry) => ({
+            witnesses: witnesses.filter((entry) => entry.name || entry.phone || entry.address).map((entry) => ({
               name: entry.name || undefined,
-              aadhaar: entry.aadhaar || undefined,
+              phone: entry.phone || undefined,
               address: entry.address || undefined,
             })),
             customLetterFields: letterFields,
@@ -554,7 +564,7 @@ export function ProjectAllotmentFlow({
         window.sessionStorage.setItem(restoreKey, JSON.stringify({
           ...restorePayload,
           allotteeDocuments: mergedAllotteeDocuments.map((entry) => ({ kind: entry.kind, number: entry.number ?? "", uploadedFiles: entry.files })),
-          paymentEntries: mergedPaymentEntries.map((entry) => ({ mode: entry.mode, amount: entry.amount ? String(entry.amount) : "", reference: entry.reference ?? "", uploadedFiles: entry.files })),
+          paymentEntries: mergedPaymentEntries.map((entry) => ({ mode: entry.mode, amount: entry.amount ? String(entry.amount) : "", reference: entry.reference ?? "", date: entry.date ?? "", bank: entry.bank ?? "", uploadedFiles: entry.files })),
           extraFields: mergedAdditionalFields.map((field) => ({
             label: field.label,
             inputType: field.inputType,
@@ -694,12 +704,12 @@ export function ProjectAllotmentFlow({
             {paymentEntries.map((entry, index) => <div className="grid gap-2 rounded-lg border border-slate-200 p-3 md:grid-cols-[1fr_1fr_1.4fr_auto]" key={index}>
               <label><span className="label">Mode</span><select className="input" value={entry.mode} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, mode: event.target.value as PaymentEntry["mode"], reference: "" } : item))}><option>Cash</option><option>Cheque</option><option>Bank transfer</option><option>UPI</option><option>Other</option></select></label>
               <label><span className="label">Amount</span><input className="input" inputMode="decimal" value={entry.amount} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, amount: event.target.value } : item))} /></label>
-              <label><span className="label">{entry.mode === "Cheque" ? "Cheque number" : entry.mode === "Bank transfer" ? "Bank details / reference" : entry.mode === "UPI" ? "UPI ID" : entry.mode === "Other" ? "Payment details" : "Reference (optional)"}</span><input className="input" value={entry.reference} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, reference: event.target.value } : item))} /></label>
+              <label><span className="label">{entry.mode === "Cheque" ? "Cheque number" : entry.mode === "Bank transfer" ? "Bank details / reference" : "Reference (optional)"}</span><input className="input" value={entry.reference} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, reference: event.target.value } : item))} /></label>
               <button className="btn-outline self-end px-3" type="button" aria-label="Remove payment entry" disabled={paymentEntries.length === 1} onClick={() => setPaymentEntries((entries) => entries.filter((_, itemIndex) => itemIndex !== index))}><X size={16} /></button>
-              {entry.mode === "Cheque" || entry.mode === "Bank transfer" ? <div className="md:col-span-4 grid gap-2 md:grid-cols-2">
-                <label><span className="label">Date of cheque</span><input className="input" type="date" value={entry.date ?? ""} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, date: event.target.value } : item))} /></label>
-                <label><span className="label">Drawn on bank</span><input className="input" value={entry.bank ?? ""} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, bank: event.target.value } : item))} /></label>
-              </div> : null}
+              <div className="md:col-span-4 grid gap-2 md:grid-cols-2">
+                <label><span className="label">{entry.mode === "Cheque" ? "Date of cheque" : "Date of payment"}</span><input className="input" type="date" value={entry.date ?? ""} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, date: event.target.value } : item))} /></label>
+                {entry.mode === "Cheque" || entry.mode === "Bank transfer" ? <label><span className="label">Drawn on bank</span><input className="input" value={entry.bank ?? ""} onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, bank: event.target.value } : item))} /></label> : null}
+              </div>
               <label className="md:col-span-4"><span className="label">Upload files</span><input className="input pt-2" type="file" multiple onChange={(event) => setPaymentEntries((entries) => entries.map((item, itemIndex) => itemIndex === index ? { ...item, files: Array.from(event.target.files ?? []) } : item))} /></label>
               {displayFileNames(entry.files, entry.uploadedFiles) ? <div className="md:col-span-4 text-xs text-slate-500">{displayFileNames(entry.files, entry.uploadedFiles)}</div> : null}
             </div>)}
@@ -729,13 +739,13 @@ export function ProjectAllotmentFlow({
           <div className="md:col-span-2">
             <div className="flex items-center justify-between">
               <span className="label">Witness with details</span>
-              <button type="button" className="btn-outline h-8 px-3 text-xs" onClick={() => setWitnesses((items) => [...items, { name: "", aadhaar: "", address: "" }])}><Plus size={14} />Add witness</button>
+              <button type="button" className="btn-outline h-8 px-3 text-xs" onClick={() => setWitnesses((items) => [...items, normalizeWitnessEntry()])}><Plus size={14} />Add witness</button>
             </div>
             <div className="space-y-3">
               {witnesses.map((witness, index) => (
                 <div key={index} className="grid gap-2 rounded-lg border border-slate-200 p-3 md:grid-cols-2">
                   <label><span className="label">Name</span><input className="input" value={witness.name} onChange={(event) => setWitnesses((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value } : item))} /></label>
-                  <label><span className="label">Aadhaar <span className="font-normal text-slate-400">(optional)</span></span><input className="input" value={witness.aadhaar} onChange={(event) => setWitnesses((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, aadhaar: event.target.value } : item))} /></label>
+                  <label><span className="label">Phone <span className="font-normal text-slate-400">(optional)</span></span><input className="input" value={witness.phone} onChange={(event) => setWitnesses((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, phone: event.target.value } : item))} /></label>
                   <label className="md:col-span-2"><span className="label">Address <span className="font-normal text-slate-400">(optional)</span></span><textarea className="input min-h-20" value={witness.address} onChange={(event) => setWitnesses((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, address: event.target.value } : item))} /></label>
                   <div className="md:col-span-2"><button type="button" className="btn-outline px-3" disabled={witnesses.length === 1} onClick={() => setWitnesses((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={16} /> Remove witness</button></div>
                 </div>
