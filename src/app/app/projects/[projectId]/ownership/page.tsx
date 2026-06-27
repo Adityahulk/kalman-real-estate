@@ -5,7 +5,7 @@ import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
 import { BackButton } from "@/components/back-button";
 import { sortByPlotCode } from "@/lib/plot-code-sort";
-import { OwnershipPlotRow, type SignedFileInfo } from "./ownership-plot-row";
+import { OwnershipPlotRow } from "./ownership-plot-row";
 
 export const dynamic = "force-dynamic";
 
@@ -83,11 +83,7 @@ export default async function ProjectOwnershipPage({
     where: { tenantId: session.tenantId, recordType: "Plot", recordId: { in: plots.map((plot) => plot.id) }, type: { contains: "allotment", mode: "insensitive" } },
     orderBy: { createdAt: "desc" },
   });
-  const letterByPlot = new Map<string, typeof generatedLetters[number]>();
-  for (const letter of generatedLetters) {
-    if (!letterByPlot.has(letter.recordId)) letterByPlot.set(letter.recordId, letter);
-  }
-  const signedFiles = await prisma.fileAsset.findMany({
+  const signedLetters = await prisma.fileAsset.findMany({
     where: {
       tenantId: session.tenantId,
       ownerType: "Plot",
@@ -95,12 +91,17 @@ export default async function ProjectOwnershipPage({
       categoryKey: "signed-allotment-letter",
       deletedAt: null,
     },
-    select: { id: true, ownerId: true, createdAt: true },
     orderBy: { createdAt: "desc" },
   });
-  const signedByPlot = new Map<string, SignedFileInfo>();
-  for (const file of signedFiles) {
-    if (file.ownerId && !signedByPlot.has(file.ownerId)) signedByPlot.set(file.ownerId, { id: file.id });
+  const letterByPlot = new Map<string, typeof generatedLetters[number]>();
+  for (const letter of generatedLetters) {
+    if (!letterByPlot.has(letter.recordId)) letterByPlot.set(letter.recordId, letter);
+  }
+  const signedLetterByPlotAndDocument = new Map<string, typeof signedLetters[number]>();
+  for (const file of signedLetters) {
+    if (!file.ownerId || !file.documentNo) continue;
+    const key = `${file.ownerId}:${file.documentNo}`;
+    if (!signedLetterByPlotAndDocument.has(key)) signedLetterByPlotAndDocument.set(key, file);
   }
   const filteredPlots = sortByPlotCode(plots);
 
@@ -181,6 +182,7 @@ export default async function ProjectOwnershipPage({
                 const development = plot.checklistItems.length
                   ? Math.round(plot.checklistItems.reduce((total, item) => total + item.progressPct, 0) / plot.checklistItems.length)
                   : null;
+                const signedLetter = letter?.number ? signedLetterByPlotAndDocument.get(`${plot.id}:${letter.number}`) : null;
                 return (
                   <OwnershipPlotRow
                     key={plot.id}
@@ -191,8 +193,15 @@ export default async function ProjectOwnershipPage({
                     area={`${plot.areaSqYards?.toString() ?? (plot.areaSqft ? String(Number(plot.areaSqft) / 9) : "-")} sq yd`}
                     development={development}
                     allotmentStatus={plot.status === "COMPANY_OWNED" ? "Available for allotment" : plot.status.replaceAll("_", " ").toLowerCase().replace(/^\w/, (letter) => letter.toUpperCase())}
-                    document={letter ? { id: letter.id, status: letter.status, fileAssetId: letter.fileAssetId, type: letter.type, number: letter.number, createdAt: letter.createdAt.toISOString() } : null}
-                    signedFile={signedByPlot.get(plot.id) ?? null}
+                    document={letter ? {
+                      id: letter.id,
+                      status: letter.status,
+                      fileAssetId: letter.fileAssetId,
+                      viewFileAssetId: signedLetter?.id ?? letter.fileAssetId,
+                      type: letter.type,
+                      number: letter.number,
+                      createdAt: letter.createdAt.toISOString(),
+                    } : null}
                     cadSource={cadLinkByPlot.get(plot.id)?.entity.scene.cadFile ?? null}
                   />
                 );
