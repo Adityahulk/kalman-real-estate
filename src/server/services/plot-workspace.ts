@@ -89,9 +89,15 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
   ]);
 
   const documentIds = generatedDocuments.map((document) => document.id);
+  const allotmentSupportingFileIds = unique(
+    plot.ownershipRecords
+      .filter((record) => record.kind === "ALLOTMENT" || record.kind === "TRANSFER")
+      .flatMap((record) => collectFileIds(record.extraDetails)),
+  );
   const historicalFiles = await prisma.fileAsset.findMany({
     where: {
       tenantId: context.tenantId,
+      deletedAt: null,
       OR: [
         { ownerType: "Plot", ownerId: plot.id },
         ...(plot.currentOwnerId ? [{ ownerType: "Owner", ownerId: plot.currentOwnerId }] : []),
@@ -114,6 +120,12 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
         include: { actor: { select: { name: true, email: true } } },
         orderBy: { createdAt: "desc" },
         take: 40,
+      })
+    : [];
+  const allotmentSupportingFiles = allotmentSupportingFileIds.length
+    ? await prisma.fileAsset.findMany({
+        where: { tenantId: context.tenantId, id: { in: allotmentSupportingFileIds }, deletedAt: null },
+        orderBy: { createdAt: "desc" },
       })
     : [];
 
@@ -191,6 +203,7 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
     generatedDocuments,
     plotFiles,
     ownerFiles,
+    allotmentSupportingFiles,
     progressUpdates,
     issues,
     auditEvents,
@@ -198,4 +211,30 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
     childCadFiles,
     timeline,
   };
+}
+
+function unique(values: string[]) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function collectFileIds(value: unknown): string[] {
+  const ids = new Set<string>();
+  visit(value, ids);
+  return [...ids];
+}
+
+function visit(value: unknown, ids: Set<string>) {
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    for (const item of value) visit(item, ids);
+    return;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.id === "string" &&
+    (typeof record.fileName === "string" || typeof record.mimeType === "string" || typeof record.storageKey === "string")
+  ) {
+    ids.add(record.id);
+  }
+  for (const item of Object.values(record)) visit(item, ids);
 }

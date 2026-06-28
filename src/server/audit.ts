@@ -1,4 +1,4 @@
-import { AuditAction, Prisma } from "@prisma/client";
+import { AuditAction, OwnershipKind, PlotStatus, Prisma, RealEstateDocumentType } from "@prisma/client";
 import { prisma } from "./db";
 import { RequestContext } from "./api";
 
@@ -33,78 +33,122 @@ export async function deleteAuditEvent(context: RequestContext, id: string) {
 }
 
 export async function cleanPlotAuditEvents(context: RequestContext, plotId: string) {
-  const plot = await prisma.plot.findFirstOrThrow({
-    where: { id: plotId, tenantId: context.tenantId, archivedAt: null },
-    select: { id: true, currentOwnerId: true },
-  });
-
-  const documents = await prisma.generatedDocument.findMany({
-    where: { tenantId: context.tenantId, recordType: "Plot", recordId: plot.id },
-    select: { id: true, fileAssetId: true },
-  });
-  const documentIds = documents.map((document) => document.id);
-  const documentFileIds = documents.map((document) => document.fileAssetId).filter((id): id is string => Boolean(id));
-
-  // Delete generated document revisions, then documents themselves
-  if (documentIds.length) {
-    await prisma.generatedDocumentRevision.deleteMany({ where: { tenantId: context.tenantId, documentId: { in: documentIds } } });
-    // Detach ownership records before deleting documents
-    await prisma.ownershipRecord.updateMany({ where: { tenantId: context.tenantId, documentId: { in: documentIds } }, data: { documentId: null } });
-    await prisma.generatedDocument.deleteMany({ where: { tenantId: context.tenantId, id: { in: documentIds } } });
-  }
-
-  // Soft-delete signed allotment letters + allotment supporting files (not plot maps or other files)
-  await prisma.fileAsset.updateMany({
-    where: {
-      tenantId: context.tenantId,
-      ownerType: "Plot",
-      ownerId: plot.id,
-      categoryKey: { in: ["signed-allotment-letter", "allotment-payment", "allotment-extra"] },
-      deletedAt: null,
-    },
-    data: { deletedAt: new Date(), deleteReason: "Plot history cleanup" },
-  });
-  // Soft-delete generated document PDFs
-  if (documentFileIds.length) {
-    await prisma.fileAsset.updateMany({
-      where: { tenantId: context.tenantId, id: { in: documentFileIds }, deletedAt: null },
-      data: { deletedAt: new Date(), deleteReason: "Plot history cleanup" },
-    });
-  }
-  // Soft-delete allottee KYC files
-  if (plot.currentOwnerId) {
-    await prisma.fileAsset.updateMany({
-      where: { tenantId: context.tenantId, ownerType: "Owner", ownerId: plot.currentOwnerId, categoryKey: "allottee-kyc", deletedAt: null },
-      data: { deletedAt: new Date(), deleteReason: "Plot history cleanup" },
-    });
-  }
-
-  // Delete ownership records (allotment/transfer) and revert plot to company inventory
-  await prisma.ownershipRecord.deleteMany({
-    where: { tenantId: context.tenantId, plotId: plot.id, kind: { in: ["ALLOTMENT", "TRANSFER"] } },
-  });
-  await prisma.plot.update({
-    where: { id: plot.id },
-    data: { currentOwnerId: null, status: "COMPANY_OWNED" },
-  });
-
-  // Clean up audit logs
-  const allFileIds = [
-    ...documentFileIds,
-    ...(await prisma.fileAsset.findMany({
-      where: { tenantId: context.tenantId, ownerType: "Plot", ownerId: plot.id },
+  const result = await prisma.$transaction(async (tx) => {
+    const plot = await tx.plot.findFirstOrThrow({
+      where: { id: plotId, tenantId: context.tenantId, archivedAt: null },
       select: { id: true },
-    })).map((file) => file.id),
-  ];
-  const result = await prisma.auditEvent.deleteMany({
-    where: {
-      tenantId: context.tenantId,
-      OR: [
-        { entityType: "Plot", entityId: plot.id },
-        ...(documentIds.length ? [{ entityType: "GeneratedDocument", entityId: { in: documentIds } }] : []),
-        ...(allFileIds.length ? [{ entityType: "FileAsset", entityId: { in: allFileIds } }] : []),
-      ],
-    },
+    });
+    const records = await tx.ownershipRecord.findMany({
+      where: { tenantId: context.tenantId, plotId: plot.id },
+      select: { id: true, extraDetails: true },
+    });
+    const documents = await tx.generatedDocument.findMany({
+      where: { tenantId: context.tenantId, recordType: "Plot", recordId: plot.id },
+      select: { id: true, fileAssetId: true },
+    });
+    const documentIds = documents.map((document) => document.id);
+    const revisions = documentIds.length
+      ? await tx.generatedDocumentRevision.findMany({
+          where: { tenantId: context.tenantId, documentId: { in: documentIds } },
+          select: { baseFileId: true, outputFileId: true },
+        })
+      : [];
+
+    const fileIdsFromRecords = records.flatMap((record) => collectFileIds(record.extraDetails));
+    const generatedFileIds = unique([
+      ...documents.map((document) => document.fileAssetId).filter((id): id is string => Boolean(id)),
+      ...revisions.flatMap((revision) => [revision.baseFileId, revision.outputFileId]).filter((id): id is string => Boolean(id)),
+    ]);
+    const fileFilters: Prisma.FileAssetWhereInput[] = [
+      { ownerType: "Plot", ownerId: plot.id, categoryKey: { in: ["signed-allotment-letter", "allotment-payment", "allotment-extra"] } },
+      { ownerType: "Plot", ownerId: plot.id, categoryKey: { startsWith: "manual-letter-" } },
+      { ownerType: "Plot", ownerId: plot.id, documentType: RealEstateDocumentType.ALLOTMENT_LETTER },
+    ];
+    if (fileIdsFromRecords.length || generatedFileIds.length) {
+      fileFilters.push({ id: { in: unique([...fileIdsFromRecords, ...generatedFileIds]) } });
+    }
+    const files = await tx.fileAsset.findMany({
+      where: { tenantId: context.tenantId, OR: fileFilters },
+      select: { id: true },
+    });
+
+    const fileIds = files.map((file) => file.id);
+    const auditFilters: Prisma.AuditEventWhereInput[] = [{ entityType: "Plot", entityId: plot.id }];
+    if (documentIds.length) auditFilters.push({ entityType: "GeneratedDocument", entityId: { in: documentIds } });
+    if (fileIds.length) auditFilters.push({ entityType: "FileAsset", entityId: { in: fileIds } });
+
+    const auditDelete = await tx.auditEvent.deleteMany({ where: { tenantId: context.tenantId, OR: auditFilters } });
+    const approvalDelete = documentIds.length
+      ? await tx.approval.deleteMany({ where: { tenantId: context.tenantId, recordType: "GeneratedDocument", recordId: { in: documentIds } } })
+      : { count: 0 };
+    if (documentIds.length) {
+      await tx.ownershipRecord.updateMany({
+        where: { tenantId: context.tenantId, documentId: { in: documentIds } },
+        data: { documentId: null },
+      });
+    }
+    const revisionDelete = documentIds.length
+      ? await tx.generatedDocumentRevision.deleteMany({ where: { tenantId: context.tenantId, documentId: { in: documentIds } } })
+      : { count: 0 };
+    const documentDelete = documentIds.length
+      ? await tx.generatedDocument.deleteMany({ where: { tenantId: context.tenantId, id: { in: documentIds } } })
+      : { count: 0 };
+    const registryDelete = await tx.registryRecord.deleteMany({ where: { tenantId: context.tenantId, plotId: plot.id } });
+    const ownershipDelete = await tx.ownershipRecord.deleteMany({ where: { tenantId: context.tenantId, plotId: plot.id } });
+    const fileDelete = fileIds.length
+      ? await tx.fileAsset.deleteMany({ where: { tenantId: context.tenantId, id: { in: fileIds } } })
+      : { count: 0 };
+
+    await tx.plot.update({
+      where: { id: plot.id },
+      data: { currentOwnerId: null, status: PlotStatus.COMPANY_OWNED },
+      select: { id: true },
+    });
+    await tx.ownershipRecord.create({
+      data: {
+        tenantId: context.tenantId,
+        plotId: plot.id,
+        kind: OwnershipKind.COMPANY_INVENTORY,
+        sharePct: new Prisma.Decimal(100),
+        notes: "Reset by plot history cleanup.",
+        createdById: context.userId,
+      },
+    });
+
+    return {
+      plotId: plot.id,
+      auditDeleted: auditDelete.count,
+      approvalsDeleted: approvalDelete.count,
+      revisionsDeleted: revisionDelete.count,
+      documentsDeleted: documentDelete.count,
+      registryDeleted: registryDelete.count,
+      ownershipDeleted: ownershipDelete.count,
+      filesDeleted: fileDelete.count,
+    };
   });
-  return { plotId: plot.id, deleted: result.count };
+  return result;
+}
+
+function unique(values: string[]) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function collectFileIds(value: Prisma.JsonValue | null): string[] {
+  const ids = new Set<string>();
+  visitJson(value, ids);
+  return [...ids];
+}
+
+function visitJson(value: Prisma.JsonValue | null, ids: Set<string>) {
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    for (const item of value) visitJson(item, ids);
+    return;
+  }
+  const record = value as Record<string, Prisma.JsonValue>;
+  const id = record.id;
+  if (typeof id === "string" && (typeof record.fileName === "string" || typeof record.mimeType === "string" || typeof record.storageKey === "string")) {
+    ids.add(id);
+  }
+  for (const item of Object.values(record)) visitJson(item, ids);
 }

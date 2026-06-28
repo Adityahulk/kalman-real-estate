@@ -28,7 +28,7 @@ export function PlotHistoryTable({
   const router = useRouter();
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [cleaning, setCleaning] = useState(false);
-  const auditCount = items.filter((item) => item.auditId).length;
+  const canClean = items.length > 0;
 
   async function deleteEntry(auditId: string) {
     if (deletingId || cleaning) return;
@@ -44,8 +44,8 @@ export function PlotHistoryTable({
   }
 
   async function cleanUpHistory() {
-    if (deletingId || cleaning || !auditCount) return;
-    if (!globalThis.window.confirm("Clean up plot history? This will delete all allotment/transfer records, generated letters, signed letters, and supporting documents. The plot will revert to company inventory. Plot details (area, boundaries, etc.) are kept.")) return;
+    if (deletingId || cleaning || !canClean) return;
+    if (!globalThis.window.confirm("Clean up this plot history? This keeps the plot details/map, removes generated letters, signed letters, allotment supporting documents, owner/allotment history, registry records, and returns the plot to company inventory.")) return;
     setCleaning(true);
     const response = await fetch(`/api/v1/ownership/plots/${plotId}/audit`, { method: "DELETE" });
     setCleaning(false);
@@ -66,8 +66,8 @@ export function PlotHistoryTable({
           type="button"
           className="btn-outline ml-auto h-8 border-rose-300 px-3 text-xs text-rose-600 hover:bg-rose-50"
           onClick={() => void cleanUpHistory()}
-          disabled={cleaning || deletingId !== null || !auditCount}
-          title={auditCount ? "Reset plot: remove allotments, letters, and supporting documents" : "No history to clean"}
+          disabled={cleaning || deletingId !== null || !canClean}
+          title={canClean ? "Reset allotment history for this plot" : "No plot history to clean"}
         >
           {cleaning ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />}
           Clean Up
