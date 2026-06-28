@@ -4,6 +4,7 @@ import { ClipboardEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Bold, Check, ChevronDown, ChevronUp, Italic, Loader2, Plus, Save, Trash2, Underline, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { requestJson } from "@/lib/api-client";
+import { autoOverflowPages } from "@/lib/editor-page-overflow";
 import { letterSystemFields } from "@/lib/letter-system-fields";
 import { sanitizePastedHtml } from "@/lib/sanitize-pasted-html";
 
@@ -407,6 +408,7 @@ export function HtmlTemplateEditor({
     const root = editorRef.current;
     if (!root) return;
     ensurePagedDocument(root);
+    autoOverflowPages(root);
     injectPageControls(root);
   }
 

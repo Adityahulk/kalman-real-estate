@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ClipboardEvent, FormEvent, MutableRefObject, RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, Bold, CheckCircle2, Download, Eye, FileText, Italic, Loader2, Plus, Save, Send, Trash2, Underline, Wand2, X } from "lucide-react";
+import { autoOverflowPages } from "@/lib/editor-page-overflow";
 import { sanitizePastedHtml } from "@/lib/sanitize-pasted-html";
 import { FileUploader } from "@/components/file-uploader";
 
@@ -1388,6 +1389,11 @@ function LetterDraftCanvas({
     onInput();
   }
 
+  function handleInput() {
+    if (editorRef.current) autoOverflowPages(editorRef.current);
+    onInput();
+  }
+
   return (
     <section className="rounded-2xl border border-slate-200 bg-slate-200/70 p-3 shadow-inner md:p-6">
       <div
@@ -1396,7 +1402,7 @@ function LetterDraftCanvas({
         suppressContentEditableWarning
         suppressHydrationWarning
         className="letter-paper-editor"
-        onInput={onInput}
+        onInput={handleInput}
         onPaste={handlePaste}
         onBlur={() => {
           const selection = globalThis.window.getSelection();
