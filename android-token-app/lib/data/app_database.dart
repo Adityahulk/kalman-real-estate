@@ -43,6 +43,42 @@ class PaymentType {
   static const refund = 'refund';
 }
 
+class PaymentStage {
+  static const token = 'token';
+  static const booking = 'booking';
+  static const installment1 = 'installment1';
+  static const installment2 = 'installment2';
+  static const installment3 = 'installment3';
+  static const installment4 = 'installment4';
+  static const adjustment = 'adjustment';
+  static const refund = 'refund';
+
+  static const all = [
+    token,
+    booking,
+    installment1,
+    installment2,
+    installment3,
+    installment4,
+    adjustment,
+    refund,
+  ];
+
+  static String label(String stage) {
+    return switch (stage) {
+      token => 'Token',
+      booking => 'Booking',
+      installment1 => '1st Installment',
+      installment2 => '2nd Installment',
+      installment3 => '3rd Installment',
+      installment4 => '4th Installment',
+      adjustment => 'Adjustment',
+      refund => 'Refund',
+      _ => stage,
+    };
+  }
+}
+
 class HistoryAction {
   static const created = 'created';
   static const manualAssigned = 'manualAssigned';
@@ -140,6 +176,7 @@ class EoiForms extends Table {
 class PaymentSchedules extends Table {
   IntColumn get id => integer().autoIncrement()();
   IntColumn get plotId => integer().references(Plots, #id, onDelete: KeyAction.cascade)();
+  TextColumn get stageKey => text().nullable()();
   TextColumn get scheduleName => text()();
   RealColumn get percentage => real()();
   DateTimeColumn get dueDate => dateTime().nullable()();
@@ -157,6 +194,7 @@ class PaymentEntries extends Table {
   RealColumn get amount => real().customConstraint('NOT NULL CHECK (amount >= 0)')();
   TextColumn get amountInWords => text().nullable()();
   TextColumn get paymentType => text()();
+  TextColumn get paymentStage => text().nullable()();
   TextColumn get holderSignaturePath => text().nullable()();
   TextColumn get authorizedSignaturePath => text().nullable()();
   TextColumn get note => text().nullable()();
@@ -206,7 +244,27 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (m) => m.createAll(),
+        onUpgrade: (m, from, to) async {
+          if (from < 2) {
+            await m.addColumn(paymentEntries, paymentEntries.paymentStage);
+            await m.addColumn(paymentSchedules, paymentSchedules.stageKey);
+            await customUpdate(
+              'UPDATE payment_entries SET payment_stage = CASE payment_type '
+              "WHEN '${PaymentType.token}' THEN '${PaymentStage.token}' "
+              "WHEN '${PaymentType.booking}' THEN '${PaymentStage.booking}' "
+              "WHEN '${PaymentType.installment}' THEN '${PaymentStage.installment1}' "
+              "WHEN '${PaymentType.adjustment}' THEN '${PaymentStage.adjustment}' "
+              "WHEN '${PaymentType.refund}' THEN '${PaymentStage.refund}' "
+              'ELSE payment_type END',
+            );
+          }
+        },
+      );
 
   Future<int> createProject(String name) {
     final now = DateTime.now();
@@ -303,6 +361,7 @@ class AppDatabase extends _$AppDatabase {
           amount: amount,
           amountInWords: Value(amountInWords),
           paymentType: PaymentType.token,
+          paymentStage: const Value(PaymentStage.token),
           note: const Value('Token amount received before plot assignment.'),
         ),
       );
@@ -339,6 +398,7 @@ class AppDatabase extends _$AppDatabase {
           amount: amount,
           amountInWords: Value(amountInWords),
           paymentType: PaymentType.token,
+          paymentStage: const Value(PaymentStage.token),
           note: const Value('Additional token amount received.'),
         ),
       );
@@ -492,6 +552,7 @@ class AppDatabase extends _$AppDatabase {
             date: now,
             amount: token.amount,
             paymentType: PaymentType.refund,
+            paymentStage: const Value(PaymentStage.refund),
             note: const Value('Refund or credit due because buyer has no redistribution target.'),
           ),
         );
@@ -508,6 +569,7 @@ class AppDatabase extends _$AppDatabase {
             date: now,
             amount: entry.value,
             paymentType: PaymentType.adjustment,
+            paymentStage: const Value(PaymentStage.adjustment),
             note: Value('Redistributed from cancelled plot ${plot.plotNumber}.'),
           ),
         );
@@ -533,6 +595,7 @@ class AppDatabase extends _$AppDatabase {
     required double amount,
     String? amountInWords,
     required String paymentType,
+    String? paymentStage,
     String? holderSignaturePath,
     String? authorizedSignaturePath,
     String? note,
@@ -549,6 +612,7 @@ class AppDatabase extends _$AppDatabase {
           amount: amount,
           amountInWords: Value(amountInWords),
           paymentType: paymentType,
+          paymentStage: Value(paymentStage ?? defaultPaymentStageForType(paymentType)),
           holderSignaturePath: Value(holderSignaturePath),
           authorizedSignaturePath: Value(authorizedSignaturePath),
           note: Value(note),
@@ -589,6 +653,17 @@ class AppDatabase extends _$AppDatabase {
         await into(paymentSchedules).insert(row);
       }
     });
+  }
+
+  String defaultPaymentStageForType(String paymentType) {
+    return switch (paymentType) {
+      PaymentType.token => PaymentStage.token,
+      PaymentType.booking => PaymentStage.booking,
+      PaymentType.installment => PaymentStage.installment1,
+      PaymentType.adjustment => PaymentStage.adjustment,
+      PaymentType.refund => PaymentStage.refund,
+      _ => paymentType,
+    };
   }
 
   Future<void> setSetting(String key, String value) async {

@@ -13,6 +13,7 @@ import '../features/plots/plot_detail_screen.dart';
 import '../features/plots/plots_screen.dart';
 import '../features/projects/project_dashboard_screen.dart';
 import '../features/projects/projects_screen.dart';
+import '../features/search/search_screen.dart';
 
 final _routerRefreshProvider = ChangeNotifierProvider((ref) {
   final notifier = RouterRefreshNotifier();
@@ -76,6 +77,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/projects/:projectId/exports',
         builder: (context, state) => ExportsScreen(projectId: int.parse(state.pathParameters['projectId']!)),
+      ),
+      GoRoute(
+        path: '/projects/:projectId/search',
+        builder: (context, state) => SearchScreen(projectId: int.parse(state.pathParameters['projectId']!)),
       ),
     ],
   );

@@ -24,6 +24,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
   final _note = TextEditingController();
   DateTime _date = DateTime.now();
   String _type = PaymentType.booking;
+  String _stage = PaymentStage.booking;
   String? _holderSignature;
   String? _authorizedSignature;
 
@@ -76,7 +77,22 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                             DropdownMenuItem(value: PaymentType.adjustment, child: Text('Adjustment')),
                             DropdownMenuItem(value: PaymentType.refund, child: Text('Refund')),
                           ],
-                          onChanged: (value) => setState(() => _type = value ?? PaymentType.booking),
+                          onChanged: (value) => setState(() {
+                            _type = value ?? PaymentType.booking;
+                            _stage = _defaultStageForType(_type);
+                          }),
+                        ),
+                        const SizedBox(height: 10),
+                        DropdownButtonFormField<String>(
+                          value: _stage,
+                          decoration: const InputDecoration(labelText: 'Payment stage'),
+                          items: PaymentStage.all
+                              .map((stage) => DropdownMenuItem(value: stage, child: Text(PaymentStage.label(stage))))
+                              .toList(),
+                          onChanged: (value) => setState(() {
+                            _stage = value ?? PaymentStage.booking;
+                            _type = _defaultTypeForStage(_stage);
+                          }),
                         ),
                         const SizedBox(height: 10),
                         TextField(
@@ -126,6 +142,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
           amount: amount,
           amountInWords: amountInWords(amount.round()),
           paymentType: _type,
+          paymentStage: _stage,
           holderSignaturePath: _holderSignature,
           authorizedSignaturePath: _authorizedSignature,
           note: _note.text.trim(),
@@ -135,5 +152,25 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
     final file = await DocumentService().writePaymentPdf(project: project, plot: plot, payment: payment);
     await Printing.sharePdf(bytes: await file.readAsBytes(), filename: file.path.split('/').last);
     if (mounted) Navigator.pop(context);
+  }
+
+  String _defaultStageForType(String type) {
+    return switch (type) {
+      PaymentType.booking => PaymentStage.booking,
+      PaymentType.installment => PaymentStage.installment1,
+      PaymentType.adjustment => PaymentStage.adjustment,
+      PaymentType.refund => PaymentStage.refund,
+      _ => PaymentStage.booking,
+    };
+  }
+
+  String _defaultTypeForStage(String stage) {
+    return switch (stage) {
+      PaymentStage.token => PaymentType.token,
+      PaymentStage.booking => PaymentType.booking,
+      PaymentStage.adjustment => PaymentType.adjustment,
+      PaymentStage.refund => PaymentType.refund,
+      _ => PaymentType.installment,
+    };
   }
 }

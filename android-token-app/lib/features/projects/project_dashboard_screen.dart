@@ -95,6 +95,12 @@ class ProjectDashboardScreen extends ConsumerWidget {
                 onTap: () => context.go('/projects/$projectId/draw'),
               ),
               _NavTile(
+                icon: Icons.manage_search,
+                title: 'Search & Reports',
+                subtitle: 'Filter plots, customers, channel partners, area, rate, and payments',
+                onTap: () => context.go('/projects/$projectId/search'),
+              ),
+              _NavTile(
                 icon: Icons.file_download,
                 title: 'Backup & Export',
                 subtitle: 'JSON backup, CSV, and PDFs',

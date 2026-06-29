@@ -2738,6 +2738,12 @@ class $PaymentSchedulesTable extends PaymentSchedules
       requiredDuringInsert: true,
       defaultConstraints: GeneratedColumn.constraintIsAlways(
           'REFERENCES plots (id) ON DELETE CASCADE'));
+  static const VerificationMeta _stageKeyMeta =
+      const VerificationMeta('stageKey');
+  @override
+  late final GeneratedColumn<String> stageKey = GeneratedColumn<String>(
+      'stage_key', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _scheduleNameMeta =
       const VerificationMeta('scheduleName');
   @override
@@ -2770,7 +2776,7 @@ class $PaymentSchedulesTable extends PaymentSchedules
       defaultValue: const Constant(PaymentStatus.pending));
   @override
   List<GeneratedColumn> get $columns =>
-      [id, plotId, scheduleName, percentage, dueDate, amount, status];
+      [id, plotId, stageKey, scheduleName, percentage, dueDate, amount, status];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -2789,6 +2795,10 @@ class $PaymentSchedulesTable extends PaymentSchedules
           plotId.isAcceptableOrUnknown(data['plot_id']!, _plotIdMeta));
     } else if (isInserting) {
       context.missing(_plotIdMeta);
+    }
+    if (data.containsKey('stage_key')) {
+      context.handle(_stageKeyMeta,
+          stageKey.isAcceptableOrUnknown(data['stage_key']!, _stageKeyMeta));
     }
     if (data.containsKey('schedule_name')) {
       context.handle(
@@ -2831,6 +2841,8 @@ class $PaymentSchedulesTable extends PaymentSchedules
           .read(DriftSqlType.int, data['${effectivePrefix}id'])!,
       plotId: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}plot_id'])!,
+      stageKey: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}stage_key']),
       scheduleName: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}schedule_name'])!,
       percentage: attachedDatabase.typeMapping
@@ -2853,6 +2865,7 @@ class $PaymentSchedulesTable extends PaymentSchedules
 class PaymentSchedule extends DataClass implements Insertable<PaymentSchedule> {
   final int id;
   final int plotId;
+  final String? stageKey;
   final String scheduleName;
   final double percentage;
   final DateTime? dueDate;
@@ -2861,6 +2874,7 @@ class PaymentSchedule extends DataClass implements Insertable<PaymentSchedule> {
   const PaymentSchedule(
       {required this.id,
       required this.plotId,
+      this.stageKey,
       required this.scheduleName,
       required this.percentage,
       this.dueDate,
@@ -2871,6 +2885,9 @@ class PaymentSchedule extends DataClass implements Insertable<PaymentSchedule> {
     final map = <String, Expression>{};
     map['id'] = Variable<int>(id);
     map['plot_id'] = Variable<int>(plotId);
+    if (!nullToAbsent || stageKey != null) {
+      map['stage_key'] = Variable<String>(stageKey);
+    }
     map['schedule_name'] = Variable<String>(scheduleName);
     map['percentage'] = Variable<double>(percentage);
     if (!nullToAbsent || dueDate != null) {
@@ -2887,6 +2904,9 @@ class PaymentSchedule extends DataClass implements Insertable<PaymentSchedule> {
     return PaymentSchedulesCompanion(
       id: Value(id),
       plotId: Value(plotId),
+      stageKey: stageKey == null && nullToAbsent
+          ? const Value.absent()
+          : Value(stageKey),
       scheduleName: Value(scheduleName),
       percentage: Value(percentage),
       dueDate: dueDate == null && nullToAbsent
@@ -2904,6 +2924,7 @@ class PaymentSchedule extends DataClass implements Insertable<PaymentSchedule> {
     return PaymentSchedule(
       id: serializer.fromJson<int>(json['id']),
       plotId: serializer.fromJson<int>(json['plotId']),
+      stageKey: serializer.fromJson<String?>(json['stageKey']),
       scheduleName: serializer.fromJson<String>(json['scheduleName']),
       percentage: serializer.fromJson<double>(json['percentage']),
       dueDate: serializer.fromJson<DateTime?>(json['dueDate']),
@@ -2917,6 +2938,7 @@ class PaymentSchedule extends DataClass implements Insertable<PaymentSchedule> {
     return <String, dynamic>{
       'id': serializer.toJson<int>(id),
       'plotId': serializer.toJson<int>(plotId),
+      'stageKey': serializer.toJson<String?>(stageKey),
       'scheduleName': serializer.toJson<String>(scheduleName),
       'percentage': serializer.toJson<double>(percentage),
       'dueDate': serializer.toJson<DateTime?>(dueDate),
@@ -2928,6 +2950,7 @@ class PaymentSchedule extends DataClass implements Insertable<PaymentSchedule> {
   PaymentSchedule copyWith(
           {int? id,
           int? plotId,
+          Value<String?> stageKey = const Value.absent(),
           String? scheduleName,
           double? percentage,
           Value<DateTime?> dueDate = const Value.absent(),
@@ -2936,6 +2959,7 @@ class PaymentSchedule extends DataClass implements Insertable<PaymentSchedule> {
       PaymentSchedule(
         id: id ?? this.id,
         plotId: plotId ?? this.plotId,
+        stageKey: stageKey.present ? stageKey.value : this.stageKey,
         scheduleName: scheduleName ?? this.scheduleName,
         percentage: percentage ?? this.percentage,
         dueDate: dueDate.present ? dueDate.value : this.dueDate,
@@ -2946,6 +2970,7 @@ class PaymentSchedule extends DataClass implements Insertable<PaymentSchedule> {
     return PaymentSchedule(
       id: data.id.present ? data.id.value : this.id,
       plotId: data.plotId.present ? data.plotId.value : this.plotId,
+      stageKey: data.stageKey.present ? data.stageKey.value : this.stageKey,
       scheduleName: data.scheduleName.present
           ? data.scheduleName.value
           : this.scheduleName,
@@ -2962,6 +2987,7 @@ class PaymentSchedule extends DataClass implements Insertable<PaymentSchedule> {
     return (StringBuffer('PaymentSchedule(')
           ..write('id: $id, ')
           ..write('plotId: $plotId, ')
+          ..write('stageKey: $stageKey, ')
           ..write('scheduleName: $scheduleName, ')
           ..write('percentage: $percentage, ')
           ..write('dueDate: $dueDate, ')
@@ -2973,13 +2999,14 @@ class PaymentSchedule extends DataClass implements Insertable<PaymentSchedule> {
 
   @override
   int get hashCode => Object.hash(
-      id, plotId, scheduleName, percentage, dueDate, amount, status);
+      id, plotId, stageKey, scheduleName, percentage, dueDate, amount, status);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is PaymentSchedule &&
           other.id == this.id &&
           other.plotId == this.plotId &&
+          other.stageKey == this.stageKey &&
           other.scheduleName == this.scheduleName &&
           other.percentage == this.percentage &&
           other.dueDate == this.dueDate &&
@@ -2990,6 +3017,7 @@ class PaymentSchedule extends DataClass implements Insertable<PaymentSchedule> {
 class PaymentSchedulesCompanion extends UpdateCompanion<PaymentSchedule> {
   final Value<int> id;
   final Value<int> plotId;
+  final Value<String?> stageKey;
   final Value<String> scheduleName;
   final Value<double> percentage;
   final Value<DateTime?> dueDate;
@@ -2998,6 +3026,7 @@ class PaymentSchedulesCompanion extends UpdateCompanion<PaymentSchedule> {
   const PaymentSchedulesCompanion({
     this.id = const Value.absent(),
     this.plotId = const Value.absent(),
+    this.stageKey = const Value.absent(),
     this.scheduleName = const Value.absent(),
     this.percentage = const Value.absent(),
     this.dueDate = const Value.absent(),
@@ -3007,6 +3036,7 @@ class PaymentSchedulesCompanion extends UpdateCompanion<PaymentSchedule> {
   PaymentSchedulesCompanion.insert({
     this.id = const Value.absent(),
     required int plotId,
+    this.stageKey = const Value.absent(),
     required String scheduleName,
     required double percentage,
     this.dueDate = const Value.absent(),
@@ -3018,6 +3048,7 @@ class PaymentSchedulesCompanion extends UpdateCompanion<PaymentSchedule> {
   static Insertable<PaymentSchedule> custom({
     Expression<int>? id,
     Expression<int>? plotId,
+    Expression<String>? stageKey,
     Expression<String>? scheduleName,
     Expression<double>? percentage,
     Expression<DateTime>? dueDate,
@@ -3027,6 +3058,7 @@ class PaymentSchedulesCompanion extends UpdateCompanion<PaymentSchedule> {
     return RawValuesInsertable({
       if (id != null) 'id': id,
       if (plotId != null) 'plot_id': plotId,
+      if (stageKey != null) 'stage_key': stageKey,
       if (scheduleName != null) 'schedule_name': scheduleName,
       if (percentage != null) 'percentage': percentage,
       if (dueDate != null) 'due_date': dueDate,
@@ -3038,6 +3070,7 @@ class PaymentSchedulesCompanion extends UpdateCompanion<PaymentSchedule> {
   PaymentSchedulesCompanion copyWith(
       {Value<int>? id,
       Value<int>? plotId,
+      Value<String?>? stageKey,
       Value<String>? scheduleName,
       Value<double>? percentage,
       Value<DateTime?>? dueDate,
@@ -3046,6 +3079,7 @@ class PaymentSchedulesCompanion extends UpdateCompanion<PaymentSchedule> {
     return PaymentSchedulesCompanion(
       id: id ?? this.id,
       plotId: plotId ?? this.plotId,
+      stageKey: stageKey ?? this.stageKey,
       scheduleName: scheduleName ?? this.scheduleName,
       percentage: percentage ?? this.percentage,
       dueDate: dueDate ?? this.dueDate,
@@ -3062,6 +3096,9 @@ class PaymentSchedulesCompanion extends UpdateCompanion<PaymentSchedule> {
     }
     if (plotId.present) {
       map['plot_id'] = Variable<int>(plotId.value);
+    }
+    if (stageKey.present) {
+      map['stage_key'] = Variable<String>(stageKey.value);
     }
     if (scheduleName.present) {
       map['schedule_name'] = Variable<String>(scheduleName.value);
@@ -3086,6 +3123,7 @@ class PaymentSchedulesCompanion extends UpdateCompanion<PaymentSchedule> {
     return (StringBuffer('PaymentSchedulesCompanion(')
           ..write('id: $id, ')
           ..write('plotId: $plotId, ')
+          ..write('stageKey: $stageKey, ')
           ..write('scheduleName: $scheduleName, ')
           ..write('percentage: $percentage, ')
           ..write('dueDate: $dueDate, ')
@@ -3170,6 +3208,12 @@ class $PaymentEntriesTable extends PaymentEntries
   late final GeneratedColumn<String> paymentType = GeneratedColumn<String>(
       'payment_type', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _paymentStageMeta =
+      const VerificationMeta('paymentStage');
+  @override
+  late final GeneratedColumn<String> paymentStage = GeneratedColumn<String>(
+      'payment_stage', aliasedName, true,
+      type: DriftSqlType.string, requiredDuringInsert: false);
   static const VerificationMeta _holderSignaturePathMeta =
       const VerificationMeta('holderSignaturePath');
   @override
@@ -3206,6 +3250,7 @@ class $PaymentEntriesTable extends PaymentEntries
         amount,
         amountInWords,
         paymentType,
+        paymentStage,
         holderSignaturePath,
         authorizedSignaturePath,
         note,
@@ -3268,6 +3313,12 @@ class $PaymentEntriesTable extends PaymentEntries
     } else if (isInserting) {
       context.missing(_paymentTypeMeta);
     }
+    if (data.containsKey('payment_stage')) {
+      context.handle(
+          _paymentStageMeta,
+          paymentStage.isAcceptableOrUnknown(
+              data['payment_stage']!, _paymentStageMeta));
+    }
     if (data.containsKey('holder_signature_path')) {
       context.handle(
           _holderSignaturePathMeta,
@@ -3316,6 +3367,8 @@ class $PaymentEntriesTable extends PaymentEntries
           .read(DriftSqlType.string, data['${effectivePrefix}amount_in_words']),
       paymentType: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}payment_type'])!,
+      paymentStage: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}payment_stage']),
       holderSignaturePath: attachedDatabase.typeMapping.read(
           DriftSqlType.string, data['${effectivePrefix}holder_signature_path']),
       authorizedSignaturePath: attachedDatabase.typeMapping.read(
@@ -3344,6 +3397,7 @@ class PaymentEntry extends DataClass implements Insertable<PaymentEntry> {
   final double amount;
   final String? amountInWords;
   final String paymentType;
+  final String? paymentStage;
   final String? holderSignaturePath;
   final String? authorizedSignaturePath;
   final String? note;
@@ -3358,6 +3412,7 @@ class PaymentEntry extends DataClass implements Insertable<PaymentEntry> {
       required this.amount,
       this.amountInWords,
       required this.paymentType,
+      this.paymentStage,
       this.holderSignaturePath,
       this.authorizedSignaturePath,
       this.note,
@@ -3382,6 +3437,9 @@ class PaymentEntry extends DataClass implements Insertable<PaymentEntry> {
       map['amount_in_words'] = Variable<String>(amountInWords);
     }
     map['payment_type'] = Variable<String>(paymentType);
+    if (!nullToAbsent || paymentStage != null) {
+      map['payment_stage'] = Variable<String>(paymentStage);
+    }
     if (!nullToAbsent || holderSignaturePath != null) {
       map['holder_signature_path'] = Variable<String>(holderSignaturePath);
     }
@@ -3414,6 +3472,9 @@ class PaymentEntry extends DataClass implements Insertable<PaymentEntry> {
           ? const Value.absent()
           : Value(amountInWords),
       paymentType: Value(paymentType),
+      paymentStage: paymentStage == null && nullToAbsent
+          ? const Value.absent()
+          : Value(paymentStage),
       holderSignaturePath: holderSignaturePath == null && nullToAbsent
           ? const Value.absent()
           : Value(holderSignaturePath),
@@ -3438,6 +3499,7 @@ class PaymentEntry extends DataClass implements Insertable<PaymentEntry> {
       amount: serializer.fromJson<double>(json['amount']),
       amountInWords: serializer.fromJson<String?>(json['amountInWords']),
       paymentType: serializer.fromJson<String>(json['paymentType']),
+      paymentStage: serializer.fromJson<String?>(json['paymentStage']),
       holderSignaturePath:
           serializer.fromJson<String?>(json['holderSignaturePath']),
       authorizedSignaturePath:
@@ -3459,6 +3521,7 @@ class PaymentEntry extends DataClass implements Insertable<PaymentEntry> {
       'amount': serializer.toJson<double>(amount),
       'amountInWords': serializer.toJson<String?>(amountInWords),
       'paymentType': serializer.toJson<String>(paymentType),
+      'paymentStage': serializer.toJson<String?>(paymentStage),
       'holderSignaturePath': serializer.toJson<String?>(holderSignaturePath),
       'authorizedSignaturePath':
           serializer.toJson<String?>(authorizedSignaturePath),
@@ -3477,6 +3540,7 @@ class PaymentEntry extends DataClass implements Insertable<PaymentEntry> {
           double? amount,
           Value<String?> amountInWords = const Value.absent(),
           String? paymentType,
+          Value<String?> paymentStage = const Value.absent(),
           Value<String?> holderSignaturePath = const Value.absent(),
           Value<String?> authorizedSignaturePath = const Value.absent(),
           Value<String?> note = const Value.absent(),
@@ -3492,6 +3556,8 @@ class PaymentEntry extends DataClass implements Insertable<PaymentEntry> {
         amountInWords:
             amountInWords.present ? amountInWords.value : this.amountInWords,
         paymentType: paymentType ?? this.paymentType,
+        paymentStage:
+            paymentStage.present ? paymentStage.value : this.paymentStage,
         holderSignaturePath: holderSignaturePath.present
             ? holderSignaturePath.value
             : this.holderSignaturePath,
@@ -3515,6 +3581,9 @@ class PaymentEntry extends DataClass implements Insertable<PaymentEntry> {
           : this.amountInWords,
       paymentType:
           data.paymentType.present ? data.paymentType.value : this.paymentType,
+      paymentStage: data.paymentStage.present
+          ? data.paymentStage.value
+          : this.paymentStage,
       holderSignaturePath: data.holderSignaturePath.present
           ? data.holderSignaturePath.value
           : this.holderSignaturePath,
@@ -3538,6 +3607,7 @@ class PaymentEntry extends DataClass implements Insertable<PaymentEntry> {
           ..write('amount: $amount, ')
           ..write('amountInWords: $amountInWords, ')
           ..write('paymentType: $paymentType, ')
+          ..write('paymentStage: $paymentStage, ')
           ..write('holderSignaturePath: $holderSignaturePath, ')
           ..write('authorizedSignaturePath: $authorizedSignaturePath, ')
           ..write('note: $note, ')
@@ -3557,6 +3627,7 @@ class PaymentEntry extends DataClass implements Insertable<PaymentEntry> {
       amount,
       amountInWords,
       paymentType,
+      paymentStage,
       holderSignaturePath,
       authorizedSignaturePath,
       note,
@@ -3574,6 +3645,7 @@ class PaymentEntry extends DataClass implements Insertable<PaymentEntry> {
           other.amount == this.amount &&
           other.amountInWords == this.amountInWords &&
           other.paymentType == this.paymentType &&
+          other.paymentStage == this.paymentStage &&
           other.holderSignaturePath == this.holderSignaturePath &&
           other.authorizedSignaturePath == this.authorizedSignaturePath &&
           other.note == this.note &&
@@ -3590,6 +3662,7 @@ class PaymentEntriesCompanion extends UpdateCompanion<PaymentEntry> {
   final Value<double> amount;
   final Value<String?> amountInWords;
   final Value<String> paymentType;
+  final Value<String?> paymentStage;
   final Value<String?> holderSignaturePath;
   final Value<String?> authorizedSignaturePath;
   final Value<String?> note;
@@ -3604,6 +3677,7 @@ class PaymentEntriesCompanion extends UpdateCompanion<PaymentEntry> {
     this.amount = const Value.absent(),
     this.amountInWords = const Value.absent(),
     this.paymentType = const Value.absent(),
+    this.paymentStage = const Value.absent(),
     this.holderSignaturePath = const Value.absent(),
     this.authorizedSignaturePath = const Value.absent(),
     this.note = const Value.absent(),
@@ -3619,6 +3693,7 @@ class PaymentEntriesCompanion extends UpdateCompanion<PaymentEntry> {
     required double amount,
     this.amountInWords = const Value.absent(),
     required String paymentType,
+    this.paymentStage = const Value.absent(),
     this.holderSignaturePath = const Value.absent(),
     this.authorizedSignaturePath = const Value.absent(),
     this.note = const Value.absent(),
@@ -3637,6 +3712,7 @@ class PaymentEntriesCompanion extends UpdateCompanion<PaymentEntry> {
     Expression<double>? amount,
     Expression<String>? amountInWords,
     Expression<String>? paymentType,
+    Expression<String>? paymentStage,
     Expression<String>? holderSignaturePath,
     Expression<String>? authorizedSignaturePath,
     Expression<String>? note,
@@ -3652,6 +3728,7 @@ class PaymentEntriesCompanion extends UpdateCompanion<PaymentEntry> {
       if (amount != null) 'amount': amount,
       if (amountInWords != null) 'amount_in_words': amountInWords,
       if (paymentType != null) 'payment_type': paymentType,
+      if (paymentStage != null) 'payment_stage': paymentStage,
       if (holderSignaturePath != null)
         'holder_signature_path': holderSignaturePath,
       if (authorizedSignaturePath != null)
@@ -3671,6 +3748,7 @@ class PaymentEntriesCompanion extends UpdateCompanion<PaymentEntry> {
       Value<double>? amount,
       Value<String?>? amountInWords,
       Value<String>? paymentType,
+      Value<String?>? paymentStage,
       Value<String?>? holderSignaturePath,
       Value<String?>? authorizedSignaturePath,
       Value<String?>? note,
@@ -3685,6 +3763,7 @@ class PaymentEntriesCompanion extends UpdateCompanion<PaymentEntry> {
       amount: amount ?? this.amount,
       amountInWords: amountInWords ?? this.amountInWords,
       paymentType: paymentType ?? this.paymentType,
+      paymentStage: paymentStage ?? this.paymentStage,
       holderSignaturePath: holderSignaturePath ?? this.holderSignaturePath,
       authorizedSignaturePath:
           authorizedSignaturePath ?? this.authorizedSignaturePath,
@@ -3723,6 +3802,9 @@ class PaymentEntriesCompanion extends UpdateCompanion<PaymentEntry> {
     if (paymentType.present) {
       map['payment_type'] = Variable<String>(paymentType.value);
     }
+    if (paymentStage.present) {
+      map['payment_stage'] = Variable<String>(paymentStage.value);
+    }
     if (holderSignaturePath.present) {
       map['holder_signature_path'] =
           Variable<String>(holderSignaturePath.value);
@@ -3752,6 +3834,7 @@ class PaymentEntriesCompanion extends UpdateCompanion<PaymentEntry> {
           ..write('amount: $amount, ')
           ..write('amountInWords: $amountInWords, ')
           ..write('paymentType: $paymentType, ')
+          ..write('paymentStage: $paymentStage, ')
           ..write('holderSignaturePath: $holderSignaturePath, ')
           ..write('authorizedSignaturePath: $authorizedSignaturePath, ')
           ..write('note: $note, ')
@@ -7883,6 +7966,7 @@ typedef $$PaymentSchedulesTableCreateCompanionBuilder
     = PaymentSchedulesCompanion Function({
   Value<int> id,
   required int plotId,
+  Value<String?> stageKey,
   required String scheduleName,
   required double percentage,
   Value<DateTime?> dueDate,
@@ -7893,6 +7977,7 @@ typedef $$PaymentSchedulesTableUpdateCompanionBuilder
     = PaymentSchedulesCompanion Function({
   Value<int> id,
   Value<int> plotId,
+  Value<String?> stageKey,
   Value<String> scheduleName,
   Value<double> percentage,
   Value<DateTime?> dueDate,
@@ -7929,6 +8014,9 @@ class $$PaymentSchedulesTableFilterComposer
   });
   ColumnFilters<int> get id => $composableBuilder(
       column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get stageKey => $composableBuilder(
+      column: $table.stageKey, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<String> get scheduleName => $composableBuilder(
       column: $table.scheduleName, builder: (column) => ColumnFilters(column));
@@ -7978,6 +8066,9 @@ class $$PaymentSchedulesTableOrderingComposer
   ColumnOrderings<int> get id => $composableBuilder(
       column: $table.id, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<String> get stageKey => $composableBuilder(
+      column: $table.stageKey, builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<String> get scheduleName => $composableBuilder(
       column: $table.scheduleName,
       builder: (column) => ColumnOrderings(column));
@@ -8026,6 +8117,9 @@ class $$PaymentSchedulesTableAnnotationComposer
   });
   GeneratedColumn<int> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get stageKey =>
+      $composableBuilder(column: $table.stageKey, builder: (column) => column);
 
   GeneratedColumn<String> get scheduleName => $composableBuilder(
       column: $table.scheduleName, builder: (column) => column);
@@ -8089,6 +8183,7 @@ class $$PaymentSchedulesTableTableManager extends RootTableManager<
           updateCompanionCallback: ({
             Value<int> id = const Value.absent(),
             Value<int> plotId = const Value.absent(),
+            Value<String?> stageKey = const Value.absent(),
             Value<String> scheduleName = const Value.absent(),
             Value<double> percentage = const Value.absent(),
             Value<DateTime?> dueDate = const Value.absent(),
@@ -8098,6 +8193,7 @@ class $$PaymentSchedulesTableTableManager extends RootTableManager<
               PaymentSchedulesCompanion(
             id: id,
             plotId: plotId,
+            stageKey: stageKey,
             scheduleName: scheduleName,
             percentage: percentage,
             dueDate: dueDate,
@@ -8107,6 +8203,7 @@ class $$PaymentSchedulesTableTableManager extends RootTableManager<
           createCompanionCallback: ({
             Value<int> id = const Value.absent(),
             required int plotId,
+            Value<String?> stageKey = const Value.absent(),
             required String scheduleName,
             required double percentage,
             Value<DateTime?> dueDate = const Value.absent(),
@@ -8116,6 +8213,7 @@ class $$PaymentSchedulesTableTableManager extends RootTableManager<
               PaymentSchedulesCompanion.insert(
             id: id,
             plotId: plotId,
+            stageKey: stageKey,
             scheduleName: scheduleName,
             percentage: percentage,
             dueDate: dueDate,
@@ -8189,6 +8287,7 @@ typedef $$PaymentEntriesTableCreateCompanionBuilder = PaymentEntriesCompanion
   required double amount,
   Value<String?> amountInWords,
   required String paymentType,
+  Value<String?> paymentStage,
   Value<String?> holderSignaturePath,
   Value<String?> authorizedSignaturePath,
   Value<String?> note,
@@ -8205,6 +8304,7 @@ typedef $$PaymentEntriesTableUpdateCompanionBuilder = PaymentEntriesCompanion
   Value<double> amount,
   Value<String?> amountInWords,
   Value<String> paymentType,
+  Value<String?> paymentStage,
   Value<String?> holderSignaturePath,
   Value<String?> authorizedSignaturePath,
   Value<String?> note,
@@ -8292,6 +8392,9 @@ class $$PaymentEntriesTableFilterComposer
 
   ColumnFilters<String> get paymentType => $composableBuilder(
       column: $table.paymentType, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get paymentStage => $composableBuilder(
+      column: $table.paymentStage, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<String> get holderSignaturePath => $composableBuilder(
       column: $table.holderSignaturePath,
@@ -8413,6 +8516,10 @@ class $$PaymentEntriesTableOrderingComposer
   ColumnOrderings<String> get paymentType => $composableBuilder(
       column: $table.paymentType, builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<String> get paymentStage => $composableBuilder(
+      column: $table.paymentStage,
+      builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<String> get holderSignaturePath => $composableBuilder(
       column: $table.holderSignaturePath,
       builder: (column) => ColumnOrderings(column));
@@ -8531,6 +8638,9 @@ class $$PaymentEntriesTableAnnotationComposer
 
   GeneratedColumn<String> get paymentType => $composableBuilder(
       column: $table.paymentType, builder: (column) => column);
+
+  GeneratedColumn<String> get paymentStage => $composableBuilder(
+      column: $table.paymentStage, builder: (column) => column);
 
   GeneratedColumn<String> get holderSignaturePath => $composableBuilder(
       column: $table.holderSignaturePath, builder: (column) => column);
@@ -8659,6 +8769,7 @@ class $$PaymentEntriesTableTableManager extends RootTableManager<
             Value<double> amount = const Value.absent(),
             Value<String?> amountInWords = const Value.absent(),
             Value<String> paymentType = const Value.absent(),
+            Value<String?> paymentStage = const Value.absent(),
             Value<String?> holderSignaturePath = const Value.absent(),
             Value<String?> authorizedSignaturePath = const Value.absent(),
             Value<String?> note = const Value.absent(),
@@ -8674,6 +8785,7 @@ class $$PaymentEntriesTableTableManager extends RootTableManager<
             amount: amount,
             amountInWords: amountInWords,
             paymentType: paymentType,
+            paymentStage: paymentStage,
             holderSignaturePath: holderSignaturePath,
             authorizedSignaturePath: authorizedSignaturePath,
             note: note,
@@ -8689,6 +8801,7 @@ class $$PaymentEntriesTableTableManager extends RootTableManager<
             required double amount,
             Value<String?> amountInWords = const Value.absent(),
             required String paymentType,
+            Value<String?> paymentStage = const Value.absent(),
             Value<String?> holderSignaturePath = const Value.absent(),
             Value<String?> authorizedSignaturePath = const Value.absent(),
             Value<String?> note = const Value.absent(),
@@ -8704,6 +8817,7 @@ class $$PaymentEntriesTableTableManager extends RootTableManager<
             amount: amount,
             amountInWords: amountInWords,
             paymentType: paymentType,
+            paymentStage: paymentStage,
             holderSignaturePath: holderSignaturePath,
             authorizedSignaturePath: authorizedSignaturePath,
             note: note,
