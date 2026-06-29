@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Browser, LaunchOptions } from "puppeteer";
 import { PDFDocument } from "pdf-lib";
+import { reflowPagesBrowserSource } from "@/lib/editor-page-overflow";
 
 // Renders the letter editor's saved HTML to a PDF with real headless Chromium, so the PDF is a
 // pixel-faithful copy of what the user sees in the "Letter Studio" editor (same HTML + same CSS).
@@ -193,7 +194,14 @@ async function renderWithBrowser(browser: Browser, bodyHtml: string): Promise<Bu
         })),
     ));
 
-    // Each <section> is one editor "sheet" that grows with its content (min-height: 1110px).
+    // Repaginate the agreement exactly like the on-screen editor: re-pack the agreement block
+    // stream into full A4 pages so no sheet is left sparse. Injecting the editor's own reflow
+    // function guarantees the PDF breaks at the same points as the draft the user approved.
+    await page.evaluate(
+      `${reflowPagesBrowserSource}(document.querySelector(".letter-paper-editor"), { pageHeight: 1216 })`,
+    );
+
+    // Each <section> is one editor "sheet" that grows with its content (min-height: 1216px).
     // Render each section as its own page sized to that section's height so a single dense
     // section never splits across two PDF pages — matching the editor exactly.
     const heights = await page.evaluate(() => {

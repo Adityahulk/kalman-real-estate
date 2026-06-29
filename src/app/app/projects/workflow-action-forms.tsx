@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ClipboardEvent, FormEvent, MutableRefObject, RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, Bold, CheckCircle2, Download, Eye, FileText, Italic, Loader2, Plus, Save, Send, Trash2, Underline, Wand2, X } from "lucide-react";
-import { autoOverflowPages } from "@/lib/editor-page-overflow";
+import { reflowPages } from "@/lib/editor-page-overflow";
 import { sanitizePastedHtml } from "@/lib/sanitize-pasted-html";
 import { FileUploader } from "@/components/file-uploader";
 
@@ -1367,11 +1367,26 @@ function LetterDraftCanvas({
     try { globalThis.document.execCommand("defaultParagraphSeparator", false, "p"); } catch {}
   }, []);
 
+  const reflowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     if (!editorRef.current) return;
     editorRef.current.innerHTML = draftHtml;
     normalizeEditableTemplateFields(editorRef.current);
+    // Pack the agreement pages on load so the editor matches the generated PDF immediately.
+    reflowPages(editorRef.current);
   }, [draftHtml, editorRef]);
+
+  useEffect(() => () => {
+    if (reflowTimer.current) clearTimeout(reflowTimer.current);
+  }, []);
+
+  function scheduleReflow() {
+    if (reflowTimer.current) clearTimeout(reflowTimer.current);
+    reflowTimer.current = setTimeout(() => {
+      if (editorRef.current) reflowPages(editorRef.current);
+    }, 400);
+  }
 
   function handlePaste(event: ClipboardEvent<HTMLDivElement>) {
     const html = event.clipboardData.getData("text/html");
@@ -1382,16 +1397,20 @@ function LetterDraftCanvas({
       if (clean) {
         globalThis.document.execCommand("insertHTML", false, clean);
         onInput();
+        scheduleReflow();
         return;
       }
     }
     if (text) globalThis.document.execCommand("insertText", false, text);
     onInput();
+    scheduleReflow();
   }
 
+  // Repaginate after the user pauses typing so moving paragraphs between pages never jumps the
+  // caret mid-keystroke; onInput (autosave/state) still fires immediately.
   function handleInput() {
-    if (editorRef.current) autoOverflowPages(editorRef.current);
     onInput();
+    scheduleReflow();
   }
 
   return (

@@ -4,7 +4,7 @@ import { ClipboardEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Bold, Check, ChevronDown, ChevronUp, Italic, Loader2, Plus, Save, Trash2, Underline, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { requestJson } from "@/lib/api-client";
-import { autoOverflowPages } from "@/lib/editor-page-overflow";
+import { reflowPages } from "@/lib/editor-page-overflow";
 import { letterSystemFields } from "@/lib/letter-system-fields";
 import { sanitizePastedHtml } from "@/lib/sanitize-pasted-html";
 
@@ -207,6 +207,7 @@ export function HtmlTemplateEditor({
 }) {
   const router = useRouter();
   const editorRef = useRef<HTMLDivElement>(null);
+  const surfaceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [templates, setTemplates] = useState(initialTemplates);
   const [categories, setCategories] = useState(initialCategories);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -408,8 +409,14 @@ export function HtmlTemplateEditor({
     const root = editorRef.current;
     if (!root) return;
     ensurePagedDocument(root);
-    autoOverflowPages(root);
+    reflowPages(root);
     injectPageControls(root);
+  }
+
+  // Repaginate after the user pauses typing so moving paragraphs between pages never jumps the caret.
+  function scheduleEditorSurface() {
+    if (surfaceTimer.current) clearTimeout(surfaceTimer.current);
+    surfaceTimer.current = setTimeout(() => prepareEditorSurface(), 400);
   }
 
   function injectPageControls(root: HTMLElement) {
@@ -585,7 +592,7 @@ export function HtmlTemplateEditor({
               suppressHydrationWarning
               className="letter-paper-editor"
               style={{ minHeight: "720px" }}
-              onInput={prepareEditorSurface}
+              onInput={scheduleEditorSurface}
               onPaste={handlePaste}
             />
           </div>

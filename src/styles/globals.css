@@ -85,12 +85,13 @@
 .letter-paper-editor section[data-letter-page] {
   position: relative;
   width: min(100%, 860px);
-  min-height: 1110px;
+  /* A4 proportions: 860px wide -> 860 * (841.92/595.32) ~= 1216px tall, 1-inch (72pt ~= 104px) margins. */
+  min-height: 1216px;
   margin: 0 auto;
   background: #fff;
   border: 1px solid #dbe3ee;
   box-shadow: 0 20px 44px rgba(15, 23, 42, 0.18);
-  padding: 74px 86px 82px;
+  padding: 104px 110px;
   color: #111827;
   font-family: Arial, Helvetica, sans-serif;
   font-size: 15px;
@@ -179,14 +180,15 @@
   line-height: 1.56;
 }
 .letter-paper-editor .agreement-page {
-  font-size: 14.6px;
-  line-height: 1.7;
-  letter-spacing: 0.01em;
+  /* ~12pt Arial at the 860/595.32 px-per-pt scale, with reference-tight leading. */
+  font-size: 16px;
+  line-height: 1.5;
+  letter-spacing: 0;
 }
 .letter-paper-editor .agreement-page p {
-  margin: 0 0 18px;
+  margin: 0 0 14px;
   white-space: normal;
-  line-height: 1.72;
+  line-height: 1.5;
   text-align: justify;
   text-justify: inter-word;
 }
@@ -232,7 +234,7 @@
   display: block;
   padding-left: 34px;
   white-space: normal;
-  line-height: 1.78;
+  line-height: 1.5;
   text-align: justify;
   text-justify: inter-word;
 }
@@ -244,7 +246,7 @@
   padding-left: 34px;
   margin-bottom: 18px;
   white-space: normal;
-  line-height: 1.78;
+  line-height: 1.5;
   text-align: justify;
   text-justify: inter-word;
 }
@@ -261,7 +263,7 @@
   display: block;
 }
 .letter-paper-editor .subclause-text {
-  line-height: 1.72;
+  line-height: 1.5;
   text-align: justify;
   text-justify: inter-word;
 }
@@ -269,7 +271,7 @@
   padding-left: 42px;
   margin-bottom: 18px;
   white-space: normal;
-  line-height: 1.72;
+  line-height: 1.5;
   text-align: justify;
   text-justify: inter-word;
 }
