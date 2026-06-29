@@ -120,6 +120,8 @@
 .letter-paper-editor p {
   margin: 0 0 16px;
   white-space: pre-wrap;
+  text-align: justify;
+  text-justify: inter-word;
 }
 .letter-paper-editor h1 u,
 .letter-paper-editor h2 u,
