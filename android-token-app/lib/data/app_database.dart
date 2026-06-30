@@ -1,10 +1,9 @@
-import 'dart:io';
 import 'dart:math';
 
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
+
+import '../shared/app_file_storage.dart';
 
 part 'app_database.g.dart';
 
@@ -93,7 +92,8 @@ class HistoryAction {
 class Projects extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get name => text()();
-  TextColumn get launchStatus => text().withDefault(const Constant(ProjectStatus.preLaunch))();
+  TextColumn get launchStatus =>
+      text().withDefault(const Constant(ProjectStatus.preLaunch))();
   IntColumn get totalPlots => integer().withDefault(const Constant(0))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
@@ -101,7 +101,8 @@ class Projects extends Table {
 
 class Buyers extends Table {
   IntColumn get id => integer().autoIncrement()();
-  IntColumn get projectId => integer().references(Projects, #id, onDelete: KeyAction.cascade)();
+  IntColumn get projectId =>
+      integer().references(Projects, #id, onDelete: KeyAction.cascade)();
   TextColumn get name => text()();
   TextColumn get guardianName => text().nullable()();
   TextColumn get address => text().nullable()();
@@ -113,11 +114,14 @@ class Buyers extends Table {
 
 class Tokens extends Table {
   IntColumn get id => integer().autoIncrement()();
-  IntColumn get projectId => integer().references(Projects, #id, onDelete: KeyAction.cascade)();
-  IntColumn get buyerId => integer().references(Buyers, #id, onDelete: KeyAction.cascade)();
+  IntColumn get projectId =>
+      integer().references(Projects, #id, onDelete: KeyAction.cascade)();
+  IntColumn get buyerId =>
+      integer().references(Buyers, #id, onDelete: KeyAction.cascade)();
   TextColumn get tokenCode => text()();
   RealColumn get amount => real()();
-  TextColumn get status => text().withDefault(const Constant(TokenStatus.active))();
+  TextColumn get status =>
+      text().withDefault(const Constant(TokenStatus.active))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 
@@ -129,13 +133,19 @@ class Tokens extends Table {
 
 class Plots extends Table {
   IntColumn get id => integer().autoIncrement()();
-  IntColumn get projectId => integer().references(Projects, #id, onDelete: KeyAction.cascade)();
+  IntColumn get projectId =>
+      integer().references(Projects, #id, onDelete: KeyAction.cascade)();
   TextColumn get plotNumber => text()();
   RealColumn get areaSqYards => real().nullable()();
-  IntColumn get holderBuyerId => integer().nullable().references(Buyers, #id, onDelete: KeyAction.setNull)();
-  IntColumn get assignedTokenId => integer().nullable().references(Tokens, #id, onDelete: KeyAction.setNull)();
+  IntColumn get holderBuyerId => integer()
+      .nullable()
+      .references(Buyers, #id, onDelete: KeyAction.setNull)();
+  IntColumn get assignedTokenId => integer()
+      .nullable()
+      .references(Tokens, #id, onDelete: KeyAction.setNull)();
   TextColumn get channelPartner => text().nullable()();
-  TextColumn get status => text().withDefault(const Constant(PlotStatus.empty))();
+  TextColumn get status =>
+      text().withDefault(const Constant(PlotStatus.empty))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 
@@ -147,9 +157,13 @@ class Plots extends Table {
 
 class EoiForms extends Table {
   IntColumn get id => integer().autoIncrement()();
-  IntColumn get projectId => integer().references(Projects, #id, onDelete: KeyAction.cascade)();
-  IntColumn get plotId => integer().references(Plots, #id, onDelete: KeyAction.cascade)();
-  IntColumn get buyerId => integer().nullable().references(Buyers, #id, onDelete: KeyAction.setNull)();
+  IntColumn get projectId =>
+      integer().references(Projects, #id, onDelete: KeyAction.cascade)();
+  IntColumn get plotId =>
+      integer().references(Plots, #id, onDelete: KeyAction.cascade)();
+  IntColumn get buyerId => integer()
+      .nullable()
+      .references(Buyers, #id, onDelete: KeyAction.setNull)();
   TextColumn get buyerName => text().nullable()();
   TextColumn get guardianName => text().nullable()();
   TextColumn get address => text().nullable()();
@@ -163,7 +177,8 @@ class EoiForms extends Table {
   RealColumn get idcCharges => real().nullable()();
   TextColumn get clubMembership => text().nullable()();
   TextColumn get notes => text().withDefault(const Constant(defaultEoiNotes))();
-  BoolColumn get plotDetailsEnabled => boolean().withDefault(const Constant(false))();
+  BoolColumn get plotDetailsEnabled =>
+      boolean().withDefault(const Constant(false))();
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 
@@ -175,23 +190,33 @@ class EoiForms extends Table {
 
 class PaymentSchedules extends Table {
   IntColumn get id => integer().autoIncrement()();
-  IntColumn get plotId => integer().references(Plots, #id, onDelete: KeyAction.cascade)();
+  IntColumn get plotId =>
+      integer().references(Plots, #id, onDelete: KeyAction.cascade)();
   TextColumn get stageKey => text().nullable()();
   TextColumn get scheduleName => text()();
   RealColumn get percentage => real()();
   DateTimeColumn get dueDate => dateTime().nullable()();
   RealColumn get amount => real().nullable()();
-  TextColumn get status => text().withDefault(const Constant(PaymentStatus.pending))();
+  TextColumn get status =>
+      text().withDefault(const Constant(PaymentStatus.pending))();
 }
 
 class PaymentEntries extends Table {
   IntColumn get id => integer().autoIncrement()();
-  IntColumn get projectId => integer().references(Projects, #id, onDelete: KeyAction.cascade)();
-  IntColumn get plotId => integer().nullable().references(Plots, #id, onDelete: KeyAction.setNull)();
-  IntColumn get buyerId => integer().nullable().references(Buyers, #id, onDelete: KeyAction.setNull)();
-  IntColumn get tokenId => integer().nullable().references(Tokens, #id, onDelete: KeyAction.setNull)();
+  IntColumn get projectId =>
+      integer().references(Projects, #id, onDelete: KeyAction.cascade)();
+  IntColumn get plotId => integer()
+      .nullable()
+      .references(Plots, #id, onDelete: KeyAction.setNull)();
+  IntColumn get buyerId => integer()
+      .nullable()
+      .references(Buyers, #id, onDelete: KeyAction.setNull)();
+  IntColumn get tokenId => integer()
+      .nullable()
+      .references(Tokens, #id, onDelete: KeyAction.setNull)();
   DateTimeColumn get date => dateTime()();
-  RealColumn get amount => real().customConstraint('NOT NULL CHECK (amount >= 0)')();
+  RealColumn get amount =>
+      real().customConstraint('NOT NULL CHECK (amount >= 0)')();
   TextColumn get amountInWords => text().nullable()();
   TextColumn get paymentType => text()();
   TextColumn get paymentStage => text().nullable()();
@@ -203,8 +228,10 @@ class PaymentEntries extends Table {
 
 class PlotHistory extends Table {
   IntColumn get id => integer().autoIncrement()();
-  IntColumn get projectId => integer().references(Projects, #id, onDelete: KeyAction.cascade)();
-  IntColumn get plotId => integer().references(Plots, #id, onDelete: KeyAction.cascade)();
+  IntColumn get projectId =>
+      integer().references(Projects, #id, onDelete: KeyAction.cascade)();
+  IntColumn get plotId =>
+      integer().references(Plots, #id, onDelete: KeyAction.cascade)();
   TextColumn get actionType => text()();
   IntColumn get oldBuyerId => integer().nullable()();
   IntColumn get newBuyerId => integer().nullable()();
@@ -287,9 +314,13 @@ class AppDatabase extends _$AppDatabase {
   }
 
   Future<void> generatePlots(int projectId, int totalPlots) async {
-    if (totalPlots <= 0) throw ArgumentError('Plot count must be greater than zero.');
+    if (totalPlots <= 0) {
+      throw ArgumentError('Plot count must be greater than zero.');
+    }
     await transaction(() async {
-      final existing = await (select(plots)..where((tbl) => tbl.projectId.equals(projectId))).get();
+      final existing = await (select(plots)
+            ..where((tbl) => tbl.projectId.equals(projectId)))
+          .get();
       if (existing.isNotEmpty) {
         throw StateError('Plots already exist for this project.');
       }
@@ -407,10 +438,14 @@ class AppDatabase extends _$AppDatabase {
 
   Future<List<DrawAssignment>> previewDraw(int projectId) async {
     final availableTokens = await (select(tokens)
-          ..where((tbl) => tbl.projectId.equals(projectId) & tbl.status.equals(TokenStatus.active)))
+          ..where((tbl) =>
+              tbl.projectId.equals(projectId) &
+              tbl.status.equals(TokenStatus.active)))
         .get();
     final availablePlots = await (select(plots)
-          ..where((tbl) => tbl.projectId.equals(projectId) & tbl.status.equals(PlotStatus.empty))
+          ..where((tbl) =>
+              tbl.projectId.equals(projectId) &
+              tbl.status.equals(PlotStatus.empty))
           ..orderBy([(tbl) => OrderingTerm(expression: tbl.plotNumber)]))
         .get();
 
@@ -428,14 +463,22 @@ class AppDatabase extends _$AppDatabase {
     ];
   }
 
-  Future<void> confirmDraw(int projectId, List<DrawAssignment> assignments) async {
+  Future<void> confirmDraw(
+      int projectId, List<DrawAssignment> assignments) async {
     await transaction(() async {
       final now = DateTime.now();
       for (final assignment in assignments) {
-        final token = await (select(tokens)..where((tbl) => tbl.id.equals(assignment.tokenId))).getSingle();
-        final buyer = await (select(buyers)..where((tbl) => tbl.id.equals(assignment.buyerId))).getSingle();
-        final plot = await (select(plots)..where((tbl) => tbl.id.equals(assignment.plotId))).getSingle();
-        if (token.status != TokenStatus.active || plot.status != PlotStatus.empty) continue;
+        final token = await (select(tokens)
+              ..where((tbl) => tbl.id.equals(assignment.tokenId)))
+            .getSingle();
+        final buyer = await (select(buyers)
+              ..where((tbl) => tbl.id.equals(assignment.buyerId)))
+            .getSingle();
+        final plot = await (select(plots)
+              ..where((tbl) => tbl.id.equals(assignment.plotId)))
+            .getSingle();
+        if (token.status != TokenStatus.active ||
+            plot.status != PlotStatus.empty) continue;
 
         await (update(plots)..where((tbl) => tbl.id.equals(plot.id))).write(
           PlotsCompanion(
@@ -447,7 +490,8 @@ class AppDatabase extends _$AppDatabase {
           ),
         );
         await (update(tokens)..where((tbl) => tbl.id.equals(token.id))).write(
-          TokensCompanion(status: const Value(TokenStatus.assigned), updatedAt: Value(now)),
+          TokensCompanion(
+              status: const Value(TokenStatus.assigned), updatedAt: Value(now)),
         );
         await _addHistory(
           projectId: projectId,
@@ -456,7 +500,8 @@ class AppDatabase extends _$AppDatabase {
           newBuyerId: buyer.id,
           newTokenId: token.id,
           amount: token.amount,
-          note: 'Draw assigned token ${token.tokenCode} to plot ${plot.plotNumber}.',
+          note:
+              'Draw assigned token ${token.tokenCode} to plot ${plot.plotNumber}.',
         );
       }
     });
@@ -470,25 +515,35 @@ class AppDatabase extends _$AppDatabase {
   }) async {
     await transaction(() async {
       final now = DateTime.now();
-      final plot = await (select(plots)..where((tbl) => tbl.id.equals(plotId))).getSingle();
-      final buyer = await (select(buyers)..where((tbl) => tbl.id.equals(buyerId))).getSingle();
-      final token = await (select(tokens)..where((tbl) => tbl.id.equals(tokenId))).getSingle();
+      final plot = await (select(plots)..where((tbl) => tbl.id.equals(plotId)))
+          .getSingle();
+      final buyer = await (select(buyers)
+            ..where((tbl) => tbl.id.equals(buyerId)))
+          .getSingle();
+      final token = await (select(tokens)
+            ..where((tbl) => tbl.id.equals(tokenId)))
+          .getSingle();
       await (update(plots)..where((tbl) => tbl.id.equals(plotId))).write(
         PlotsCompanion(
           holderBuyerId: Value(buyerId),
           assignedTokenId: Value(tokenId),
           channelPartner: Value(buyer.channelPartner),
-          status: Value(plot.holderBuyerId == null ? PlotStatus.manualAssigned : PlotStatus.booked),
+          status: Value(plot.holderBuyerId == null
+              ? PlotStatus.manualAssigned
+              : PlotStatus.booked),
           updatedAt: Value(now),
         ),
       );
       await (update(tokens)..where((tbl) => tbl.id.equals(tokenId))).write(
-        TokensCompanion(status: const Value(TokenStatus.assigned), updatedAt: Value(now)),
+        TokensCompanion(
+            status: const Value(TokenStatus.assigned), updatedAt: Value(now)),
       );
       await _addHistory(
         projectId: projectId,
         plotId: plotId,
-        actionType: plot.holderBuyerId == null ? HistoryAction.manualAssigned : HistoryAction.reassigned,
+        actionType: plot.holderBuyerId == null
+            ? HistoryAction.manualAssigned
+            : HistoryAction.reassigned,
         oldBuyerId: plot.holderBuyerId,
         newBuyerId: buyerId,
         oldTokenId: plot.assignedTokenId,
@@ -507,14 +562,20 @@ class AppDatabase extends _$AppDatabase {
   }) async {
     await transaction(() async {
       final now = DateTime.now();
-      final plot = await (select(plots)..where((tbl) => tbl.id.equals(plotId))).getSingle();
+      final plot = await (select(plots)..where((tbl) => tbl.id.equals(plotId)))
+          .getSingle();
       if (plot.holderBuyerId == null || plot.assignedTokenId == null) {
         throw StateError('This plot has no buyer assignment to cancel.');
       }
-      final token = await (select(tokens)..where((tbl) => tbl.id.equals(plot.assignedTokenId!))).getSingle();
-      final distributedTotal = redistributionByPlotId.values.fold<double>(0, (sum, item) => sum + item);
-      if ((distributedTotal - token.amount).abs() > 0.01 && redistributionByPlotId.isNotEmpty) {
-        throw ArgumentError('Redistribution total must match cancelled token amount.');
+      final token = await (select(tokens)
+            ..where((tbl) => tbl.id.equals(plot.assignedTokenId!)))
+          .getSingle();
+      final distributedTotal = redistributionByPlotId.values
+          .fold<double>(0, (sum, item) => sum + item);
+      if ((distributedTotal - token.amount).abs() > 0.01 &&
+          redistributionByPlotId.isNotEmpty) {
+        throw ArgumentError(
+            'Redistribution total must match cancelled token amount.');
       }
 
       await (update(plots)..where((tbl) => tbl.id.equals(plot.id))).write(
@@ -528,7 +589,9 @@ class AppDatabase extends _$AppDatabase {
       );
       await (update(tokens)..where((tbl) => tbl.id.equals(token.id))).write(
         TokensCompanion(
-          status: Value(redistributionByPlotId.isEmpty ? TokenStatus.refunded : TokenStatus.cancelled),
+          status: Value(redistributionByPlotId.isEmpty
+              ? TokenStatus.refunded
+              : TokenStatus.cancelled),
           updatedAt: Value(now),
         ),
       );
@@ -553,7 +616,8 @@ class AppDatabase extends _$AppDatabase {
             amount: token.amount,
             paymentType: PaymentType.refund,
             paymentStage: const Value(PaymentStage.refund),
-            note: const Value('Refund or credit due because buyer has no redistribution target.'),
+            note: const Value(
+                'Refund or credit due because buyer has no redistribution target.'),
           ),
         );
         return;
@@ -570,7 +634,8 @@ class AppDatabase extends _$AppDatabase {
             amount: entry.value,
             paymentType: PaymentType.adjustment,
             paymentStage: const Value(PaymentStage.adjustment),
-            note: Value('Redistributed from cancelled plot ${plot.plotNumber}.'),
+            note:
+                Value('Redistributed from cancelled plot ${plot.plotNumber}.'),
           ),
         );
         await _addHistory(
@@ -580,7 +645,8 @@ class AppDatabase extends _$AppDatabase {
           newBuyerId: plot.holderBuyerId,
           newTokenId: token.id,
           amount: entry.value,
-          note: 'Token amount redistributed from cancelled plot ${plot.plotNumber}.',
+          note:
+              'Token amount redistributed from cancelled plot ${plot.plotNumber}.',
         );
       }
     });
@@ -612,7 +678,8 @@ class AppDatabase extends _$AppDatabase {
           amount: amount,
           amountInWords: Value(amountInWords),
           paymentType: paymentType,
-          paymentStage: Value(paymentStage ?? defaultPaymentStageForType(paymentType)),
+          paymentStage:
+              Value(paymentStage ?? defaultPaymentStageForType(paymentType)),
           holderSignaturePath: Value(holderSignaturePath),
           authorizedSignaturePath: Value(authorizedSignaturePath),
           note: Value(note),
@@ -646,9 +713,12 @@ class AppDatabase extends _$AppDatabase {
     });
   }
 
-  Future<void> savePaymentSchedule(int plotId, List<PaymentSchedulesCompanion> rows) async {
+  Future<void> savePaymentSchedule(
+      int plotId, List<PaymentSchedulesCompanion> rows) async {
     await transaction(() async {
-      await (delete(paymentSchedules)..where((tbl) => tbl.plotId.equals(plotId))).go();
+      await (delete(paymentSchedules)
+            ..where((tbl) => tbl.plotId.equals(plotId)))
+          .go();
       for (final row in rows) {
         await into(paymentSchedules).insert(row);
       }
@@ -667,11 +737,13 @@ class AppDatabase extends _$AppDatabase {
   }
 
   Future<void> setSetting(String key, String value) async {
-    await into(appSettings).insertOnConflictUpdate(AppSettingsCompanion.insert(key: key, value: value));
+    await into(appSettings).insertOnConflictUpdate(
+        AppSettingsCompanion.insert(key: key, value: value));
   }
 
   Future<String?> getSetting(String key) async {
-    final row = await (select(appSettings)..where((tbl) => tbl.key.equals(key))).getSingleOrNull();
+    final row = await (select(appSettings)..where((tbl) => tbl.key.equals(key)))
+        .getSingleOrNull();
     return row?.value;
   }
 
@@ -704,8 +776,8 @@ class AppDatabase extends _$AppDatabase {
 
 QueryExecutor _openConnection() {
   return LazyDatabase(() async {
-    final dir = await getApplicationDocumentsDirectory();
-    final file = File(p.join(dir.path, 'kalman_token_plot_app.sqlite'));
+    final file =
+        await appWritableFile(fileName: 'kalman_token_plot_app.sqlite');
     return NativeDatabase.createInBackground(file);
   });
 }

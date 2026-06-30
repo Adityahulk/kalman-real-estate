@@ -1,13 +1,15 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:csv/csv.dart';
 import 'package:excel/excel.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../../data/app_database.dart';
+import '../../shared/app_file_storage.dart';
 import '../../shared/formatters.dart';
 import 'search_models.dart';
 
@@ -18,6 +20,20 @@ class SearchReportService {
     required List<SearchResult> results,
     Directory? outputDirectory,
   }) async {
+    final file = await _outputFile(
+        project.name, fileName(project.name, 'xlsx'), outputDirectory);
+    await file.writeAsBytes(
+        await buildXlsxBytes(
+            project: project, filters: filters, results: results),
+        flush: true);
+    return file;
+  }
+
+  Future<Uint8List> buildXlsxBytes({
+    required Project project,
+    required SearchFilters filters,
+    required List<SearchResult> results,
+  }) async {
     final excel = Excel.createExcel();
     const sheetName = 'Search Results';
     final sheet = excel[sheetName];
@@ -27,7 +43,9 @@ class SearchReportService {
     const headers = _headers;
     sheet.appendRow(headers.map((item) => TextCellValue(item)).toList());
     for (var i = 0; i < headers.length; i++) {
-      sheet.cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0)).cellStyle = CellStyle(bold: true);
+      sheet
+          .cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0))
+          .cellStyle = CellStyle(bold: true);
     }
     for (final result in results) {
       sheet.appendRow([
@@ -46,11 +64,9 @@ class SearchReportService {
       sheet.appendRow([TextCellValue('No results')]);
     }
 
-    final bytes = excel.save(fileName: _fileName(project.name, 'xlsx'));
+    final bytes = excel.save(fileName: fileName(project.name, 'xlsx'));
     if (bytes == null) throw StateError('Could not generate XLSX.');
-    final file = await _outputFile(project.name, _fileName(project.name, 'xlsx'), outputDirectory);
-    await file.writeAsBytes(bytes, flush: true);
-    return file;
+    return Uint8List.fromList(bytes);
   }
 
   Future<File> writeCsv({
@@ -59,6 +75,28 @@ class SearchReportService {
     required List<SearchResult> results,
     Directory? outputDirectory,
   }) async {
+    final file = await _outputFile(
+        project.name, fileName(project.name, 'csv'), outputDirectory);
+    await file.writeAsBytes(
+        buildCsvBytes(project: project, filters: filters, results: results),
+        flush: true);
+    return file;
+  }
+
+  Uint8List buildCsvBytes({
+    required Project project,
+    required SearchFilters filters,
+    required List<SearchResult> results,
+  }) {
+    return Uint8List.fromList(utf8.encode(
+        buildCsvText(project: project, filters: filters, results: results)));
+  }
+
+  String buildCsvText({
+    required Project project,
+    required SearchFilters filters,
+    required List<SearchResult> results,
+  }) {
     final rows = <List<Object?>>[
       _headers,
       for (final result in results)
@@ -75,9 +113,7 @@ class SearchReportService {
         ],
       if (results.isEmpty) ['No results'],
     ];
-    final file = await _outputFile(project.name, _fileName(project.name, 'csv'), outputDirectory);
-    await file.writeAsString(const ListToCsvConverter().convert(rows), flush: true);
-    return file;
+    return const ListToCsvConverter().convert(rows);
   }
 
   Future<File> writePdf({
@@ -86,13 +122,29 @@ class SearchReportService {
     required List<SearchResult> results,
     Directory? outputDirectory,
   }) async {
+    final file = await _outputFile(
+        project.name, fileName(project.name, 'pdf'), outputDirectory);
+    await file.writeAsBytes(
+        await buildPdfBytes(
+            project: project, filters: filters, results: results),
+        flush: true);
+    return file;
+  }
+
+  Future<Uint8List> buildPdfBytes({
+    required Project project,
+    required SearchFilters filters,
+    required List<SearchResult> results,
+  }) async {
     final pdf = pw.Document();
     pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4.landscape,
         margin: const pw.EdgeInsets.all(20),
         build: (context) => [
-          pw.Text('Search Results - ${project.name}', style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+          pw.Text('Search Results - ${project.name}',
+              style:
+                  pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
           pw.SizedBox(height: 4),
           pw.Text('Generated: ${shortDate(DateTime.now())}'),
           pw.Text('Filters: ${filters.describe()}'),
@@ -116,7 +168,9 @@ class SearchReportService {
               children: [
                 pw.TableRow(
                   decoration: const pw.BoxDecoration(color: PdfColors.grey200),
-                  children: _headers.map((header) => _cell(header, bold: true)).toList(),
+                  children: _headers
+                      .map((header) => _cell(header, bold: true))
+                      .toList(),
                 ),
                 for (final result in results)
                   pw.TableRow(
@@ -137,9 +191,7 @@ class SearchReportService {
         ],
       ),
     );
-    final file = await _outputFile(project.name, _fileName(project.name, 'pdf'), outputDirectory);
-    await file.writeAsBytes(await pdf.save(), flush: true);
-    return file;
+    return pdf.save();
   }
 
   static const _headers = [
@@ -163,26 +215,35 @@ class SearchReportService {
       padding: const pw.EdgeInsets.all(4),
       child: pw.Text(
         text,
-        style: pw.TextStyle(fontSize: 8, fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal),
+        style: pw.TextStyle(
+            fontSize: 8,
+            fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal),
       ),
     );
   }
 
-  String _number(double? value) => value == null ? '-' : value.toStringAsFixed(2);
+  String _number(double? value) =>
+      value == null ? '-' : value.toStringAsFixed(2);
 
-  String _moneyPdfOrDash(double? value) => value == null ? '-' : 'Rs. ${value.toStringAsFixed(0)}';
+  String _moneyPdfOrDash(double? value) =>
+      value == null ? '-' : 'Rs. ${value.toStringAsFixed(0)}';
 
-  Future<File> _outputFile(String projectName, String fileName, Directory? outputDirectory) async {
-    final base = outputDirectory ?? await getApplicationDocumentsDirectory();
-    final dir = Directory(p.join(base.path, 'exports', _safeName(projectName)));
-    if (!await dir.exists()) await dir.create(recursive: true);
-    return File(p.join(dir.path, fileName));
+  Future<File> _outputFile(
+      String projectName, String fileName, Directory? outputDirectory) async {
+    if (outputDirectory != null) {
+      final dir = Directory(p.join(
+          outputDirectory.path, 'exports', safeFileSegment(projectName)));
+      if (!await dir.exists()) await dir.create(recursive: true);
+      return File(p.join(dir.path, fileName));
+    }
+    return appWritableFile(
+      directoryPath: 'exports/${safeFileSegment(projectName)}',
+      fileName: fileName,
+    );
   }
 
-  String _fileName(String projectName, String extension) {
+  String fileName(String projectName, String extension) {
     final date = DateTime.now().toIso8601String().substring(0, 10);
-    return 'search_results_${_safeName(projectName)}_$date.$extension';
+    return 'search_results_${safeFileSegment(projectName)}_$date.$extension';
   }
-
-  String _safeName(String input) => input.replaceAll(RegExp(r'[^a-zA-Z0-9_-]+'), '_');
 }

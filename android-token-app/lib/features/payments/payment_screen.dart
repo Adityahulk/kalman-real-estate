@@ -10,7 +10,8 @@ import '../exports/document_service.dart';
 import 'signature_field.dart';
 
 class PaymentScreen extends ConsumerStatefulWidget {
-  const PaymentScreen({super.key, required this.projectId, required this.plotId});
+  const PaymentScreen(
+      {super.key, required this.projectId, required this.plotId});
 
   final int projectId;
   final int plotId;
@@ -38,7 +39,9 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
   @override
   Widget build(BuildContext context) {
     final project = ref.watch(projectProvider(widget.projectId)).valueOrNull;
-    final plot = (ref.watch(plotsProvider(widget.projectId)).valueOrNull ?? const <Plot>[]).firstWhereOrNull((item) => item.id == widget.plotId);
+    final plot = (ref.watch(plotsProvider(widget.projectId)).valueOrNull ??
+            const <Plot>[])
+        .firstWhereOrNull((item) => item.id == widget.plotId);
     return Scaffold(
       appBar: AppBar(title: Text('Payment · Plot ${plot?.plotNumber ?? ''}')),
       body: plot == null
@@ -52,7 +55,8 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Text('Payment Acknowledgement', style: Theme.of(context).textTheme.titleMedium),
+                        Text('Payment Acknowledgement',
+                            style: Theme.of(context).textTheme.titleMedium),
                         const SizedBox(height: 10),
                         Text('Plot/SCO/Unit No. ${plot.plotNumber}'),
                         const SizedBox(height: 10),
@@ -65,17 +69,27 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                         TextField(
                           controller: _amount,
                           keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: 'Amount'),
+                          decoration:
+                              const InputDecoration(labelText: 'Amount'),
                         ),
                         const SizedBox(height: 10),
                         DropdownButtonFormField<String>(
                           value: _type,
-                          decoration: const InputDecoration(labelText: 'Payment type'),
+                          decoration:
+                              const InputDecoration(labelText: 'Payment type'),
                           items: const [
-                            DropdownMenuItem(value: PaymentType.booking, child: Text('Booking')),
-                            DropdownMenuItem(value: PaymentType.installment, child: Text('Installment')),
-                            DropdownMenuItem(value: PaymentType.adjustment, child: Text('Adjustment')),
-                            DropdownMenuItem(value: PaymentType.refund, child: Text('Refund')),
+                            DropdownMenuItem(
+                                value: PaymentType.booking,
+                                child: Text('Booking')),
+                            DropdownMenuItem(
+                                value: PaymentType.installment,
+                                child: Text('Installment')),
+                            DropdownMenuItem(
+                                value: PaymentType.adjustment,
+                                child: Text('Adjustment')),
+                            DropdownMenuItem(
+                                value: PaymentType.refund,
+                                child: Text('Refund')),
                           ],
                           onChanged: (value) => setState(() {
                             _type = value ?? PaymentType.booking;
@@ -85,9 +99,12 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                         const SizedBox(height: 10),
                         DropdownButtonFormField<String>(
                           value: _stage,
-                          decoration: const InputDecoration(labelText: 'Payment stage'),
+                          decoration:
+                              const InputDecoration(labelText: 'Payment stage'),
                           items: PaymentStage.all
-                              .map((stage) => DropdownMenuItem(value: stage, child: Text(PaymentStage.label(stage))))
+                              .map((stage) => DropdownMenuItem(
+                                  value: stage,
+                                  child: Text(PaymentStage.label(stage))))
                               .toList(),
                           onChanged: (value) => setState(() {
                             _stage = value ?? PaymentStage.booking;
@@ -97,18 +114,24 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                         const SizedBox(height: 10),
                         TextField(
                           controller: _note,
-                          decoration: const InputDecoration(labelText: 'Note optional'),
+                          decoration:
+                              const InputDecoration(labelText: 'Note optional'),
                         ),
                       ],
                     ),
                   ),
                 ),
-                SignatureField(label: 'Plot Holder/CP Signature', onSaved: (path) => _holderSignature = path),
+                SignatureField(
+                    label: 'Plot Holder/CP Signature',
+                    onSaved: (path) => _holderSignature = path),
                 const SizedBox(height: 12),
-                SignatureField(label: 'Authorized Signature', onSaved: (path) => _authorizedSignature = path),
+                SignatureField(
+                    label: 'Authorized Signature',
+                    onSaved: (path) => _authorizedSignature = path),
                 const SizedBox(height: 12),
                 FilledButton.icon(
-                  onPressed: project == null ? null : () => _save(project, plot),
+                  onPressed:
+                      project == null ? null : () => _save(project, plot),
                   icon: const Icon(Icons.save),
                   label: const Text('Save Payment'),
                 ),
@@ -130,7 +153,8 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
   Future<void> _save(Project project, Plot plot) async {
     final amount = double.tryParse(_amount.text);
     if (amount == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter valid amount.')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Enter valid amount.')));
       return;
     }
     final id = await ref.read(databaseProvider).addPayment(
@@ -148,9 +172,15 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
           note: _note.text.trim(),
         );
     final db = ref.read(databaseProvider);
-    final payment = await (db.select(db.paymentEntries)..where((tbl) => tbl.id.equals(id))).getSingle();
-    final file = await DocumentService().writePaymentPdf(project: project, plot: plot, payment: payment);
-    await Printing.sharePdf(bytes: await file.readAsBytes(), filename: file.path.split('/').last);
+    final payment = await (db.select(db.paymentEntries)
+          ..where((tbl) => tbl.id.equals(id)))
+        .getSingle();
+    final service = DocumentService();
+    await Printing.sharePdf(
+      bytes: await service.buildPaymentPdf(
+          project: project, plot: plot, payment: payment),
+      filename: service.paymentFileName(plot, payment),
+    );
     if (mounted) Navigator.pop(context);
   }
 

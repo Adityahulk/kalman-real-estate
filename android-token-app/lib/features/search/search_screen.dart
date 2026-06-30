@@ -1,4 +1,4 @@
-import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -43,7 +43,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   @override
   void dispose() {
-    for (final controller in [_plot, _customer, _channelPartner, _areaMin, _areaMax, _rateMin, _rateMax]) {
+    for (final controller in [
+      _plot,
+      _customer,
+      _channelPartner,
+      _areaMin,
+      _areaMax,
+      _rateMin,
+      _rateMax
+    ]) {
       controller.dispose();
     }
     super.dispose();
@@ -57,12 +65,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       body: AsyncValueView(
         value: projectValue,
         builder: (project) {
-          if (project == null) return const Center(child: Text('Project not found.'));
+          if (project == null) {
+            return const Center(child: Text('Project not found.'));
+          }
           return FutureBuilder<List<SearchResult>>(
             future: _resultsFuture,
             builder: (context, snapshot) {
               final results = snapshot.data ?? const <SearchResult>[];
-              final loading = snapshot.connectionState == ConnectionState.waiting;
+              final loading =
+                  snapshot.connectionState == ConnectionState.waiting;
               return ListView(
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
                 children: [
@@ -70,7 +81,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                   const SizedBox(height: 8),
                   _exportRow(project, results, loading),
                   const SizedBox(height: 8),
-                  Text('${results.length} result(s)', style: Theme.of(context).textTheme.titleMedium),
+                  Text('${results.length} result(s)',
+                      style: Theme.of(context).textTheme.titleMedium),
                   if (loading)
                     const Padding(
                       padding: EdgeInsets.all(24),
@@ -107,27 +119,40 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             _textField(_channelPartner, 'Channel partner'),
             Row(
               children: [
-                Expanded(child: _textField(_areaMin, 'Area min', keyboardType: TextInputType.number)),
+                Expanded(
+                    child: _textField(_areaMin, 'Area min',
+                        keyboardType: TextInputType.number)),
                 const SizedBox(width: 8),
-                Expanded(child: _textField(_areaMax, 'Area max', keyboardType: TextInputType.number)),
+                Expanded(
+                    child: _textField(_areaMax, 'Area max',
+                        keyboardType: TextInputType.number)),
               ],
             ),
             Row(
               children: [
-                Expanded(child: _textField(_rateMin, 'Rate min', keyboardType: TextInputType.number)),
+                Expanded(
+                    child: _textField(_rateMin, 'Rate min',
+                        keyboardType: TextInputType.number)),
                 const SizedBox(width: 8),
-                Expanded(child: _textField(_rateMax, 'Rate max', keyboardType: TextInputType.number)),
+                Expanded(
+                    child: _textField(_rateMax, 'Rate max',
+                        keyboardType: TextInputType.number)),
               ],
             ),
             const SizedBox(height: 6),
             SegmentedButton<SearchPaymentStatus>(
               segments: const [
-                ButtonSegment(value: SearchPaymentStatus.any, label: Text('Any')),
-                ButtonSegment(value: SearchPaymentStatus.received, label: Text('Received')),
-                ButtonSegment(value: SearchPaymentStatus.pending, label: Text('Pending')),
+                ButtonSegment(
+                    value: SearchPaymentStatus.any, label: Text('Any')),
+                ButtonSegment(
+                    value: SearchPaymentStatus.received,
+                    label: Text('Received')),
+                ButtonSegment(
+                    value: SearchPaymentStatus.pending, label: Text('Pending')),
               ],
               selected: {_paymentStatus},
-              onSelectionChanged: (value) => setState(() => _paymentStatus = value.single),
+              onSelectionChanged: (value) =>
+                  setState(() => _paymentStatus = value.single),
             ),
             const SizedBox(height: 10),
             Wrap(
@@ -141,7 +166,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     onSelected: (selected) {
                       setState(() {
                         _paymentStages = {..._paymentStages};
-                        selected ? _paymentStages.add(stage) : _paymentStages.remove(stage);
+                        selected
+                            ? _paymentStages.add(stage)
+                            : _paymentStages.remove(stage);
                       });
                     },
                   ),
@@ -181,17 +208,23 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           runSpacing: 8,
           children: [
             OutlinedButton.icon(
-              onPressed: loading ? null : () => _export(project, results, _ExportKind.xlsx),
+              onPressed: loading
+                  ? null
+                  : () => _export(project, results, _ExportKind.xlsx),
               icon: const Icon(Icons.table_view),
               label: const Text('XLSX'),
             ),
             OutlinedButton.icon(
-              onPressed: loading ? null : () => _export(project, results, _ExportKind.csv),
+              onPressed: loading
+                  ? null
+                  : () => _export(project, results, _ExportKind.csv),
               icon: const Icon(Icons.description),
               label: const Text('CSV'),
             ),
             OutlinedButton.icon(
-              onPressed: loading ? null : () => _export(project, results, _ExportKind.pdf),
+              onPressed: loading
+                  ? null
+                  : () => _export(project, results, _ExportKind.pdf),
               icon: const Icon(Icons.picture_as_pdf),
               label: const Text('PDF'),
             ),
@@ -205,14 +238,20 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     return Card(
       child: ExpansionTile(
         title: Text('Plot ${result.plotNumber} · ${result.customerName}'),
-        subtitle: Text('${result.channelPartner}\nReceived ${money(result.totalReceived)} · Pending ${_moneyOrDash(result.totalPending)}'),
+        subtitle: Text(
+            '${result.channelPartner}\nReceived ${money(result.totalReceived)} · Pending ${_moneyOrDash(result.totalPending)}'),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
         children: [
-          _detailRow('Area', result.areaSqYards == null ? '-' : '${result.areaSqYards!.toStringAsFixed(2)} sq yd'),
+          _detailRow(
+              'Area',
+              result.areaSqYards == null
+                  ? '-'
+                  : '${result.areaSqYards!.toStringAsFixed(2)} sq yd'),
           _detailRow('Rate', _moneyOrDash(result.ratePerSqYard)),
           _detailRow('Total', _moneyOrDash(result.totalAmount)),
           const Divider(),
-          for (final stage in result.stageDetails.where((stage) => _paymentStages.isEmpty || _paymentStages.contains(stage.stage)))
+          for (final stage in result.stageDetails.where((stage) =>
+              _paymentStages.isEmpty || _paymentStages.contains(stage.stage)))
             _detailRow(
               stage.label,
               'Expected ${_moneyOrDash(stage.expected)} | Received ${money(stage.received)} | Pending ${_moneyOrDash(stage.pending)} | ${stage.statusLabel}',
@@ -228,14 +267,18 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(width: 92, child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600))),
+          SizedBox(
+              width: 92,
+              child: Text(label,
+                  style: const TextStyle(fontWeight: FontWeight.w600))),
           Expanded(child: Text(value)),
         ],
       ),
     );
   }
 
-  Widget _textField(TextEditingController controller, String label, {TextInputType? keyboardType}) {
+  Widget _textField(TextEditingController controller, String label,
+      {TextInputType? keyboardType}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: TextField(
@@ -249,12 +292,21 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   void _runSearch() {
     setState(() {
-      _resultsFuture = SearchService(ref.read(databaseProvider)).searchProject(widget.projectId, _filters());
+      _resultsFuture = SearchService(ref.read(databaseProvider))
+          .searchProject(widget.projectId, _filters());
     });
   }
 
   void _clear() {
-    for (final controller in [_plot, _customer, _channelPartner, _areaMin, _areaMax, _rateMin, _rateMax]) {
+    for (final controller in [
+      _plot,
+      _customer,
+      _channelPartner,
+      _areaMin,
+      _areaMax,
+      _rateMin,
+      _rateMax
+    ]) {
       controller.clear();
     }
     setState(() {
@@ -264,14 +316,35 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     _runSearch();
   }
 
-  Future<void> _export(Project project, List<SearchResult> results, _ExportKind kind) async {
+  Future<void> _export(
+      Project project, List<SearchResult> results, _ExportKind kind) async {
     final service = SearchReportService();
-    final File file = switch (kind) {
-      _ExportKind.xlsx => await service.writeXlsx(project: project, filters: _filters(), results: results),
-      _ExportKind.csv => await service.writeCsv(project: project, filters: _filters(), results: results),
-      _ExportKind.pdf => await service.writePdf(project: project, filters: _filters(), results: results),
+    final filters = _filters();
+    final Uint8List bytes = switch (kind) {
+      _ExportKind.xlsx => await service.buildXlsxBytes(
+          project: project, filters: filters, results: results),
+      _ExportKind.csv => service.buildCsvBytes(
+          project: project, filters: filters, results: results),
+      _ExportKind.pdf => await service.buildPdfBytes(
+          project: project, filters: filters, results: results),
     };
-    await Share.shareXFiles([XFile(file.path)]);
+    final extension = kind.name;
+    await Share.shareXFiles([
+      XFile.fromData(
+        bytes,
+        name: service.fileName(project.name, extension),
+        mimeType: _mimeType(kind),
+      ),
+    ]);
+  }
+
+  String _mimeType(_ExportKind kind) {
+    return switch (kind) {
+      _ExportKind.xlsx =>
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      _ExportKind.csv => 'text/csv',
+      _ExportKind.pdf => 'application/pdf',
+    };
   }
 
   SearchFilters _filters() {

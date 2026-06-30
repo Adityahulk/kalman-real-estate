@@ -4,8 +4,9 @@ import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:signature/signature.dart';
+
+import '../../shared/app_file_storage.dart';
 
 class SignatureField extends StatefulWidget {
   const SignatureField({super.key, required this.label, required this.onSaved});
@@ -18,7 +19,8 @@ class SignatureField extends StatefulWidget {
 }
 
 class _SignatureFieldState extends State<SignatureField> {
-  final _controller = SignatureController(penStrokeWidth: 2.5, penColor: Colors.black);
+  final _controller =
+      SignatureController(penStrokeWidth: 2.5, penColor: Colors.black);
   String? _path;
 
   @override
@@ -40,16 +42,26 @@ class _SignatureFieldState extends State<SignatureField> {
             const SizedBox(height: 8),
             Container(
               height: 140,
-              decoration: BoxDecoration(border: Border.all(color: Colors.black26), color: Colors.white),
-              child: Signature(controller: _controller, backgroundColor: Colors.white),
+              decoration: BoxDecoration(
+                  border: Border.all(color: Colors.black26),
+                  color: Colors.white),
+              child: Signature(
+                  controller: _controller, backgroundColor: Colors.white),
             ),
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
               children: [
-                OutlinedButton.icon(onPressed: _saveDrawn, icon: const Icon(Icons.save), label: const Text('Use Drawn')),
-                OutlinedButton.icon(onPressed: _upload, icon: const Icon(Icons.upload_file), label: const Text('Upload')),
-                TextButton(onPressed: _controller.clear, child: const Text('Clear')),
+                OutlinedButton.icon(
+                    onPressed: _saveDrawn,
+                    icon: const Icon(Icons.save),
+                    label: const Text('Use Drawn')),
+                OutlinedButton.icon(
+                    onPressed: _upload,
+                    icon: const Icon(Icons.upload_file),
+                    label: const Text('Upload')),
+                TextButton(
+                    onPressed: _controller.clear, child: const Text('Clear')),
               ],
             ),
             if (_path != null) Text('Saved: ${p.basename(_path!)}'),
@@ -69,7 +81,8 @@ class _SignatureFieldState extends State<SignatureField> {
   }
 
   Future<void> _upload() async {
-    final picked = await FilePicker.platform.pickFiles(type: FileType.image, allowMultiple: false);
+    final picked = await FilePicker.platform
+        .pickFiles(type: FileType.image, allowMultiple: false);
     final source = picked?.files.single.path;
     if (source == null) return;
     final bytes = await File(source).readAsBytes();
@@ -79,10 +92,10 @@ class _SignatureFieldState extends State<SignatureField> {
   }
 
   Future<String> _writeSignature(Uint8List bytes) async {
-    final base = await getApplicationDocumentsDirectory();
-    final dir = Directory(p.join(base.path, 'signatures'));
-    if (!await dir.exists()) await dir.create(recursive: true);
-    final file = File(p.join(dir.path, 'signature_${DateTime.now().microsecondsSinceEpoch}.png'));
+    final file = await appWritableFile(
+      directoryPath: 'signatures',
+      fileName: 'signature_${DateTime.now().microsecondsSinceEpoch}.png',
+    );
     await file.writeAsBytes(bytes, flush: true);
     return file.path;
   }

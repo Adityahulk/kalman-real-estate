@@ -10,7 +10,8 @@ import '../../shared/async_value_view.dart';
 import '../../shared/formatters.dart';
 
 class PlotDetailScreen extends ConsumerWidget {
-  const PlotDetailScreen({super.key, required this.projectId, required this.plotId});
+  const PlotDetailScreen(
+      {super.key, required this.projectId, required this.plotId});
 
   final int projectId;
   final int plotId;
@@ -29,12 +30,14 @@ class PlotDetailScreen extends ConsumerWidget {
         actions: [
           IconButton(
             tooltip: 'EOI',
-            onPressed: () => context.go('/projects/$projectId/plots/$plotId/eoi'),
+            onPressed: () =>
+                context.go('/projects/$projectId/plots/$plotId/eoi'),
             icon: const Icon(Icons.description),
           ),
           IconButton(
             tooltip: 'Add payment',
-            onPressed: () => context.go('/projects/$projectId/plots/$plotId/payment'),
+            onPressed: () =>
+                context.go('/projects/$projectId/plots/$plotId/payment'),
             icon: const Icon(Icons.payments),
           ),
         ],
@@ -49,8 +52,12 @@ class PlotDetailScreen extends ConsumerWidget {
             builder: (buyerRows) => AsyncValueView(
               value: tokens,
               builder: (tokenRows) {
-                final holder = buyerRows.where((item) => item.id == plot.holderBuyerId).firstOrNull;
-                final token = tokenRows.where((item) => item.id == plot.assignedTokenId).firstOrNull;
+                final holder = buyerRows
+                    .where((item) => item.id == plot.holderBuyerId)
+                    .firstOrNull;
+                final token = tokenRows
+                    .where((item) => item.id == plot.assignedTokenId)
+                    .firstOrNull;
                 return ListView(
                   padding: const EdgeInsets.only(bottom: 24),
                   children: [
@@ -60,30 +67,41 @@ class PlotDetailScreen extends ConsumerWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Plot ${plot.plotNumber}', style: Theme.of(context).textTheme.headlineSmall),
+                            Text('Plot ${plot.plotNumber}',
+                                style:
+                                    Theme.of(context).textTheme.headlineSmall),
                             const SizedBox(height: 8),
                             Text('Status: ${plot.status}'),
-                            Text('Area: ${plot.areaSqYards == null ? 'Not set' : '${plot.areaSqYards} sq yd'}'),
+                            Text(
+                                'Area: ${plot.areaSqYards == null ? 'Not set' : '${plot.areaSqYards} sq yd'}'),
                             Text('Holder: ${holder?.name ?? 'Not assigned'}'),
-                            Text('Channel partner: ${plot.channelPartner ?? holder?.channelPartner ?? '-'}'),
-                            Text('Token: ${token?.tokenCode ?? '-'}${token == null ? '' : ' · ${money(token.amount)}'}'),
+                            Text(
+                                'Channel partner: ${plot.channelPartner ?? holder?.channelPartner ?? '-'}'),
+                            Text(
+                                'Token: ${token?.tokenCode ?? '-'}${token == null ? '' : ' · ${money(token.amount)}'}'),
                             const SizedBox(height: 12),
                             Wrap(
                               spacing: 8,
                               runSpacing: 8,
                               children: [
                                 OutlinedButton.icon(
-                                  onPressed: () => _editPlotArea(context, ref, plot),
+                                  onPressed: () =>
+                                      _editPlotArea(context, ref, plot),
                                   icon: const Icon(Icons.square_foot),
                                   label: const Text('Edit Area'),
                                 ),
                                 OutlinedButton.icon(
-                                  onPressed: () => _assignDialog(context, ref, buyerRows, tokenRows),
+                                  onPressed: () => _assignDialog(
+                                      context, ref, buyerRows, tokenRows),
                                   icon: const Icon(Icons.assignment_ind),
-                                  label: Text(holder == null ? 'Assign' : 'Reassign'),
+                                  label: Text(
+                                      holder == null ? 'Assign' : 'Reassign'),
                                 ),
                                 OutlinedButton.icon(
-                                  onPressed: holder == null ? null : () => _cancelDialog(context, ref, plot, plotRows),
+                                  onPressed: holder == null
+                                      ? null
+                                      : () => _cancelDialog(
+                                          context, ref, plot, plotRows),
                                   icon: const Icon(Icons.cancel),
                                   label: const Text('Cancel'),
                                 ),
@@ -103,8 +121,10 @@ class PlotDetailScreen extends ConsumerWidget {
                                 children: rows
                                     .map(
                                       (payment) => ListTile(
-                                        title: Text('${money(payment.amount)} · ${payment.paymentType}'),
-                                        subtitle: Text('${shortDate(payment.date)}${payment.note == null ? '' : ' · ${payment.note}'}'),
+                                        title: Text(
+                                            '${money(payment.amount)} · ${payment.paymentType}'),
+                                        subtitle: Text(
+                                            '${shortDate(payment.date)}${payment.note == null ? '' : ' · ${payment.note}'}'),
                                       ),
                                     )
                                     .toList(),
@@ -122,7 +142,8 @@ class PlotDetailScreen extends ConsumerWidget {
                                     .map(
                                       (item) => ListTile(
                                         title: Text(item.actionType),
-                                        subtitle: Text('${shortDate(item.createdAt)}${item.note == null ? '' : ' · ${item.note}'}'),
+                                        subtitle: Text(
+                                            '${shortDate(item.createdAt)}${item.note == null ? '' : ' · ${item.note}'}'),
                                       ),
                                     )
                                     .toList(),
@@ -139,8 +160,10 @@ class PlotDetailScreen extends ConsumerWidget {
     );
   }
 
-  Future<void> _editPlotArea(BuildContext context, WidgetRef ref, Plot plot) async {
-    final controller = TextEditingController(text: plot.areaSqYards?.toString() ?? '');
+  Future<void> _editPlotArea(
+      BuildContext context, WidgetRef ref, Plot plot) async {
+    final controller =
+        TextEditingController(text: plot.areaSqYards?.toString() ?? '');
     final area = await showDialog<double>(
       context: context,
       builder: (context) => AlertDialog(
@@ -151,28 +174,42 @@ class PlotDetailScreen extends ConsumerWidget {
           decoration: const InputDecoration(labelText: 'Area in sq yards'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, double.tryParse(controller.text)), child: const Text('Save')),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () =>
+                  Navigator.pop(context, double.tryParse(controller.text)),
+              child: const Text('Save')),
         ],
       ),
     );
     controller.dispose();
     if (area == null) return;
-    await (ref.read(databaseProvider).update(ref.read(databaseProvider).plots)..where((tbl) => tbl.id.equals(plot.id))).write(
-      PlotsCompanion(areaSqYards: Value(area), updatedAt: Value(DateTime.now())),
+    await (ref.read(databaseProvider).update(ref.read(databaseProvider).plots)
+          ..where((tbl) => tbl.id.equals(plot.id)))
+        .write(
+      PlotsCompanion(
+          areaSqYards: Value(area), updatedAt: Value(DateTime.now())),
     );
   }
 
-  Future<void> _assignDialog(BuildContext context, WidgetRef ref, List<Buyer> buyers, List<Token> tokens) async {
-    final activeTokens = tokens.where((token) => token.status == TokenStatus.active).toList();
+  Future<void> _assignDialog(BuildContext context, WidgetRef ref,
+      List<Buyer> buyers, List<Token> tokens) async {
+    final activeTokens =
+        tokens.where((token) => token.status == TokenStatus.active).toList();
     int? buyerId = buyers.firstOrNull?.id;
     int? tokenId = activeTokens.firstOrNull?.id;
     final result = await showDialog<({int buyerId, int tokenId})>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
-          final buyerTokens = activeTokens.where((token) => token.buyerId == buyerId).toList();
-          if (buyerTokens.isNotEmpty && !buyerTokens.any((token) => token.id == tokenId)) tokenId = buyerTokens.first.id;
+          final buyerTokens =
+              activeTokens.where((token) => token.buyerId == buyerId).toList();
+          if (buyerTokens.isNotEmpty &&
+              !buyerTokens.any((token) => token.id == tokenId)) {
+            tokenId = buyerTokens.first.id;
+          }
           return AlertDialog(
             title: const Text('Assign Plot'),
             content: Column(
@@ -181,7 +218,10 @@ class PlotDetailScreen extends ConsumerWidget {
                 DropdownButtonFormField<int>(
                   value: buyerId,
                   decoration: const InputDecoration(labelText: 'Buyer'),
-                  items: buyers.map((buyer) => DropdownMenuItem(value: buyer.id, child: Text(buyer.name))).toList(),
+                  items: buyers
+                      .map((buyer) => DropdownMenuItem(
+                          value: buyer.id, child: Text(buyer.name)))
+                      .toList(),
                   onChanged: (value) => setDialogState(() => buyerId = value),
                 ),
                 const SizedBox(height: 10),
@@ -189,16 +229,24 @@ class PlotDetailScreen extends ConsumerWidget {
                   value: tokenId,
                   decoration: const InputDecoration(labelText: 'Token'),
                   items: buyerTokens
-                      .map((token) => DropdownMenuItem(value: token.id, child: Text('${token.tokenCode} · ${money(token.amount)}')))
+                      .map((token) => DropdownMenuItem(
+                          value: token.id,
+                          child: Text(
+                              '${token.tokenCode} · ${money(token.amount)}')))
                       .toList(),
                   onChanged: (value) => setDialogState(() => tokenId = value),
                 ),
               ],
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancel')),
               FilledButton(
-                onPressed: buyerId == null || tokenId == null ? null : () => Navigator.pop(context, (buyerId: buyerId!, tokenId: tokenId!)),
+                onPressed: buyerId == null || tokenId == null
+                    ? null
+                    : () => Navigator.pop(
+                        context, (buyerId: buyerId!, tokenId: tokenId!)),
                 child: const Text('Save'),
               ),
             ],
@@ -215,12 +263,24 @@ class PlotDetailScreen extends ConsumerWidget {
         );
   }
 
-  Future<void> _cancelDialog(BuildContext context, WidgetRef ref, Plot plot, List<Plot> allPlots) async {
-    final otherPlots = allPlots.where((item) => item.id != plot.id && item.holderBuyerId == plot.holderBuyerId).toList();
-    final token = await (ref.read(databaseProvider).select(ref.read(databaseProvider).tokens)..where((tbl) => tbl.id.equals(plot.assignedTokenId!))).getSingle();
+  Future<void> _cancelDialog(BuildContext context, WidgetRef ref, Plot plot,
+      List<Plot> allPlots) async {
+    final otherPlots = allPlots
+        .where((item) =>
+            item.id != plot.id && item.holderBuyerId == plot.holderBuyerId)
+        .toList();
+    final token = await (ref
+            .read(databaseProvider)
+            .select(ref.read(databaseProvider).tokens)
+          ..where((tbl) => tbl.id.equals(plot.assignedTokenId!)))
+        .getSingle();
     if (!context.mounted) return;
     final controllers = {
-      for (final item in otherPlots) item.id: TextEditingController(text: otherPlots.isEmpty ? '' : (token.amount / otherPlots.length).toStringAsFixed(0)),
+      for (final item in otherPlots)
+        item.id: TextEditingController(
+            text: otherPlots.isEmpty
+                ? ''
+                : (token.amount / otherPlots.length).toStringAsFixed(0)),
     };
     final confirmed = await showDialog<bool>(
       context: context,
@@ -234,7 +294,8 @@ class PlotDetailScreen extends ConsumerWidget {
               Text('Token amount: ${money(token.amount)}'),
               const SizedBox(height: 10),
               if (otherPlots.isEmpty)
-                const Text('Buyer has no other assigned plots. Amount will be marked as refund/credit due.')
+                const Text(
+                    'Buyer has no other assigned plots. Amount will be marked as refund/credit due.')
               else
                 ...otherPlots.map(
                   (item) => Padding(
@@ -242,7 +303,8 @@ class PlotDetailScreen extends ConsumerWidget {
                     child: TextField(
                       controller: controllers[item.id],
                       keyboardType: TextInputType.number,
-                      decoration: InputDecoration(labelText: 'Redistribute to plot ${item.plotNumber}'),
+                      decoration: InputDecoration(
+                          labelText: 'Redistribute to plot ${item.plotNumber}'),
                     ),
                   ),
                 ),
@@ -250,14 +312,19 @@ class PlotDetailScreen extends ConsumerWidget {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Confirm')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Confirm')),
         ],
       ),
     );
     if (confirmed != true) return;
     final distribution = {
-      for (final entry in controllers.entries) entry.key: double.tryParse(entry.value.text) ?? 0,
+      for (final entry in controllers.entries)
+        entry.key: double.tryParse(entry.value.text) ?? 0,
     };
     for (final controller in controllers.values) {
       controller.dispose();

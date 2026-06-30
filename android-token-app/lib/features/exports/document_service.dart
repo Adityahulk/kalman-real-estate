@@ -1,16 +1,33 @@
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../../data/app_database.dart';
+import '../../shared/app_file_storage.dart';
 import '../../shared/formatters.dart';
 
 class DocumentService {
   Future<File> writeEoiPdf({
+    required Project project,
+    required Plot plot,
+    required EoiForm form,
+    required List<PaymentSchedule> schedules,
+  }) async {
+    return _writePdf(
+      project.name,
+      eoiFileName(plot),
+      await buildEoiPdf(
+        project: project,
+        plot: plot,
+        form: form,
+        schedules: schedules,
+      ),
+    );
+  }
+
+  Future<Uint8List> buildEoiPdf({
     required Project project,
     required Plot plot,
     required EoiForm form,
@@ -36,10 +53,22 @@ class DocumentService {
           _fieldTable([
             ['PLOT NO.', form.plotNumber ?? plot.plotNumber],
             ['AREA', form.areaSqYards?.toStringAsFixed(2) ?? ''],
-            ['RATE PER SQ YD', form.ratePerSqYard == null ? '' : money(form.ratePerSqYard!)],
-            ['TOTAL AMOUNT', form.totalAmount == null ? '' : money(form.totalAmount!)],
-            ['IFMS CHARGES', form.ifmsCharges == null ? '' : money(form.ifmsCharges!)],
-            ['IDC CHARGES', form.idcCharges == null ? '' : money(form.idcCharges!)],
+            [
+              'RATE PER SQ YD',
+              form.ratePerSqYard == null ? '' : money(form.ratePerSqYard!)
+            ],
+            [
+              'TOTAL AMOUNT',
+              form.totalAmount == null ? '' : money(form.totalAmount!)
+            ],
+            [
+              'IFMS CHARGES',
+              form.ifmsCharges == null ? '' : money(form.ifmsCharges!)
+            ],
+            [
+              'IDC CHARGES',
+              form.idcCharges == null ? '' : money(form.idcCharges!)
+            ],
             ['CLUB MEMBERSHIP', form.clubMembership ?? 'NA'],
           ]),
           pw.SizedBox(height: 12),
@@ -52,7 +81,7 @@ class DocumentService {
         ],
       ),
     );
-    return _writePdf(project.name, 'eoi_plot_${plot.plotNumber}.pdf', await pdf.save());
+    return pdf.save();
   }
 
   Future<File> writePaymentPdf({
@@ -60,8 +89,21 @@ class DocumentService {
     required Plot plot,
     required PaymentEntry payment,
   }) async {
+    return _writePdf(
+      project.name,
+      paymentFileName(plot, payment),
+      await buildPaymentPdf(project: project, plot: plot, payment: payment),
+    );
+  }
+
+  Future<Uint8List> buildPaymentPdf({
+    required Project project,
+    required Plot plot,
+    required PaymentEntry payment,
+  }) async {
     final holderSignature = await _imageProvider(payment.holderSignaturePath);
-    final authorizedSignature = await _imageProvider(payment.authorizedSignaturePath);
+    final authorizedSignature =
+        await _imageProvider(payment.authorizedSignaturePath);
     final pdf = pw.Document();
     pdf.addPage(
       pw.Page(
@@ -73,12 +115,16 @@ class DocumentService {
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
-                pw.Text('PLOT/SCO/UNIT NO. ${plot.plotNumber}', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
-                pw.Text('1ST', style: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 18)),
+                pw.Text('PLOT/SCO/UNIT NO. ${plot.plotNumber}',
+                    style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+                pw.Text('1ST',
+                    style: pw.TextStyle(
+                        fontWeight: pw.FontWeight.bold, fontSize: 18)),
               ],
             ),
             pw.SizedBox(height: 18),
-            pw.Text('PAYMENT ACKNOWLEDGEMENT', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+            pw.Text('PAYMENT ACKNOWLEDGEMENT',
+                style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
             pw.SizedBox(height: 12),
             pw.Table(
               border: pw.TableBorder.all(color: PdfColors.grey700),
@@ -101,21 +147,28 @@ class DocumentService {
                 pw.TableRow(
                   children: [
                     _cell(shortDate(payment.date)),
-                    _cell('${money(payment.amount)}\n${payment.amountInWords ?? ''}'),
+                    _cell(
+                        '${money(payment.amount)}\n${payment.amountInWords ?? ''}'),
                     _signatureCell(holderSignature),
                     _signatureCell(authorizedSignature),
                   ],
                 ),
                 for (var i = 0; i < 12; i++)
-                  pw.TableRow(children: [_cell(''), _cell(''), _cell(''), _cell('')]),
+                  pw.TableRow(
+                      children: [_cell(''), _cell(''), _cell(''), _cell('')]),
               ],
             ),
           ],
         ),
       ),
     );
-    return _writePdf(project.name, 'payment_plot_${plot.plotNumber}_${payment.id}.pdf', await pdf.save());
+    return pdf.save();
   }
+
+  String eoiFileName(Plot plot) => 'eoi_plot_${plot.plotNumber}.pdf';
+
+  String paymentFileName(Plot plot, PaymentEntry payment) =>
+      'payment_plot_${plot.plotNumber}_${payment.id}.pdf';
 
   pw.Widget _header(String title, String plotNumber) {
     return pw.Column(
@@ -128,7 +181,11 @@ class DocumentService {
           ],
         ),
         pw.SizedBox(height: 10),
-        pw.Center(child: pw.Text(title, style: pw.TextStyle(fontWeight: pw.FontWeight.bold, decoration: pw.TextDecoration.underline))),
+        pw.Center(
+            child: pw.Text(title,
+                style: pw.TextStyle(
+                    fontWeight: pw.FontWeight.bold,
+                    decoration: pw.TextDecoration.underline))),
         pw.SizedBox(height: 14),
       ],
     );
@@ -136,14 +193,21 @@ class DocumentService {
 
   pw.Widget _sectionTitle(String title) => pw.Padding(
         padding: const pw.EdgeInsets.only(bottom: 6),
-        child: pw.Text(title, style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+        child:
+            pw.Text(title, style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
       );
 
   pw.Widget _fieldTable(List<List<String>> rows) {
     return pw.Table(
       border: pw.TableBorder.all(color: PdfColors.grey700),
-      columnWidths: const {0: pw.FlexColumnWidth(1.4), 1: pw.FlexColumnWidth(3.6)},
-      children: rows.map((row) => pw.TableRow(children: [_cell(row[0], bold: true), _cell(row[1])])).toList(),
+      columnWidths: const {
+        0: pw.FlexColumnWidth(1.4),
+        1: pw.FlexColumnWidth(3.6)
+      },
+      children: rows
+          .map((row) =>
+              pw.TableRow(children: [_cell(row[0], bold: true), _cell(row[1])]))
+          .toList(),
     );
   }
 
@@ -173,7 +237,9 @@ class DocumentService {
                   '${entry.key + 1}',
                   entry.value.scheduleName,
                   '${entry.value.percentage.toStringAsFixed(0)}%',
-                  entry.value.dueDate == null ? '' : shortDate(entry.value.dueDate!),
+                  entry.value.dueDate == null
+                      ? ''
+                      : shortDate(entry.value.dueDate!),
                 ])
             .toList();
     return pw.Table(
@@ -187,7 +253,12 @@ class DocumentService {
       children: [
         pw.TableRow(
           decoration: const pw.BoxDecoration(color: PdfColors.grey200),
-          children: [_cell('SR.', bold: true), _cell('SCHEDULE', bold: true), _cell('PERCENTAGE', bold: true), _cell('DUE DATE', bold: true)],
+          children: [
+            _cell('SR.', bold: true),
+            _cell('SCHEDULE', bold: true),
+            _cell('PERCENTAGE', bold: true),
+            _cell('DUE DATE', bold: true)
+          ],
         ),
         ...rows.map((row) => pw.TableRow(children: row.map(_cell).toList())),
       ],
@@ -207,7 +278,9 @@ class DocumentService {
   pw.Widget _cell(String text, {bool bold = false}) {
     return pw.Padding(
       padding: const pw.EdgeInsets.all(6),
-      child: pw.Text(text, style: pw.TextStyle(fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal)),
+      child: pw.Text(text,
+          style: pw.TextStyle(
+              fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal)),
     );
   }
 
@@ -215,7 +288,9 @@ class DocumentService {
     return pw.Container(
       height: 54,
       padding: const pw.EdgeInsets.all(4),
-      child: image == null ? pw.SizedBox() : pw.Image(image, fit: pw.BoxFit.contain),
+      child: image == null
+          ? pw.SizedBox()
+          : pw.Image(image, fit: pw.BoxFit.contain),
     );
   }
 
@@ -226,14 +301,13 @@ class DocumentService {
     return pw.MemoryImage(await file.readAsBytes());
   }
 
-  Future<File> _writePdf(String projectName, String fileName, Uint8List bytes) async {
-    final base = await getApplicationDocumentsDirectory();
-    final dir = Directory(p.join(base.path, 'exports', _safeName(projectName)));
-    if (!await dir.exists()) await dir.create(recursive: true);
-    final file = File(p.join(dir.path, fileName));
+  Future<File> _writePdf(
+      String projectName, String fileName, Uint8List bytes) async {
+    final file = await appWritableFile(
+      directoryPath: 'exports/${safeFileSegment(projectName)}',
+      fileName: fileName,
+    );
     await file.writeAsBytes(bytes, flush: true);
     return file;
   }
-
-  String _safeName(String input) => input.replaceAll(RegExp(r'[^a-zA-Z0-9_-]+'), '_');
 }

@@ -35,7 +35,20 @@ class _EoiScreenState extends ConsumerState<EoiScreen> {
 
   @override
   void dispose() {
-    for (final controller in [_buyerName, _guardian, _address, _contact, _cp, _area, _rate, _total, _ifms, _idc, _club, _notes]) {
+    for (final controller in [
+      _buyerName,
+      _guardian,
+      _address,
+      _contact,
+      _cp,
+      _area,
+      _rate,
+      _total,
+      _ifms,
+      _idc,
+      _club,
+      _notes
+    ]) {
       controller.dispose();
     }
     super.dispose();
@@ -44,10 +57,13 @@ class _EoiScreenState extends ConsumerState<EoiScreen> {
   @override
   Widget build(BuildContext context) {
     final project = ref.watch(projectProvider(widget.projectId)).valueOrNull;
-    final plots = ref.watch(plotsProvider(widget.projectId)).valueOrNull ?? const <Plot>[];
-    final buyers = ref.watch(buyersProvider(widget.projectId)).valueOrNull ?? const <Buyer>[];
+    final plots = ref.watch(plotsProvider(widget.projectId)).valueOrNull ??
+        const <Plot>[];
+    final buyers = ref.watch(buyersProvider(widget.projectId)).valueOrNull ??
+        const <Buyer>[];
     final plot = plots.firstWhereOrNull((item) => item.id == widget.plotId);
-    final buyer = buyers.firstWhereOrNull((item) => item.id == plot?.holderBuyerId);
+    final buyer =
+        buyers.firstWhereOrNull((item) => item.id == plot?.holderBuyerId);
     final launched = project?.launchStatus == ProjectStatus.launched;
 
     if (!_loaded && plot != null) {
@@ -60,7 +76,9 @@ class _EoiScreenState extends ConsumerState<EoiScreen> {
         actions: [
           IconButton(
             tooltip: 'Generate PDF',
-            onPressed: project == null || plot == null ? null : () => _generatePdf(project, plot),
+            onPressed: project == null || plot == null
+                ? null
+                : () => _generatePdf(project, plot),
             icon: const Icon(Icons.picture_as_pdf),
           ),
         ],
@@ -74,19 +92,33 @@ class _EoiScreenState extends ConsumerState<EoiScreen> {
                   _field(_buyerName, 'Name'),
                   _field(_guardian, 'S/O,D/O,W/O'),
                   _field(_address, 'Address', maxLines: 2),
-                  _field(_contact, 'Contact no.', keyboardType: TextInputType.phone),
+                  _field(_contact, 'Contact no.',
+                      keyboardType: TextInputType.phone),
                   _field(_cp, 'C/O (CP/Broker/Property Dealer)'),
                 ]),
-                _section('Plot/SCO Detail ${launched ? '' : '(enabled after launch)'}', [
-                  _readonlyField('Plot no.', plot.plotNumber),
-                  _field(_area, 'Area sq. yds approx.', enabled: launched, keyboardType: TextInputType.number),
-                  _field(_rate, 'Rate per sq yd', enabled: launched, keyboardType: TextInputType.number),
-                  _field(_total, 'Total amount', enabled: launched, keyboardType: TextInputType.number),
-                  _field(_ifms, 'IFMS charges', enabled: launched, keyboardType: TextInputType.number),
-                  _field(_idc, 'IDC charges', enabled: launched, keyboardType: TextInputType.number),
-                  _field(_club, 'Club membership', enabled: launched),
-                ]),
-                _section('Important Notes', [_field(_notes, 'Notes', maxLines: 5)]),
+                _section(
+                    'Plot/SCO Detail ${launched ? '' : '(enabled after launch)'}',
+                    [
+                      _readonlyField('Plot no.', plot.plotNumber),
+                      _field(_area, 'Area sq. yds approx.',
+                          enabled: launched,
+                          keyboardType: TextInputType.number),
+                      _field(_rate, 'Rate per sq yd',
+                          enabled: launched,
+                          keyboardType: TextInputType.number),
+                      _field(_total, 'Total amount',
+                          enabled: launched,
+                          keyboardType: TextInputType.number),
+                      _field(_ifms, 'IFMS charges',
+                          enabled: launched,
+                          keyboardType: TextInputType.number),
+                      _field(_idc, 'IDC charges',
+                          enabled: launched,
+                          keyboardType: TextInputType.number),
+                      _field(_club, 'Club membership', enabled: launched),
+                    ]),
+                _section(
+                    'Important Notes', [_field(_notes, 'Notes', maxLines: 5)]),
                 const SizedBox(height: 8),
                 FilledButton.icon(
                   onPressed: () => _save(plot, buyer, launched),
@@ -101,16 +133,23 @@ class _EoiScreenState extends ConsumerState<EoiScreen> {
   Future<void> _loadExisting(Plot plot, Buyer? buyer) async {
     _loaded = true;
     final db = ref.read(databaseProvider);
-    final existing = await (db.select(db.eoiForms)..where((tbl) => tbl.plotId.equals(widget.plotId))).getSingleOrNull();
+    final existing = await (db.select(db.eoiForms)
+          ..where((tbl) => tbl.plotId.equals(widget.plotId)))
+        .getSingleOrNull();
     final sourceBuyer = buyer;
     if (!mounted) return;
     setState(() {
       _buyerName.text = existing?.buyerName ?? sourceBuyer?.name ?? '';
-      _guardian.text = existing?.guardianName ?? sourceBuyer?.guardianName ?? '';
+      _guardian.text =
+          existing?.guardianName ?? sourceBuyer?.guardianName ?? '';
       _address.text = existing?.address ?? sourceBuyer?.address ?? '';
       _contact.text = existing?.contactNo ?? sourceBuyer?.phone ?? '';
-      _cp.text = existing?.channelPartner ?? sourceBuyer?.channelPartner ?? plot.channelPartner ?? '';
-      _area.text = (existing?.areaSqYards ?? plot.areaSqYards)?.toString() ?? '';
+      _cp.text = existing?.channelPartner ??
+          sourceBuyer?.channelPartner ??
+          plot.channelPartner ??
+          '';
+      _area.text =
+          (existing?.areaSqYards ?? plot.areaSqYards)?.toString() ?? '';
       _rate.text = existing?.ratePerSqYard?.toString() ?? '';
       _total.text = existing?.totalAmount?.toString() ?? '';
       _ifms.text = existing?.ifmsCharges?.toString() ?? '';
@@ -143,19 +182,33 @@ class _EoiScreenState extends ConsumerState<EoiScreen> {
             updatedAt: Value(DateTime.now()),
           ),
         );
-    if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('EOI saved.')));
+    if (mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('EOI saved.')));
+    }
   }
 
   Future<void> _generatePdf(Project project, Plot plot) async {
     final db = ref.read(databaseProvider);
-    final form = await (db.select(db.eoiForms)..where((tbl) => tbl.plotId.equals(widget.plotId))).getSingleOrNull();
+    final form = await (db.select(db.eoiForms)
+          ..where((tbl) => tbl.plotId.equals(widget.plotId)))
+        .getSingleOrNull();
     if (form == null) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Save EOI before generating PDF.')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Save EOI before generating PDF.')));
+      }
       return;
     }
-    final schedules = await (db.select(db.paymentSchedules)..where((tbl) => tbl.plotId.equals(widget.plotId))).get();
-    final file = await DocumentService().writeEoiPdf(project: project, plot: plot, form: form, schedules: schedules);
-    await Printing.sharePdf(bytes: await file.readAsBytes(), filename: file.path.split('/').last);
+    final schedules = await (db.select(db.paymentSchedules)
+          ..where((tbl) => tbl.plotId.equals(widget.plotId)))
+        .get();
+    final service = DocumentService();
+    await Printing.sharePdf(
+      bytes: await service.buildEoiPdf(
+          project: project, plot: plot, form: form, schedules: schedules),
+      filename: service.eoiFileName(plot),
+    );
   }
 
   Widget _section(String title, List<Widget> children) {
@@ -175,7 +228,8 @@ class _EoiScreenState extends ConsumerState<EoiScreen> {
     );
   }
 
-  Widget _field(TextEditingController controller, String label, {bool enabled = true, int maxLines = 1, TextInputType? keyboardType}) {
+  Widget _field(TextEditingController controller, String label,
+      {bool enabled = true, int maxLines = 1, TextInputType? keyboardType}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: TextField(
