@@ -20,6 +20,58 @@ export const reflowPagesBrowserSource = `(function (rootOrSelector, opts) {
   var PAGE_HEIGHT = (opts && opts.pageHeight) || 1216;
   var PAGE_SELECTOR = "section[data-ambey-page], section[data-letter-page]";
   function isControl(el) { return el.hasAttribute("data-editor-page-controls"); }
+  function contentKids(page) {
+    return Array.prototype.slice.call(page.children).filter(function (el) { return !isControl(el); });
+  }
+  function createAfter(page) {
+    var next = page.cloneNode(false); // copies class + data-reflow, no children
+    next.removeAttribute("style");
+    if (page.parentElement) page.parentElement.insertBefore(next, page.nextSibling);
+    return next;
+  }
+  // A short paragraph that introduces the block after it (e.g. "DETAILS OF PRICING:") must not be
+  // orphaned at the bottom of a page when its table moves down — drag the caption along with it.
+  function isCaptionP(el) {
+    if (!el || el.tagName !== "P") return false;
+    var t = String(el.textContent || "").trim();
+    return t.length <= 120 || /:$/.test(t);
+  }
+  function splitWords(text, wordCount) {
+    var words = String(text || "").trim().split(/\\s+/).filter(Boolean);
+    return { head: words.slice(0, wordCount).join(" "), tail: words.slice(wordCount).join(" "), count: words.length };
+  }
+  function textRemainderElement(className, text) {
+    var p = document.createElement("p");
+    p.className = className;
+    p.textContent = text;
+    return p;
+  }
+  // Break a clause/subclause body so its head fills the rest of the current page and the tail flows
+  // to the next one — the same way Word splits a paragraph across a page boundary. Only plain-text
+  // body paragraphs are split (their text carries no inline formatting), so nothing is lost.
+  function splitBlockToFit(page, block) {
+    var target = null;
+    var remainderClass = "";
+    if (block.classList && block.classList.contains("clause-block")) { target = block.querySelector(".clause-body"); remainderClass = "clause-continuation"; }
+    else if (block.classList && block.classList.contains("subclause-item")) { target = block.querySelector(".subclause-text"); remainderClass = "subclause-continuation"; }
+    else if (block.classList && block.classList.contains("clause-continuation")) { target = block; remainderClass = "clause-continuation"; }
+    else if (block.classList && block.classList.contains("subclause-continuation")) { target = block; remainderClass = "subclause-continuation"; }
+    if (!target) return null;
+    var fullText = String(target.textContent || "").trim();
+    var all = splitWords(fullText, 0);
+    if (all.count < 12) return null;
+
+    var low = 1, high = all.count, best = 0;
+    while (low <= high) {
+      var mid = Math.floor((low + high) / 2);
+      target.textContent = splitWords(fullText, mid).head;
+      if (page.scrollHeight <= PAGE_HEIGHT) { best = mid; low = mid + 1; } else { high = mid - 1; }
+    }
+    if (best < 6 || best >= all.count) { target.textContent = fullText; return null; }
+    var finalParts = splitWords(fullText, best);
+    target.textContent = finalParts.head;
+    return textRemainderElement(remainderClass, finalParts.tail);
+  }
 
   // Save caret so moving nodes around doesn't drop the cursor (nodes are moved, not cloned).
   var saved = null;
@@ -71,13 +123,28 @@ export const reflowPagesBrowserSource = `(function (rootOrSelector, opts) {
     for (var s = 0; s < stream.length; s++) {
       var block = stream[s];
       current.appendChild(block);
-      var count = Array.prototype.slice.call(current.children).filter(function (el) { return !isControl(el); }).length;
-      if (current.scrollHeight > PAGE_HEIGHT && count > 1) {
-        var next = current.cloneNode(false); // copies class + data-reflow, no children
-        next.removeAttribute("style");
-        if (current.parentElement) current.parentElement.insertBefore(next, current.nextSibling);
-        next.appendChild(block);
-        current = next;
+      var kids = contentKids(current);
+      if (current.scrollHeight > PAGE_HEIGHT && kids.length > 1) {
+        // First try to split the overflowing block so its head fills this page to the bottom.
+        var remainder = splitBlockToFit(current, block);
+        if (remainder) {
+          stream.splice(s + 1, 0, remainder);
+          current = createAfter(current);
+        } else {
+          // Can't split (table, short block, heading): move it to a fresh page. If it is a table,
+          // carry its caption paragraph along so the heading stays with the table.
+          var move = [block];
+          var prev = kids[kids.length - 2];
+          if (block.tagName === "TABLE" && kids.length > 2 && isCaptionP(prev)) move.unshift(prev);
+          var next = createAfter(current);
+          for (var mi = 0; mi < move.length; mi++) next.appendChild(move[mi]);
+          current = next;
+          // A lone block taller than a page still needs splitting so following content can flow.
+          if (current.scrollHeight > PAGE_HEIGHT) {
+            var rem2 = splitBlockToFit(current, block);
+            if (rem2) stream.splice(s + 1, 0, rem2);
+          }
+        }
       }
     }
   }
