@@ -20,11 +20,13 @@ const LETTER_PRINT_CSS = `
   .letter-paper-editor section[data-ambey-page],
   .letter-paper-editor section[data-letter-page] {
     width: 860px !important;
+    height: 1216px !important;
+    min-height: 1216px !important;
     max-width: none !important;
     margin: 0 !important;
     border: 0 !important;
     box-shadow: none !important;
-    overflow: visible;
+    overflow: hidden;
     break-after: page;
     page-break-after: always;
   }
@@ -58,6 +60,11 @@ const LETTER_PRINT_CSS = `
     overflow-wrap: normal !important;
     text-align: justify !important;
     text-justify: inter-word !important;
+  }
+  .letter-paper-editor .pricing-summary-block,
+  .letter-paper-editor .payments-summary-block {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
   }
   [data-editor-page-controls] { display: none !important; }
 `;
@@ -230,12 +237,11 @@ async function renderWithBrowser(browser: Browser, bodyHtml: string): Promise<Bu
       `${reflowPagesBrowserSource}(document.querySelector(".letter-paper-editor"), { pageHeight: 1216 })`,
     );
 
-    // Each <section> is one editor "sheet" that grows with its content (min-height: 1216px).
-    // Render each section as its own page sized to that section's height so a single dense
-    // section never splits across two PDF pages — matching the editor exactly.
+    // Each <section> is one fixed A4 editor sheet. Reflow above moves overflow into following
+    // sections, so the PDF can render the same fixed A4 page boxes the draft shows.
     const heights = await page.evaluate(() => {
       const sections = Array.from(document.querySelectorAll<HTMLElement>("section[data-ambey-page], section[data-letter-page]"));
-      return sections.map((el) => Math.ceil(el.getBoundingClientRect().height));
+      return sections.map(() => 1216);
     });
 
     // Fallback for letters that aren't section-based: render the whole body as one tall page.
@@ -251,9 +257,8 @@ async function renderWithBrowser(browser: Browser, bodyHtml: string): Promise<Bu
       return Buffer.from(pdf);
     }
 
-    // Render each section as its own page sized to that section's measured height, so a single
-    // dense section never splits across two PDF pages — matching the editor exactly. These calls
-    // are sequential, so peak Chromium memory is ~one section, not the whole document. (Rendering
+    // Render each section as a fixed A4-like sheet. These calls are sequential, so peak Chromium
+    // memory is ~one section, not the whole document. (Rendering
     // the full stacked document in one giant page.pdf() call actually uses MORE peak memory and is
     // what OOM-crashed on the small server.)
     const pages: Buffer[] = [];

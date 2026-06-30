@@ -80,7 +80,7 @@ export function ambeyAllotmentTemplate() {
 <p class="buyer-block"><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.addressMultilineHtml}}</u><br><u>Aadhaar No. {{owner.aadhaarNo}}</u><br><u>Pan No. {{owner.panNo}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>
 <p class="buyer-note"><em>(hereinafter referred to as the *Allottee' which expression shall, unless excluded by or repugnant to the subject or context be deemed to include his/their heirs, executors, administrators, legal representatives, nominees, and assigns of the Other Part.</em></p>
 <p><strong>AND WHEREAS</strong> M/S. {{firm.nameUpper}}, entered into arrangements / collaborations with the Land Owners to develop, market and sell Plots in the said Residential Housing Project under the Brand Name "{{project.name}}" in the <strong>revenue estate of Hadbast No. 55, Village Barnala A, B, C &amp; D situated at Near Gaushalla, Raikot Road, Barnala, Distt. Barnala, Punjab 148101</strong> being developed on the aforesaid land (hereinafter referred to as then "Said Colony').</p>
-<p><strong>AND WHEREAS</strong> The Firm by virtue of the said sale by {{firm.nameUpper}} is entitled to and is competent to construct, develop, market and sell plots in the said colony, receive monies, give receipts, execute conveyance, other documents etc. as may be necessary and expedient to give effect to the aforesaid purpose, for the purpose of construction and sale of plots.</p>
+<p data-force-page-break="true"><strong>AND WHEREAS</strong> The Firm by virtue of the said sale by {{firm.nameUpper}} is entitled to and is competent to construct, develop, market and sell plots in the said colony, receive monies, give receipts, execute conveyance, other documents etc. as may be necessary and expedient to give effect to the aforesaid purpose, for the purpose of construction and sale of plots.</p>
 </section>
 
 <section data-ambey-page="6" data-top="760" class="agreement-page" data-reflow="agreement">
@@ -95,6 +95,7 @@ export function ambeyAllotmentTemplate() {
 <section data-ambey-page="7" data-top="760" class="agreement-page" data-reflow="agreement">
 <p class="clause-heading-only"><span class="clause-heading-number"><strong>1.</strong></span><span class="clause-heading-text"><strong>DETAILS OF PRICE PAYABLE FOR THE SAID PLOT</strong></span></p>
 <p class="clause-follow">The Allottee has agreed to purchase from the Firm and the Firm has agreed to sell to the Allottee, the Said Plot in the Said Colony as per details given below at the rate of <u><strong>Rs. {{plot.bspRate}}/- per Sq yds.</strong></u> being the Basic Selling Price (hereinafter referred to as 'BSP') exclusive of other payments as below:-</p>
+<div class="pricing-summary-block" data-force-page-break="true">
 <p><u><strong>DETAILS OF PRICING:</strong></u></p>
 <table class="pricing-table">
 <tr><td>Plot No.</td><td>:</td><td><strong>{{plot.code}}</strong></td></tr>
@@ -102,10 +103,13 @@ export function ambeyAllotmentTemplate() {
 <tr><td>Total BSP</td><td>:</td><td><strong>{{plot.priceInrFormatted}}/-</strong></td></tr>
 </table>
 <p><strong>(Rupees {{plot.priceInrWords}} Only)</strong></p>
+</div>
+<div class="payments-summary-block">
 <p><strong>DETAILS OF PAYMENTS RECEIVED:</strong></p>
 <table class="payments">
 <tr><th>Cheque No./<br>RTGS/NEFT</th><th>Date of Cheque</th><th>Amount</th><th>Drawn on Bank</th></tr>
 </table>
+</div>
 <p>The allottee / vendee shall pay to the promoters / colonizers on prorata basis, the price of said plot, if the dimensions of the said plot increase.</p>
 <p>The colonizers /promoters promise to adjust on prorate basis, the price of plot, if the dimensions of the said plot and hence the area decreases.</p>
 <p>In addition to the Total Price as mentioned above, the Allottee will be liable and agrees to pay club house which will be built by the firm, the firm have right to charge maintenance and the firm also reserve right to demand membership fee, these charges will be decided by the firm from time to time.</p>
@@ -136,7 +140,7 @@ export function ambeyAllotmentTemplate() {
 <p class="subclause-item"><span class="subclause-label">(j)</span><span class="subclause-text">The allottee/vendee shall get the building plan duly approved from M. C. {{project.city}} within three years w.e.f. the date of allotment letter/title deed and submit a copy of the sanctioned plan to the office of the Promoters for their records.</span></p>
 <p class="clause-block"><span class="clause-heading"><span class="clause-heading-number"><strong>4.</strong></span><span class="clause-heading-text"><strong>ZONING PLAN RESTRICTIONS</strong></span></span><span class="clause-body">It is abundantly made clear to the Allottee that in the zoning plan as may be approved by the Competent Authority(ies), there would be restrictions including but not limited to the ramp and front gate of the plot will be constructed as per the approved plan by the competent authority(ies). Further the Allottee specifically undertake(s) to strictly abide by all norms and conditions of the zoning plan/layout plan/building plan, notifications, rules, bye-laws and/or any other approvals granted by the competent authority(ies) in respect of the Said plot/Said Colony, as may be applicable from time to time. It is specifically made clear to the Allottee that the approval of the building plan(s), occupation certificate etc., shall be at the sole cost and responsibility of the Allottee and the Firm shall have no role in the same whatsoever.</span></p>
 <p class="clause-block"><span class="clause-heading"><span class="clause-heading-number"><strong>5.</strong></span><span class="clause-heading-text"><strong>GOVT. CHARGES AND TAXES</strong></span></span><span class="clause-body">It is made abundantly clear that all the Govt. Charges, are solely to the account of the Allottee and the Firm shall have no liability in this regard. Further it is made known to the Allottee that the Government of Punjab may also levy other charges at any stage including upon the completion of the Said Colony or thereafter, the demand for which will be raised by the Firm and the Allottee undertake(s) to pay the same on demand to the Firm. Apart from the above demand as stated, for the sake of clarity, it is emphasized and understood by the Allottee that there could be future levies/ increases in the Govt. Charges, levies, during the occupation of the Said Plot and the same shall be charged and the Allottee agree(s) to be liable and pay all such future levies/increases as and when demanded by the Firm and this undertaking by the Allottee shall always survive the conveyance of the Said Plot in favour of the Allottee. The Purchaser/Allottee will get no due certificate from the firm at the time of execution of the sale deed in his favour.</span></p>
-<p class="clause-block"><span class="clause-heading"><span class="clause-heading-number"><strong>6.</strong></span><span class="clause-heading-text"><strong>ESSENCE OF THE AGREEMENT</strong></span></span><span class="clause-body">The payment on or before the due date, of Total Price and other amounts payable as per the payment plan, as accepted by the Allottee or as demanded by the Firm from time to time is the essence of this Agreement.</span></p>
+<p class="clause-block" data-force-page-break="true"><span class="clause-heading"><span class="clause-heading-number"><strong>6.</strong></span><span class="clause-heading-text"><strong>ESSENCE OF THE AGREEMENT</strong></span></span><span class="clause-body">The payment on or before the due date, of Total Price and other amounts payable as per the payment plan, as accepted by the Allottee or as demanded by the Firm from time to time is the essence of this Agreement.</span></p>
 </section>
 
 <section data-ambey-page="11" data-top="760" class="agreement-page" data-reflow="agreement">
@@ -153,7 +157,7 @@ export function ambeyAllotmentTemplate() {
 </section>
 
 <section data-ambey-page="13" data-top="760" class="agreement-page" data-reflow="agreement">
-<p class="subclause-continuation">First allottee is bound to pay transfer fee of Rs, 5,100/- for first transfer to the firm. Second allottee is bound to pay transfer fee of Rs. 11,000/- to firm for second transfer and third allottee is bound pay the transfer fee of Rs. 21,000/- to firm for third transfer.</p>
+<p class="subclause-item"><span class="subclause-label">(b)</span><span class="subclause-text">First allottee is bound to pay transfer fee of Rs, 5,100/- for first transfer to the firm. Second allottee is bound to pay transfer fee of Rs. 11,000/- to firm for second transfer and third allottee is bound pay the transfer fee of Rs. 21,000/- to firm for third transfer.</span></p>
 <p class="clause-block"><span class="clause-heading"><span class="clause-heading-number"><strong>12.</strong></span><span class="clause-heading-text"><strong>LAWS OF LNDIA</strong></span></span><span class="clause-body">The rights and obligations of the parties under or arising out of this Agreement shall be construed and enforced in accordance with the laws of India.</span></p>
 <p class="clause-block"><span class="clause-heading"><span class="clause-heading-number"><strong>13.</strong></span><span class="clause-heading-text"><strong>TRANSFER OF OWNERSHIP OF THE SAID COLONY</strong></span></span><span class="clause-body">The Allottee agrees that the Firm shall have the right to transfer ownership of the Said Colony in whole or in parts to any other entity such as any partnership firm, body corporate(s) whether incorporated or not, association or agency by way of sale/ disposal /or any other arrangement as may be decided by the Firm without any intimation, written or otherwise to the Allottee and the Allottee shall not raise any objection in this regard.</span></p>
 <p class="clause-block"><span class="clause-heading"><span class="clause-heading-number"><strong>14.</strong></span><span class="clause-heading-text"><strong>RIGHT TO AMEND TERMS AND CONDITIONS</strong></span></span><span class="clause-body">The Allottee agrees and understands that the terms and conditions of the Agreement may be modified / amended by the Firm in accordance with any directions/order of any court of law, Governmental Authority, in compliance with applicable law and such amendment shall be binding on the Allottee. The Firm further reserves the right to correct, modify, amend or change all the annexure attached to this Agreement and also annexure which are indicated to be tentative at any time prior to the execution of the Sale Deed of the Said Plot.</span></p>
@@ -161,7 +165,7 @@ export function ambeyAllotmentTemplate() {
 </section>
 
 <section data-ambey-page="14" data-top="760" class="agreement-page" data-reflow="agreement">
-<p class="closing-intro"><strong>IN WITNESS WHEREOF</strong>, the parties hereto have set and subscribed their respective hands at the places and on the day, month and year mentioned under their respective signatures</p>
+<p class="closing-intro" data-force-page-break="true"><strong>IN WITNESS WHEREOF</strong>, the parties hereto have set and subscribed their respective hands at the places and on the day, month and year mentioned under their respective signatures</p>
 <p class="closing-title"><u><strong>SIGNED AND DELIVERED BY THE WITH IN NAMED</strong></u><br>Allottee (including joint allottees)</p>
 <table class="signature-lines">
 <tr><td>(1) NAME: {{owner.nameWithRelation}}</td><td>SIGNATURE</td></tr>
