@@ -69,7 +69,7 @@ class _PaymentScreenState extends ConsumerState<PaymentScreen> {
                         ),
                         const SizedBox(height: 10),
                         DropdownButtonFormField<String>(
-                          value: _type,
+                          initialValue: _type,
                           decoration: const InputDecoration(labelText: 'Payment type'),
                           items: const [
                             DropdownMenuItem(value: PaymentType.booking, child: Text('Booking')),

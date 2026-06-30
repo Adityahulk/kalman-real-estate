@@ -276,22 +276,39 @@
   text-justify: inter-word;
 }
 .letter-paper-editor .roman-item {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  column-gap: 8px;
+  display: flex !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  gap: 18px;
   align-items: start;
   padding-left: 26px;
   text-indent: 0;
   line-height: 1.62;
   margin-bottom: 22px;
+  white-space: normal !important;
+  text-align: left;
 }
 .letter-paper-editor .roman-label,
 .letter-paper-editor .roman-text {
-  display: block;
+  display: block !important;
 }
 .letter-paper-editor .roman-label {
+  flex: 0 0 44px !important;
+  width: 44px !important;
+  min-width: 44px !important;
   text-align: right;
   white-space: nowrap;
+}
+.letter-paper-editor .roman-text {
+  flex: 1 1 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: none !important;
+  white-space: normal !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+  text-align: justify;
+  text-justify: inter-word;
 }
 .letter-paper-editor .consent-indent {
   padding-left: 0;

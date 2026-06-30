@@ -22,8 +22,8 @@ final _routerRefreshProvider = ChangeNotifierProvider((ref) {
 });
 
 final appRouterProvider = Provider<GoRouter>((ref) {
-  final refresh = ref.watch(_routerRefreshProvider);
-  return GoRouter(
+  final refresh = ref.read(_routerRefreshProvider);
+  final router = GoRouter(
     initialLocation: '/login',
     refreshListenable: refresh,
     redirect: (context, state) {
@@ -84,6 +84,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
+  ref.onDispose(router.dispose);
+  return router;
 });
 
 class RouterRefreshNotifier extends ChangeNotifier {
