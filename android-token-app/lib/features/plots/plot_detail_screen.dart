@@ -179,14 +179,14 @@ class PlotDetailScreen extends ConsumerWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<int>(
-                  initialValue: buyerId,
+                  value: buyerId,
                   decoration: const InputDecoration(labelText: 'Buyer'),
                   items: buyers.map((buyer) => DropdownMenuItem(value: buyer.id, child: Text(buyer.name))).toList(),
                   onChanged: (value) => setDialogState(() => buyerId = value),
                 ),
                 const SizedBox(height: 10),
                 DropdownButtonFormField<int>(
-                  initialValue: tokenId,
+                  value: tokenId,
                   decoration: const InputDecoration(labelText: 'Token'),
                   items: buyerTokens
                       .map((token) => DropdownMenuItem(value: token.id, child: Text('${token.tokenCode} · ${money(token.amount)}')))

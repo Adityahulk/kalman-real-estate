@@ -30,35 +30,6 @@ const LETTER_PRINT_CSS = `
   }
   .letter-paper-editor section[data-ambey-page]:last-child,
   .letter-paper-editor section[data-letter-page]:last-child { break-after: auto; page-break-after: auto; }
-  .letter-paper-editor .roman-item {
-    display: flex !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    gap: 18px !important;
-    align-items: flex-start !important;
-    white-space: normal !important;
-    text-align: left !important;
-  }
-  .letter-paper-editor .roman-label {
-    display: block !important;
-    flex: 0 0 44px !important;
-    width: 44px !important;
-    min-width: 44px !important;
-    white-space: nowrap !important;
-    text-align: right !important;
-  }
-  .letter-paper-editor .roman-text {
-    display: block !important;
-    flex: 1 1 auto !important;
-    width: auto !important;
-    min-width: 0 !important;
-    max-width: none !important;
-    white-space: normal !important;
-    word-break: normal !important;
-    overflow-wrap: normal !important;
-    text-align: justify !important;
-    text-justify: inter-word !important;
-  }
   [data-editor-page-controls] { display: none !important; }
 `;
 

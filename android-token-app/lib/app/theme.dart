@@ -15,7 +15,7 @@ ThemeData buildAppTheme() {
       border: OutlineInputBorder(),
       isDense: true,
     ),
-    cardTheme: const CardThemeData(
+    cardTheme: const CardTheme(
       elevation: 0,
       margin: EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       shape: RoundedRectangleBorder(

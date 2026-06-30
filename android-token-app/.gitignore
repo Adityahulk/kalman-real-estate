@@ -1,7 +1,4 @@
 .dart_tool/
-.config/
-.gradle-local/
-.pub-cache/
 .flutter-plugins
 .flutter-plugins-dependencies
 .packages
@@ -12,6 +9,7 @@ android/app/build/
 ios/
 linux/
 macos/
+web/
 windows/
 .idea/
 *.iml
