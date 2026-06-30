@@ -20,72 +20,6 @@ export const reflowPagesBrowserSource = `(function (rootOrSelector, opts) {
   var PAGE_HEIGHT = (opts && opts.pageHeight) || 1216;
   var PAGE_SELECTOR = "section[data-ambey-page], section[data-letter-page]";
   function isControl(el) { return el.hasAttribute("data-editor-page-controls"); }
-  function contentCount(page) {
-    return Array.prototype.slice.call(page.children).filter(function (el) { return !isControl(el); }).length;
-  }
-  function createAfter(page) {
-    var next = page.cloneNode(false);
-    next.removeAttribute("style");
-    if (page.parentElement) page.parentElement.insertBefore(next, page.nextSibling);
-    return next;
-  }
-  function splitWords(text, wordCount) {
-    var words = String(text || "").trim().split(/\\s+/).filter(Boolean);
-    return {
-      head: words.slice(0, wordCount).join(" "),
-      tail: words.slice(wordCount).join(" "),
-      count: words.length
-    };
-  }
-  function textRemainderElement(className, text) {
-    var p = document.createElement("p");
-    p.className = className;
-    p.textContent = text;
-    return p;
-  }
-  function splitBlockToFit(page, block) {
-    var target = null;
-    var remainderClass = "";
-    if (block.classList && block.classList.contains("clause-block")) {
-      target = block.querySelector(".clause-body");
-      remainderClass = "clause-continuation";
-    } else if (block.classList && block.classList.contains("subclause-item")) {
-      target = block.querySelector(".subclause-text");
-      remainderClass = "subclause-continuation";
-    } else if (block.classList && block.classList.contains("clause-continuation")) {
-      target = block;
-      remainderClass = "clause-continuation";
-    } else if (block.classList && block.classList.contains("subclause-continuation")) {
-      target = block;
-      remainderClass = "subclause-continuation";
-    }
-    if (!target) return null;
-    var fullText = String(target.textContent || "").trim();
-    var all = splitWords(fullText, 0);
-    if (all.count < 12) return null;
-
-    var low = 1;
-    var high = all.count;
-    var best = 0;
-    while (low <= high) {
-      var mid = Math.floor((low + high) / 2);
-      var parts = splitWords(fullText, mid);
-      target.textContent = parts.head;
-      if (page.scrollHeight <= PAGE_HEIGHT) {
-        best = mid;
-        low = mid + 1;
-      } else {
-        high = mid - 1;
-      }
-    }
-    if (best < 6 || best >= all.count) {
-      target.textContent = fullText;
-      return null;
-    }
-    var finalParts = splitWords(fullText, best);
-    target.textContent = finalParts.head;
-    return textRemainderElement(remainderClass, finalParts.tail);
-  }
 
   // Save caret so moving nodes around doesn't drop the cursor (nodes are moved, not cloned).
   var saved = null;
@@ -136,27 +70,14 @@ export const reflowPagesBrowserSource = `(function (rootOrSelector, opts) {
     var current = first;
     for (var s = 0; s < stream.length; s++) {
       var block = stream[s];
-      if (block.hasAttribute("data-force-page-break") && contentCount(current) > 0) {
-        current = createAfter(current);
-      }
       current.appendChild(block);
-      var count = contentCount(current);
-      if (current.scrollHeight > PAGE_HEIGHT) {
-        var remainder = count > 1 ? splitBlockToFit(current, block) : null;
-        if (remainder) {
-          stream.splice(s + 1, 0, remainder);
-        } else if (count > 1) {
-          var next = createAfter(current); // copies class + data-reflow, no children
-          next.appendChild(block);
-          current = next;
-          if (current.scrollHeight > PAGE_HEIGHT) {
-            var nextRemainder = splitBlockToFit(current, block);
-            if (nextRemainder) stream.splice(s + 1, 0, nextRemainder);
-          }
-        } else {
-          var singleRemainder = splitBlockToFit(current, block);
-          if (singleRemainder) stream.splice(s + 1, 0, singleRemainder);
-        }
+      var count = Array.prototype.slice.call(current.children).filter(function (el) { return !isControl(el); }).length;
+      if (current.scrollHeight > PAGE_HEIGHT && count > 1) {
+        var next = current.cloneNode(false); // copies class + data-reflow, no children
+        next.removeAttribute("style");
+        if (current.parentElement) current.parentElement.insertBefore(next, current.nextSibling);
+        next.appendChild(block);
+        current = next;
       }
     }
   }
