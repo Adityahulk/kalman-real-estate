@@ -444,7 +444,12 @@ async function drawSpecialBox(context: RenderContext, html: string, attrs: Recor
 
   if (className.includes("photo-box")) {
     drawPhotoPlaceholder(context, html, className);
+    return;
   }
+
+  // Unrecognised container (e.g. the closing-block wrapper): render its children so a layout-only
+  // <div> never silently drops the content nested inside it.
+  await renderSection(context, html);
 }
 
 function drawPossessionLayout(context: RenderContext, html: string) {
