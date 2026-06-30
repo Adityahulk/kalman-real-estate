@@ -112,10 +112,32 @@ export const reflowPagesBrowserSource = `(function (rootOrSelector, opts) {
   } else {
     // Collect the agreement group's blocks into one ordered stream, then greedily fill pages.
     var first = agreementSections[0];
-    var stream = [];
+    var rawStream = [];
     for (var a = 0; a < agreementSections.length; a++) {
       var kids = Array.prototype.slice.call(agreementSections[a].children);
-      for (var b = 0; b < kids.length; b++) { if (!isControl(kids[b])) stream.push(kids[b]); }
+      for (var b = 0; b < kids.length; b++) { if (!isControl(kids[b])) rawStream.push(kids[b]); }
+    }
+    // Undo any earlier split: fold each continuation paragraph back into the clause/subclause body it
+    // came from, so re-pagination always starts from whole clauses. Without this, a continuation that
+    // now fits on the same page as its head stays a separate paragraph and shows a blank-line gap.
+    var stream = [];
+    for (var q = 0; q < rawStream.length; q++) {
+      var blk = rawStream[q];
+      var isCont = blk.classList && (blk.classList.contains("clause-continuation") || blk.classList.contains("subclause-continuation"));
+      if (isCont && stream.length) {
+        var prevBlk = stream[stream.length - 1];
+        var foldTarget =
+          prevBlk.querySelector && prevBlk.querySelector(".clause-body") ? prevBlk.querySelector(".clause-body")
+          : prevBlk.querySelector && prevBlk.querySelector(".subclause-text") ? prevBlk.querySelector(".subclause-text")
+          : (prevBlk.classList && (prevBlk.classList.contains("clause-continuation") || prevBlk.classList.contains("subclause-continuation"))) ? prevBlk
+          : null;
+        if (foldTarget) {
+          foldTarget.textContent = (String(foldTarget.textContent || "") + " " + String(blk.textContent || "")).replace(/\\s+/g, " ").trim();
+          if (blk.parentElement) blk.parentElement.removeChild(blk);
+          continue;
+        }
+      }
+      stream.push(blk);
     }
     for (var c = 1; c < agreementSections.length; c++) agreementSections[c].remove();
     while (first.firstChild) first.removeChild(first.firstChild);
