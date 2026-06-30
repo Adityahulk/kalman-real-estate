@@ -179,16 +179,20 @@
 .letter-paper-editor .regulatory-note {
   line-height: 1.56;
 }
+/* Selector includes section[data-ambey-page] so it outranks the base section font-size:15px rule
+   (otherwise the agreement body silently renders at 15px and paginates too tightly). */
+.letter-paper-editor section[data-ambey-page].agreement-page,
 .letter-paper-editor .agreement-page {
-  /* ~12pt Arial at the 860/595.32 px-per-pt scale, with reference-tight leading. */
-  font-size: 16px;
-  line-height: 1.5;
+  /* 12pt Arial at the 860/595.32 px-per-pt scale (17.3px), matching the Word reference's body
+     size and ~1.2 leading so the agreement paginates with the same density as the reference. */
+  font-size: 17.3px;
+  line-height: 1.2;
   letter-spacing: 0;
 }
 .letter-paper-editor .agreement-page p {
   margin: 0 0 14px;
   white-space: normal;
-  line-height: 1.5;
+  line-height: 1.2;
   text-align: justify;
   text-justify: inter-word;
 }
@@ -234,7 +238,7 @@
   display: block;
   padding-left: 34px;
   white-space: normal;
-  line-height: 1.5;
+  line-height: 1.2;
   text-align: justify;
   text-justify: inter-word;
 }
@@ -246,7 +250,7 @@
   padding-left: 34px;
   margin-bottom: 18px;
   white-space: normal;
-  line-height: 1.5;
+  line-height: 1.2;
   text-align: justify;
   text-justify: inter-word;
 }
@@ -263,7 +267,7 @@
   display: block;
 }
 .letter-paper-editor .subclause-text {
-  line-height: 1.5;
+  line-height: 1.2;
   text-align: justify;
   text-justify: inter-word;
 }
@@ -271,7 +275,7 @@
   padding-left: 42px;
   margin-bottom: 18px;
   white-space: normal;
-  line-height: 1.5;
+  line-height: 1.2;
   text-align: justify;
   text-justify: inter-word;
 }
