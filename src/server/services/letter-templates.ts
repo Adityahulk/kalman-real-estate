@@ -199,40 +199,80 @@ export function ambeyAllotmentTemplate() {
 export function transferLetterTemplate() {
   return `<div data-letter-template="transfer-letter">
 <section data-letter-page="1" data-top="760">
-<h1><u>Transfer Letter</u></h1>
-<p class="right">Transfer Letter No.: {{document.number}}<br>Date: {{document.date}}</p>
-<p>To<br><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.address}}</u><br><u>Aadhaar No. {{owner.aadhaarNo}}</u><br><u>Pan No. {{owner.panNo}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>
-<p><strong>Subject :-</strong> Transfer of Residential Plot No. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqydApprox}}</strong> in <strong>{{project.name}}, {{project.fullAddress}}</strong>.</p>
-<p>This is to confirm that the ownership / allotment interest in Plot No. <strong>{{plot.code}}</strong> of <strong>{{project.name}}</strong> has been recorded in favour of <strong>{{owner.nameWithRelation}}</strong>, resident of <strong>{{owner.address}}</strong>, subject to the terms, dues, records, approvals, and internal transfer conditions of <strong>{{firm.name}}</strong>.</p>
-<table>
-<tr><th>Project</th><td><strong>{{project.nameUpper}}</strong></td></tr>
-<tr><th>Plot No.</th><td><strong>{{plot.code}}</strong></td></tr>
-<tr><th>Plot Area</th><td><strong>{{plot.areaSqyd}} Sq. Yds. approx.</strong></td></tr>
-<tr><th>Transferee / Owner</th><td><strong>{{owner.nameWithRelationUpper}}</strong></td></tr>
-<tr><th>Address</th><td><strong>{{owner.addressUpper}}</strong></td></tr>
-<tr><th>Transfer Amount</th><td><strong>Rs. {{plot.priceInrFormatted}}/-</strong></td></tr>
-<tr><th>Share</th><td><strong>{{ownership.sharePct}}%</strong></td></tr>
-<tr><th>Effective Date</th><td><strong>{{ownership.effectiveDateDots}}</strong></td></tr>
-</table>
-<p>The transfer has been entered in the records of the Firm on the basis of information, documents, and declarations submitted by the parties. The transferee shall be bound by the terms and conditions of the original allotment, buyer agreement, colony rules, development controls, payment obligations, transfer fee conditions, and all government/statutory requirements applicable from time to time.</p>
-<p>This letter does not by itself substitute any registered conveyance deed, sale deed, registry, mutation, government approval, or statutory record. Registry and other government processes, wherever applicable, shall be completed separately by the concerned parties.</p>
-<p class="right">For M/s. {{firm.nameUpper}}<br><br>Authorized Signatory</p>
+<p>Date: {{document.date}}</p>
+<p class="transfer-to-block">To,<br><span class="transfer-to-firm"><strong>M/S. {{firm.nameUpper}},</strong></span><br><span class="transfer-to-firm"><strong>{{project.name}}, {{project.fullAddress}}</strong></span></p>
+<p class="transfer-subject"><span>Subject&nbsp;&nbsp;&nbsp;:</span><span>Transfer of Residential Plot No. <strong>{{plot.code}}</strong> situated in <strong>{{project.name}}</strong> situated at <strong>{{project.fullAddress}}</strong>.</span></p>
+<p>Respected Sir,</p>
+<p>I, <strong>------------ s/o Sh. -----------</strong> has been allotted residential Plot No. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqyd}}</strong> Square Yards at <strong>{{project.name}}</strong> of <strong>M/s. {{firm.name}}, {{firm.address}}</strong> vide allotment letter No. <strong>-----------------</strong> dated <strong>----------</strong>. I/we seek your permission to transfer the above stated plot in favor of:</p>
+<p class="center transfer-party"><u><strong>{{owner.nameWithRelation}}</strong></u><br>{{owner.addressMultilineHtml}}<br>PAN No. {{owner.panNo}}<br>Aadhaar No. {{owner.aadhaarNo}}</p>
+<p>The conveyance deed in respect of the plot has been / not yet been executed. The said plot is free from all encumbrances like mortgages, gift or transfer in any manner to any person(s)/body.</p>
+<p>I/we hereby declare that nothing has been concealed in the above information and the residential plot is vacant. If in future, it is found that the transfer has been affected on the basis of false/wrong information provided in the application the transfer shall be deemed to be null and void and all consequent losses i.e. legal or financial shall be born by us. In case company suffers any loss on account of this transfer or as a consequence of this transfer myself/ourselves, legal heirs and successors of myself/ourselves shall be liable to make good all the losses or expenses sustained/suffered by the company or its employees. In case any legal heirs or successor or other person makes any claim regarding this residential plot, the litigation of the same shall be defended by me/us and the loss/expenses sustained/suffered by the company will also be made good by myself/ourselves.</p>
 </section>
 
 <section data-letter-page="2" data-top="760">
-<h2><u>Transfer Acknowledgement</u></h2>
-<p>I/We acknowledge that Plot No. <strong>{{plot.code}}</strong> in <strong>{{project.name}}, {{project.fullAddress}}</strong> has been transferred / recorded in my/our name as per the details mentioned in this transfer letter.</p>
-<p>I/We confirm that all details provided by me/us, including identity, address, contact, payment, and KYC details are true and correct. I/We shall submit any additional document, declaration, undertaking, or government record required by the Firm or the competent authority.</p>
-<p>I/We agree to follow all terms applicable to the said plot, including construction rules, colony maintenance, dues, taxes, statutory charges, registry expenses, and any future charges payable as per law or project rules.</p>
-<table class="plain">
-<tr><th>Owner Name</th><td>: {{owner.nameWithRelation}}</td></tr>
-<tr><th>Mobile No.</th><td>: {{owner.mobileNo}}</td></tr>
-<tr><th>PAN No.</th><td>: {{owner.panNo}}</td></tr>
-<tr><th>Aadhaar No.</th><td>: {{owner.aadhaarNo}}</td></tr>
-<tr><th>Address</th><td>: {{owner.address}}</td></tr>
+<p>The name, address and specimen signatures of the 1st transfer holder(s) as attested by me/us are as below:-</p>
+<table class="holder-table">
+<tr><th>Sr. No.</th><th>Name</th><th>Address</th><th>Signature</th></tr>
+<tr><td>1.</td><td>{{owner.nameWithRelation}}</td><td>{{owner.address}}</td><td>&nbsp;</td></tr>
 </table>
-<p><strong>Witnesses:</strong><br>1. Name: ________________________ Signature: ________________________<br>2. Name: ________________________ Signature: ________________________</p>
-<p class="right">Signature of Transferee / Owner</p>
+<p>Signature of the 1st Allotee _________________________________________________</p>
+<p>Thanking You,<br>Yours Faithfully</p>
+<p><strong>Submitted by<br>(------------------------)</strong></p>
+</section>
+
+<section data-letter-page="3" data-top="760">
+<p class="center">(Stamp Duty Rs. {{stamp.amount}}/- having E-Stamp No. {{stamp.estampNo}} dated {{stamp.date}})</p>
+<p class="transfer-heading">AFFIDAVITE</p>
+<p>I, <strong>------------- s/o Sh. ----------------</strong> do solemnly declare and affirm as under: -</p>
+<div class="num-list">
+<p class="num-item"><span>1.</span><span>That I am the first allotee of residential plot no. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqyd}}</strong> Square Yards situated at <strong>{{project.name}}</strong> vide allotment letter no. <strong>--------------</strong> dated <strong>----------</strong>.</span></p>
+<p class="num-item"><span>2.</span><span>That I have sold the above plot to <strong>{{owner.nameWithRelation}}</strong>.</span></p>
+<p class="num-item"><span>3.</span><span>That neither I or our legal heirs or successors shall not be concerned with this plot after this transfer.</span></p>
+<p class="num-item"><span>4.</span><span>That I shall be liable to make good any loss or damages sustained by company due to transfer made on false information provided by us.</span></p>
+<p class="num-item"><span>5.</span><span>That I undertake to pay all the dues, if any towards the company.</span></p>
+<p class="num-item"><span>6.</span><span>That in case any dispute arises, we shall stand responsible for the same.</span></p>
+</div>
+<p class="deponent">Deponent</p>
+<p class="transfer-heading">VERIFICATION</p>
+<p>I, <strong>---------------- s/o Sh. ------------</strong> verify that the contents of the above affidavit are true and correct to the best of my knowledge and nothing has been concealed therein.</p>
+<p class="deponent">Deponent</p>
+</section>
+
+<section data-letter-page="4" data-top="760">
+<p class="center">(Stamp Duty Rs. {{stamp.amount}}/- having E-Stamp No. {{stamp.2.estampNo}} dated {{stamp.2.date}})</p>
+<p class="transfer-heading">AFFIDAVITE</p>
+<p>I, <strong>{{owner.nameWithRelation}}</strong> does hereby solemnly declare and affirm as under:</p>
+<div class="num-list">
+<p class="num-item"><span>1.</span><span>That I have purchased plot no. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqyd}}</strong> Sq. Yds. situated at <strong>{{project.nameUpper}}</strong> from <strong>----------- s/o Sh. --------------</strong>.</span></p>
+<p class="num-item"><span>2.</span><span>That I accept the allotment of residential plot no. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqyd}}</strong> Sq. Yds. situated at <strong>{{project.nameUpper}}</strong> of the firm.</span></p>
+<p class="num-item"><span>3.</span><span>That I further undertake to make payment of all the outstanding dues i.e. taxes/cess if any in respect of the above plot.</span></p>
+<p class="num-item"><span>4.</span><span>That I accept all the terms and condition relating to the allotment of residential plot, of the company as provided in the allotment letter no. <strong>-------</strong> dated <strong>---------</strong>.</span></p>
+<p class="num-item"><span>5.</span><span>That I undertake to abide all the terms and conditions of RERA / PUDA / <span class="red-text">Municipal Corporation, {{project.city}}</span>.</span></p>
+</div>
+<p class="deponent">Deponent</p>
+<p class="transfer-heading">VERIFICATION</p>
+<p>I, <strong>{{owner.nameWithRelation}}</strong> verify that the contents of the above affidavit are true and correct to the best of my knowledge and nothing have been concealed therein.</p>
+<p class="deponent">Deponent</p>
+</section>
+
+<section data-letter-page="5" data-top="760">
+<p class="transfer-title">TRANSFER LETTER</p>
+<p class="transfer-refline"><span><strong>No. <span class="red-text">{{document.number}}</span></strong></span><span class="red-text"><strong>DATED: {{document.date}}</strong></span></p>
+<p>To,</p>
+<p class="center transfer-party"><u><strong>{{owner.nameWithRelation}}</strong></u><br>{{owner.addressMultilineHtml}}<br>PAN No. {{owner.panNo}}<br>Aadhaar No. {{owner.aadhaarNo}}</p>
+<p class="transfer-subject"><span><strong>SUBJECT:</strong></span><span><strong>TRANSRFER OF RESIDENTIAL PLOT NO. {{plot.code}} MEASURING {{plot.areaSqyd}} SQ. YDS. SITUATED AT {{project.nameUpper}}.</strong></span></p>
+<p>Respected Sir/Madam,</p>
+<p>Reference to your application dated <strong>{{document.date}}</strong> on the subject cited above.</p>
+<p>We are pleased to transfer in your favour plot no. <strong>{{plot.code}}</strong> at {{project.nameUpper}} measuring {{plot.areaSqyd}} Sq. Yds. The details of which are mentioned below:</p>
+<table class="transfer-directions">
+<tr><td>EAST SIDE</td><td>:</td><td>{{plot.eastSize}} {{plot.eastBoundary}}</td></tr>
+<tr><td>WEST SIDE</td><td>:</td><td>{{plot.westSize}} {{plot.westBoundary}}</td></tr>
+<tr><td>NORTH SIDE</td><td>:</td><td>{{plot.northSize}} {{plot.northBoundary}}</td></tr>
+<tr><td>SOUTH SIDE</td><td>:</td><td>{{plot.southSize}} {{plot.southBoundary}}</td></tr>
+</table>
+<p>The above transfer has been made subject to the condition that you will be \`Mutatis Mutandis' bound to abide by the terms and conditions of original allotment letter no. <strong>-------------</strong> dated <strong>----------</strong>.</p>
+<p class="signoff-firm">FOR {{firm.nameUpper}}</p>
+<p class="signoff-partner">(PARTNER)</p>
 </section>
 </div>`;
 }

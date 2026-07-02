@@ -530,6 +530,92 @@
   border: 0;
   padding: 4px 0;
 }
+/* Transfer letter */
+.letter-paper-editor .transfer-to-block {
+  line-height: 1.55;
+  margin-bottom: 22px;
+}
+.letter-paper-editor .transfer-to-firm {
+  text-transform: uppercase;
+}
+.letter-paper-editor .transfer-subject {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  column-gap: 8px;
+  align-items: start;
+  margin: 20px 0 26px;
+  white-space: normal;
+  text-align: left;
+}
+.letter-paper-editor .transfer-party {
+  line-height: 1.55;
+  margin: 14px 0 20px;
+}
+.letter-paper-editor .transfer-heading {
+  text-align: center;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  margin: 28px 0 24px;
+}
+.letter-paper-editor .transfer-title {
+  text-align: center;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  font-size: 1.12em;
+  margin: 8px 0 30px;
+}
+.letter-paper-editor .num-list {
+  padding-left: 38px;
+  margin: 14px 0;
+}
+.letter-paper-editor .num-item {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  column-gap: 10px;
+  align-items: start;
+  margin-bottom: 16px;
+  white-space: normal;
+  text-align: justify;
+  text-justify: inter-word;
+}
+.letter-paper-editor .deponent {
+  text-align: right;
+  padding-right: 92px;
+  margin: 26px 0;
+}
+.letter-paper-editor .transfer-directions {
+  width: 66%;
+  margin: 16px 0 18px;
+}
+.letter-paper-editor .transfer-directions td {
+  padding: 6px 12px;
+}
+.letter-paper-editor .holder-table td,
+.letter-paper-editor .holder-table th {
+  padding: 8px 12px;
+}
+.letter-paper-editor .holder-table th {
+  font-weight: 400;
+  text-align: left;
+}
+.letter-paper-editor .transfer-refline {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 6px 0 20px;
+}
+.letter-paper-editor .signoff-firm {
+  text-align: right;
+  font-weight: 700;
+  margin-top: 40px;
+}
+.letter-paper-editor .signoff-partner {
+  text-align: right;
+  font-weight: 700;
+  margin-top: 44px;
+}
 .letter-paper-editor .pricing-table {
   width: 100%;
   margin: 8px 0 4px;
