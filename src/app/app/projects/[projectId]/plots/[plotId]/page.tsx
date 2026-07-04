@@ -685,8 +685,8 @@ function DocumentGrid({ files, empty, showShare = false }: { files: Awaited<Retu
             {file.documentNo ?? "No reference"} · {(file.documentDate ?? file.createdAt).toLocaleDateString("en-IN")} · {file.visibility.replaceAll("_", " ")}
           </div>
           {file.notes ? <div className="mt-2 text-xs text-slate-500">{file.notes}</div> : null}
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${file.id}/download`}>Download</a>
+          <div className="mt-3 grid gap-2 sm:flex sm:flex-wrap sm:items-center">
+            <a className="btn-outline h-9 justify-center px-3 text-xs sm:h-8" href={`/api/v1/files/${file.id}/download`}>Download</a>
             {showShare ? <FileShareActions fileId={file.id} fileName={file.fileName} /> : null}
             <DeleteFileButton fileId={file.id} fileName={file.fileName} />
           </div>

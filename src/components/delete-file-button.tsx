@@ -42,11 +42,11 @@ export function DeleteFileButton({ fileId, fileName }: { fileId: string; fileNam
   }
 
   return (
-    <span className="inline-flex items-center gap-2">
-      <button type="button" className="btn-outline h-8 px-3 text-xs" onClick={() => void rename()} disabled={loading}>
+    <span className="inline-flex w-full flex-wrap items-center gap-2 sm:w-auto">
+      <button type="button" className="btn-outline h-9 flex-1 justify-center px-3 text-xs sm:h-8 sm:flex-none" onClick={() => void rename()} disabled={loading}>
         <Pencil size={14} /> Rename
       </button>
-      <button type="button" className="btn-outline h-8 px-3 text-xs text-rose-700 hover:bg-rose-50" onClick={remove} disabled={loading}>
+      <button type="button" className="btn-outline h-9 flex-1 justify-center px-3 text-xs text-rose-700 hover:bg-rose-50 sm:h-8 sm:flex-none" onClick={remove} disabled={loading}>
         <Trash2 size={14} />
         {loading ? "Deleting" : "Delete"}
       </button>

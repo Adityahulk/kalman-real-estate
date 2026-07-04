@@ -74,12 +74,12 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
   }
 
   async function shareViaWhatsApp() {
-    const popup = window.open("", "_blank", "noopener,noreferrer");
+    const popup = window.open("about:blank", "_blank");
     try {
       const text = await shareText();
-      const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+      const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
       if (popup) popup.location.href = url;
-      else window.open(url, "_blank", "noopener,noreferrer");
+      else window.open(url, "_blank");
     } catch (error) {
       popup?.close();
       window.alert(error instanceof Error ? error.message : "Could not create share links.");
@@ -87,25 +87,28 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
   }
 
   return (
-    <div className="grid min-h-0 flex-1 gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <section ref={previewRef} className="min-h-0 overflow-hidden rounded-lg border border-slate-200 bg-white">
-        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3"><h2 className="font-semibold">{selected ? selected.fileName : `No ${label} uploaded`}</h2>{selected ? <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${selected.id}/download`}><Download size={14} /> Download</a> : null}</div>
+    <div className="grid min-h-0 min-w-0 flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-5">
+      <section ref={previewRef} className="min-h-0 min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white max-lg:order-2">
+        <div className="flex flex-col gap-2 border-b border-slate-200 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+          <h2 className="min-w-0 break-words text-sm font-semibold sm:text-base">{selected ? selected.fileName : `No ${label} uploaded`}</h2>
+          {selected ? <a className="btn-outline h-9 w-full justify-center px-3 text-xs sm:h-8 sm:w-auto" href={`/api/v1/files/${selected.id}/download`}><Download size={14} /> Download</a> : null}
+        </div>
         {selected ? <FilePreview id={selected.id} fileName={selected.fileName} mimeType={selected.mimeType} /> : <div className="flex h-[calc(100vh-16rem)] items-center justify-center text-sm text-slate-500">Upload the first file to preview it here.</div>}
       </section>
-      <aside className="min-h-0 space-y-4 overflow-auto">
+      <aside className="min-h-0 min-w-0 space-y-4 overflow-visible lg:overflow-auto max-lg:order-1">
         {canUpload && categoryKey ? <FileUploader label={`Upload new ${label}`} ownerType="Project" ownerId={projectId} visibility="TEAM" metadata={{ categoryKey }} onUploaded={() => router.refresh()} /> : null}
         <div className="rounded-lg border border-slate-200 bg-white">
-          <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-3 py-3 sm:px-4">
             <div className="font-semibold">{canUpload ? "Previous files" : "Matching files"}</div>
-            {files.length ? <button className="btn-outline h-8 px-2 text-xs" type="button" onClick={() => { setShareMode((value) => !value); setShareIds(new Set()); }}>{shareMode ? <X size={13} /> : <Share2 size={13} />}{shareMode ? "Cancel" : "Share"}</button> : null}
+            {files.length ? <button className="btn-outline h-9 px-3 text-xs sm:h-8 sm:px-2" type="button" onClick={() => { setShareMode((value) => !value); setShareIds(new Set()); }}>{shareMode ? <X size={13} /> : <Share2 size={13} />}{shareMode ? "Cancel" : "Share"}</button> : null}
           </div>
           {shareMode ? (
             <div className="space-y-2 border-b border-slate-100 bg-slate-50 p-3">
               <div className="text-xs text-slate-600">Select files, then choose how to share their download links.</div>
-              <div className="flex flex-wrap gap-2">
-                <button className="btn-primary h-8 px-3 text-xs" type="button" disabled={!shareIds.size} onClick={() => void nativeShare()}><Share2 size={13} /> Share</button>
-                <button className="btn-outline h-8 px-3 text-xs" type="button" disabled={!shareIds.size} onClick={() => void shareViaEmail()}><Mail size={13} /> Email</button>
-                <button className="btn-outline h-8 px-3 text-xs" type="button" disabled={!shareIds.size} onClick={() => void shareViaWhatsApp()}><MessageCircle size={13} /> WhatsApp</button>
+              <div className="grid gap-2 sm:grid-cols-3">
+                <button className="btn-primary h-9 justify-center px-3 text-xs sm:h-8" type="button" disabled={!shareIds.size} onClick={() => void nativeShare()}><Share2 size={13} /> Share</button>
+                <button className="btn-outline h-9 justify-center px-3 text-xs sm:h-8" type="button" disabled={!shareIds.size} onClick={() => void shareViaEmail()}><Mail size={13} /> Email</button>
+                <button className="btn-outline h-9 justify-center px-3 text-xs sm:h-8" type="button" disabled={!shareIds.size} onClick={() => void shareViaWhatsApp()}><MessageCircle size={13} /> WhatsApp</button>
               </div>
             </div>
           ) : null}
@@ -113,7 +116,7 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
             {files.map((file) => <div className={`p-3 ${selected?.id === file.id ? "bg-navy-100" : ""}`} key={file.id}>
               <div className="flex items-start gap-2">
                 {shareMode ? <input className="mt-1 size-4" type="checkbox" checked={shareIds.has(file.id)} onChange={() => toggleShare(file.id)} aria-label={`Share ${file.fileName}`} /> : null}
-                <button className="flex min-w-0 flex-1 items-start gap-2 text-left" type="button" onClick={() => selectFile(file.id)}><File className="mt-0.5 shrink-0" size={15} /><span className="min-w-0"><span className="block truncate text-sm font-medium">{file.fileName}</span>{file.categoryLabel ? <span className="block truncate text-xs text-slate-500">{file.categoryLabel}</span> : null}<span className="text-xs text-slate-500">{new Date(file.createdAt).toLocaleString()}</span></span></button>
+                <button className="flex min-w-0 flex-1 items-start gap-2 text-left" type="button" onClick={() => selectFile(file.id)}><File className="mt-0.5 shrink-0" size={15} /><span className="min-w-0"><span className="block break-words text-sm font-medium sm:truncate">{file.fileName}</span>{file.categoryLabel ? <span className="block break-words text-xs text-slate-500 sm:truncate">{file.categoryLabel}</span> : null}<span className="text-xs text-slate-500">{new Date(file.createdAt).toLocaleString()}</span></span></button>
               </div>
               <div className="mt-2 flex flex-wrap gap-1"><a className="btn-ghost h-8 px-2 text-xs" href={`/api/v1/files/${file.id}/download`}><Download size={13} /> Download</a><FileActions fileId={file.id} fileName={file.fileName} /></div>
             </div>)}

@@ -15,11 +15,11 @@ export function FileShareActions({ fileId, fileName }: { fileId: string; fileNam
 
   async function share(target: "whatsapp" | "email") {
     setLoading(target);
-    const popup = target === "whatsapp" ? window.open("", "_blank", "noopener,noreferrer") : null;
+    const popup = target === "whatsapp" ? window.open("about:blank", "_blank") : null;
     try {
       const text = await createPublicShareText();
       const url = target === "whatsapp"
-        ? `https://wa.me/?text=${encodeURIComponent(text)}`
+        ? `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`
         : `mailto:?subject=${encodeURIComponent(fileName)}&body=${encodeURIComponent(text)}`;
       if (popup) popup.location.href = url;
       else window.open(url, "_self");
@@ -33,11 +33,11 @@ export function FileShareActions({ fileId, fileName }: { fileId: string; fileNam
 
   return (
     <>
-      <button className="btn-outline h-8 px-3 text-xs" type="button" disabled={Boolean(loading)} onClick={() => void share("whatsapp")}>
+      <button className="btn-outline h-9 w-full justify-center px-3 text-xs sm:h-8 sm:w-auto" type="button" disabled={Boolean(loading)} onClick={() => void share("whatsapp")}>
         <MessageCircle size={13} />
         {loading === "whatsapp" ? "Preparing" : "WhatsApp"}
       </button>
-      <button className="btn-outline h-8 px-3 text-xs" type="button" disabled={Boolean(loading)} onClick={() => void share("email")}>
+      <button className="btn-outline h-9 w-full justify-center px-3 text-xs sm:h-8 sm:w-auto" type="button" disabled={Boolean(loading)} onClick={() => void share("email")}>
         <Mail size={13} />
         {loading === "email" ? "Preparing" : "Email"}
       </button>
