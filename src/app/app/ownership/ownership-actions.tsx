@@ -8,6 +8,8 @@ import { FileUploader } from "@/components/file-uploader";
 type PlotOption = { id: string; code: string };
 type OwnerOption = { id: string; name: string };
 type OwnerDetailOption = { id: string; name: string; email: string | null; phone: string | null };
+type StoredFileRef = { id: string; fileName: string };
+type ManualLetterField = { key: string; label: string; inputType?: "TEXT" | "FILE" };
 type RealEstateDocumentType =
   | "ALLOTMENT_LETTER"
   | "TRANSFER_LETTER"
@@ -383,7 +385,17 @@ export function PlotAllotmentForm({ plotId, owners }: { plotId: string; owners: 
   );
 }
 
-export function PlotTransferForm({ plotId, owners }: { plotId: string; owners: OwnerDetailOption[] }) {
+export function PlotTransferForm({
+  plotId,
+  projectId,
+  owners,
+  manualLetterFields = [],
+}: {
+  plotId: string;
+  projectId?: string;
+  owners: OwnerDetailOption[];
+  manualLetterFields?: ManualLetterField[];
+}) {
   const router = useRouter();
   const [mode, setMode] = useState<"new" | "existing">("new");
   const [buyerOwnerId, setBuyerOwnerId] = useState("");
@@ -395,6 +407,8 @@ export function PlotTransferForm({ plotId, owners }: { plotId: string; owners: O
   const [amountInr, setAmountInr] = useState("");
   const [sharePct, setSharePct] = useState("100");
   const [notes, setNotes] = useState("");
+  const [letterFields, setLetterFields] = useState<Record<string, string>>({});
+  const [letterFieldFiles, setLetterFieldFiles] = useState<Record<string, File[]>>({});
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -419,6 +433,34 @@ export function PlotTransferForm({ plotId, owners }: { plotId: string; owners: O
       resolvedBuyerId = ownerBody.data.id;
     }
 
+    let uploadedManualFieldFiles: Record<string, StoredFileRef[]> = {};
+    try {
+      const uploaded = await uploadTransferDocumentGroups(
+        manualLetterFields
+          .filter((field) => field.inputType === "FILE" && (letterFieldFiles[field.key]?.length ?? 0) > 0)
+          .map((field) => ({
+            group: `manual-${field.key}`,
+            files: letterFieldFiles[field.key] ?? [],
+            ownerType: "Plot",
+            ownerId: plotId,
+            categoryKey: `transfer-letter-${field.key}`,
+          })),
+      );
+      uploadedManualFieldFiles = Object.fromEntries(
+        manualLetterFields
+          .filter((field) => field.inputType === "FILE")
+          .map((field) => [
+            field.key,
+            uploaded.filter((file) => file.group === `manual-${field.key}`).map(({ group, ...file }) => file),
+          ])
+          .filter(([, files]) => (files as StoredFileRef[]).length),
+      );
+    } catch (error) {
+      setLoading(false);
+      setMessage(error instanceof Error ? error.message : "Could not upload transfer letter files.");
+      return;
+    }
+
     const response = await fetch(`/api/v1/ownership/plots/${plotId}/transfer`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -427,18 +469,57 @@ export function PlotTransferForm({ plotId, owners }: { plotId: string; owners: O
         amountInr: amountInr ? Number(amountInr) : undefined,
         sharePct: sharePct ? Number(sharePct) : undefined,
         notes: notes || undefined,
+        extraDetails: {
+          transfer: {
+            notes: notes || undefined,
+          },
+          customLetterFields: letterFields,
+          customLetterFiles: uploadedManualFieldFiles,
+        },
       }),
     });
     const body = await response.json();
+    if (!response.ok) {
+      setLoading(false);
+      setMessage(body.error ?? "Transfer failed");
+      return;
+    }
+
+    const draftResponse = await fetch("/api/v1/documents/drafts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "transfer_letter",
+        recordType: "Plot",
+        recordId: plotId,
+        data: {
+          transferAmountInr: amountInr ? Number(amountInr) : undefined,
+          transferNotes: notes || undefined,
+          customLetterFields: letterFields,
+          customLetterFiles: uploadedManualFieldFiles,
+        },
+      }),
+    });
+    const draftBody = await draftResponse.json();
     setLoading(false);
-    setMessage(response.ok ? "Transfer recorded." : body.error ?? "Transfer failed");
-    if (response.ok) router.refresh();
+    if (!draftResponse.ok) {
+      setMessage(draftBody.error ?? "Transfer recorded, but Transfer Letter could not be opened.");
+      router.refresh();
+      return;
+    }
+    if (projectId) {
+      const returnTo = `/app/projects/${projectId}/plots/${plotId}/transfer`;
+      router.push(`/app/projects/${projectId}/plots/${plotId}/letters/${draftBody.data.document.id}?returnTo=${encodeURIComponent(returnTo)}`);
+      return;
+    }
+    setMessage("Transfer recorded. Open the plot documents to edit the transfer letter.");
+    router.refresh();
   }
 
   return (
     <form onSubmit={submit} className="rounded-lg border border-slate-200 bg-white p-4">
       <h3 className="text-sm font-semibold">Transfer / resale</h3>
-      <p className="mt-1 text-xs leading-5 text-slate-500">Use this only after a plot already has an owner. No buyer is selected by default.</p>
+      <p className="mt-1 text-xs leading-5 text-slate-500">Enter the transferee details. After saving, the transfer letter draft opens automatically.</p>
       <div className="mt-3 grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 text-sm">
         <button type="button" className={`px-3 py-2 ${mode === "new" ? "bg-navy-100 text-navy-900" : "bg-white text-slate-700"}`} onClick={() => setMode("new")}>New buyer</button>
         <button type="button" className={`px-3 py-2 ${mode === "existing" ? "bg-navy-100 text-navy-900" : "bg-white text-slate-700"}`} onClick={() => setMode("existing")}>Existing buyer</button>
@@ -465,13 +546,98 @@ export function PlotTransferForm({ plotId, owners }: { plotId: string; owners: O
         <label><span className="label">Share %</span><input className="input" inputMode="decimal" value={sharePct} onChange={(event) => setSharePct(event.target.value)} /></label>
       </div>
       <label className="mt-3 block"><span className="label">Transfer notes</span><textarea className="input min-h-20" value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+      {manualLetterFields.length ? <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <div className="font-semibold text-amber-950">Transfer letter fields required before generation</div>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          {manualLetterFields.map((field) => field.inputType === "FILE" ? (
+            <label key={field.key}>
+              <span className="label text-amber-950">{field.label}</span>
+              <input className="input bg-white pt-2" type="file" multiple required={(letterFieldFiles[field.key]?.length ?? 0) === 0} onChange={(event) => setLetterFieldFiles((current) => ({ ...current, [field.key]: Array.from(event.target.files ?? []) }))} />
+              {(letterFieldFiles[field.key]?.length ?? 0) > 0 ? <div className="mt-1 text-xs text-amber-900">{letterFieldFiles[field.key].map((file) => file.name).join(", ")}</div> : null}
+            </label>
+          ) : (
+            <label key={field.key}>
+              <span className="label text-amber-950">{field.label}</span>
+              <input className="input bg-white" required value={letterFields[field.key] ?? ""} onChange={(event) => setLetterFields((values) => ({ ...values, [field.key]: event.target.value }))} />
+            </label>
+          ))}
+        </div>
+      </div> : null}
       {message ? <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
       <button className="btn-primary mt-4 w-full" disabled={loading || (mode === "existing" ? !buyerOwnerId : !name)}>
         {loading ? <Loader2 className="animate-spin" size={17} /> : <Send size={17} />}
-        Record transfer
+        Record transfer and open letter
       </button>
     </form>
   );
+}
+
+async function uploadTransferDocumentGroups(
+  groups: Array<{ group: string; files: File[]; ownerType: string; ownerId: string; categoryKey: string }>,
+) {
+  const uploaded: Array<{ group: string; id: string; fileName: string }> = [];
+  for (const group of groups) {
+    for (const file of group.files) {
+      const metaResponse = await fetch("/api/v1/files/upload", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          fileName: file.name,
+          mimeType: file.type || "application/octet-stream",
+          sizeBytes: file.size,
+          visibility: "TEAM",
+          ownerType: group.ownerType,
+          ownerId: group.ownerId,
+          categoryKey: group.categoryKey,
+          notes: `Uploaded from transfer letter form (${group.group})`,
+        }),
+      });
+      const metaBody = await metaResponse.json();
+      if (!metaResponse.ok) throw new Error(metaBody.error ?? `Could not prepare upload for ${file.name}`);
+      const uploadedTo = await uploadTransferFileToPlan(metaBody.data.upload, file);
+      const completeResponse = await fetch(`/api/v1/files/${metaBody.data.file.id}/upload-complete`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          storageProvider: uploadedTo.provider,
+          storageKey: uploadedTo.storageKey || metaBody.data.file.storageKey,
+          sizeBytes: file.size,
+        }),
+      });
+      const completeBody = await completeResponse.json();
+      if (!completeResponse.ok) throw new Error(completeBody.error ?? `Upload completed, but ${file.name} could not be saved.`);
+      uploaded.push({ group: group.group, id: completeBody.data.id, fileName: completeBody.data.fileName });
+    }
+  }
+  return uploaded;
+}
+
+type TransferUploadTarget = {
+  provider: "LOCAL" | "S3";
+  storageKey: string;
+  url: string;
+};
+
+async function uploadTransferFileToPlan(upload: string | { primary: TransferUploadTarget; fallback?: TransferUploadTarget }, file: File): Promise<TransferUploadTarget> {
+  const contentType = file.type || "application/octet-stream";
+  if (typeof upload === "string") {
+    const response = await fetch(upload, { method: "PUT", headers: { "content-type": contentType }, body: file });
+    if (!response.ok) throw new Error(`Upload failed for ${file.name}`);
+    return { provider: upload.includes("/api/v1/storage/upload") ? "LOCAL" : "S3", storageKey: "", url: upload };
+  }
+  try {
+    await putTransferUploadFile(upload.primary, file, contentType);
+    return upload.primary;
+  } catch (error) {
+    if (!upload.fallback) throw error;
+    await putTransferUploadFile(upload.fallback, file, contentType);
+    return upload.fallback;
+  }
+}
+
+async function putTransferUploadFile(target: TransferUploadTarget, file: File, contentType: string) {
+  const response = await fetch(target.url, { method: "PUT", headers: { "content-type": contentType }, body: file });
+  if (!response.ok) throw new Error(`${file.name} upload failed`);
 }
 
 export function PlotRegistryForm({ plotId }: { plotId: string }) {

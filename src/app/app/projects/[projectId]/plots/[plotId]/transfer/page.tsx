@@ -4,30 +4,42 @@ import { getSessionUser } from "@/server/session";
 import { prisma } from "@/server/db";
 import { ActionHint, ActionPageShell } from "../../../../action-page-shell";
 import { PlotTransferForm } from "../../../../../ownership/ownership-actions";
+import { extractTemplateFieldsFromBody, templateFields } from "@/server/services/document-templates";
+import { listLetterFieldSettings } from "@/server/services/letter-field-settings";
 
 export const dynamic = "force-dynamic";
 
 export default async function TransferPlotPage({ params }: { params: { projectId: string; plotId: string } }) {
   const session = await getSessionUser();
   if (!session) return null;
-  const [plot, firm] = await Promise.all([
+  const [plot, firm, letterTemplate, letterCategories] = await Promise.all([
     prisma.plot.findFirst({
       where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId, archivedAt: null },
       include: { project: true, currentOwner: true },
     }),
     prisma.tenant.findUniqueOrThrow({ where: { id: session.tenantId }, select: { maxTransfersPerPlot: true } }),
+    prisma.documentTemplate.findFirst({ where: { tenantId: session.tenantId, projectId: params.projectId, type: "transfer_letter", active: true }, orderBy: { createdAt: "desc" } }),
+    listLetterFieldSettings(session.tenantId),
   ]);
   if (!plot) notFound();
   const [owners, acceptedTransfers] = await Promise.all([
     prisma.owner.findMany({ where: { tenantId: session.tenantId }, orderBy: { name: "asc" } }),
     acceptedTransferCount(session.tenantId, plot.id),
   ]);
+  const availableLetterFields = letterCategories.flatMap((category) => category.fields.map((field) => ({
+    id: field.id,
+    label: field.label,
+    mapping: field.mapping,
+  })));
+  const resolvedTemplateFields = templateFields(letterTemplate?.variables).length
+    ? templateFields(letterTemplate?.variables)
+    : extractTemplateFieldsFromBody(letterTemplate?.body, availableLetterFields);
 
   return (
     <ActionPageShell
       eyebrow={`${plot.project.name} / ${plot.code}`}
       title="New transfer"
-      description="Record a transfer or resale. The ownership timeline, current owner, plot status, and audit history will update after saving."
+      description="Enter the transferee details, record the transfer, and continue directly to the transfer letter draft."
       backHref={`/app/projects/${plot.projectId}/plots/${plot.id}`}
       backLabel="Back to plot"
       aside={<ActionHint title="Current owner">{plot.currentOwner?.name ?? "Company inventory"}</ActionHint>}
@@ -38,7 +50,14 @@ export default async function TransferPlotPage({ params }: { params: { projectId
           <p className="mt-2">This plot already has {acceptedTransfers} accepted transfer(s). The configured cap is {firm.maxTransfersPerPlot}. Continue with registry only.</p>
           <Link className="btn-primary mt-4 w-fit" href={`/app/projects/${plot.projectId}/plots/${plot.id}/registry/update`}>Update registry</Link>
         </div>
-      ) : <PlotTransferForm plotId={plot.id} owners={owners} />}
+      ) : <PlotTransferForm
+        plotId={plot.id}
+        projectId={plot.projectId}
+        owners={owners}
+        manualLetterFields={resolvedTemplateFields
+          .filter((field) => !field.mapping || field.mapping.startsWith("manual."))
+          .map((field) => ({ key: field.key, label: field.label, inputType: field.inputType }))}
+      />}
     </ActionPageShell>
   );
 }

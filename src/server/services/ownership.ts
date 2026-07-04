@@ -152,6 +152,7 @@ export const transferPlotSchema = z.object({
   documentId: z.string().optional(),
   effectiveAt: z.string().datetime().optional(),
   notes: z.string().optional(),
+  extraDetails: z.record(z.unknown()).optional(),
 });
 
 export async function transferPlot(context: RequestContext, plotId: string, input: z.infer<typeof transferPlotSchema>) {
@@ -188,6 +189,7 @@ export async function transferPlot(context: RequestContext, plotId: string, inpu
         sharePct: input.sharePct,
         documentId: input.documentId,
         notes: input.notes,
+        extraDetails: input.extraDetails as Prisma.InputJsonValue | undefined,
         effectiveAt: input.effectiveAt ? new Date(input.effectiveAt) : undefined,
         createdById: context.userId,
       },

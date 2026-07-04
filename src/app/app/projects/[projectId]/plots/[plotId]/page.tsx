@@ -23,6 +23,7 @@ import { DeleteFileButton } from "@/components/delete-file-button";
 import { DeleteCadButton } from "@/components/delete-cad-button";
 import { FileActions } from "@/components/file-actions";
 import { FilePreview } from "@/components/file-preview";
+import { FileShareActions } from "@/components/file-share-actions";
 import { FileUploader } from "@/components/file-uploader";
 import { DeleteDocumentButton, DocumentApprovalButtons } from "../../../../documents/document-actions";
 import { ManualPlotZoneForm } from "../../../manual-entry-actions";
@@ -60,6 +61,7 @@ export default async function ProjectPlotWorkspacePage({
   const plotMapFileId = workspace.childCadFiles[0]?.id ?? cadFileId;
   const plotMapFiles = workspace.plotFiles.filter((file) => file.categoryKey === "plot-map");
   const signedAllotmentFiles = workspace.plotFiles.filter((file) => file.categoryKey === "signed-allotment-letter");
+  const oldDocumentFiles = workspace.plotFiles.filter((file) => file.categoryKey === "old-documents");
   const latestPlotMapFile = plotMapFiles[0] ?? null;
   const latestPlotCadPreviewId = workspace.childCadFiles.find((file) => file.analysis?.previewArtifactKey)?.id ?? null;
   const registryDocuments = workspace.plotFiles.filter((file) => file.documentType === "REGISTRY_RECEIPT" || file.documentType === "REGISTRY_DEED");
@@ -318,6 +320,10 @@ export default async function ProjectPlotWorkspacePage({
             <div className="card p-5">
               <h2 className="mb-4 font-semibold">Signed allotment letters</h2>
               <DocumentGrid files={signedAllotmentFiles} empty="No signed allotment letter uploaded yet." />
+            </div>
+            <div className="card p-5">
+              <h2 className="mb-4 font-semibold">Old documents</h2>
+              <DocumentGrid files={oldDocumentFiles} empty="No old allotment or transfer letter uploaded yet." showShare />
             </div>
             <div className="card p-5">
               <h2 className="mb-4 font-semibold">Allotment supporting documents</h2>
@@ -668,7 +674,7 @@ function uniqueFiles<T extends { id: string }>(files: T[]) {
   });
 }
 
-function DocumentGrid({ files, empty }: { files: Awaited<ReturnType<typeof getPlotWorkspace>>["plotFiles"]; empty: string }) {
+function DocumentGrid({ files, empty, showShare = false }: { files: Awaited<ReturnType<typeof getPlotWorkspace>>["plotFiles"]; empty: string; showShare?: boolean }) {
   return (
     <div className="grid gap-3 md:grid-cols-2">
       {files.map((file) => (
@@ -681,6 +687,7 @@ function DocumentGrid({ files, empty }: { files: Awaited<ReturnType<typeof getPl
           {file.notes ? <div className="mt-2 text-xs text-slate-500">{file.notes}</div> : null}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${file.id}/download`}>Download</a>
+            {showShare ? <FileShareActions fileId={file.id} fileName={file.fileName} /> : null}
             <DeleteFileButton fileId={file.id} fileName={file.fileName} />
           </div>
         </div>

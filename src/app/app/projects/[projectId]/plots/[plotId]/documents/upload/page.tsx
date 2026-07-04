@@ -36,6 +36,15 @@ export default async function UploadPlotDocumentPage({ params }: { params: { pro
           hideDocumentType
           title="Upload signed allotment letter"
         />
+        <OwnershipDocumentUpload
+          ownerType="Plot"
+          ownerId={plot.id}
+          defaultVisibility="OWNER_VISIBLE"
+          defaultDocumentType="ALLOTMENT_LETTER"
+          fixedCategoryKey="old-documents"
+          defaultNotes="Old allotment / transfer letter"
+          title="Upload old allotment / transfer letter"
+        />
         {plot.currentOwnerId ? (
           <OwnershipDocumentUpload ownerType="Owner" ownerId={plot.currentOwnerId} defaultVisibility="TEAM" defaultDocumentType="PAN_CARD" title="Upload owner PAN / Aadhaar / KYC" />
         ) : (

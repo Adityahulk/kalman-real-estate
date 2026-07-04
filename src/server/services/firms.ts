@@ -219,13 +219,6 @@ async function ensureFirmBaselineData(tenantId: string) {
     await prisma.tenant.update({ where: { id: tenantId }, data: tenantUpdate });
   }
 
-  await prisma.projectFileField.createMany({
-    data: [
-      ...defaultProjectFileFields.map((field) => ({ tenantId, section: "PROJECT_FILES", ...field })),
-      ...defaultProjectMapFields.map((field) => ({ tenantId, section: "PROJECT_MAPS", ...field })),
-    ],
-    skipDuplicates: true,
-  });
   await ensureDefaultLetterFields(tenantId);
 
   const projects = await prisma.project.findMany({ where: { tenantId }, select: { id: true } });
