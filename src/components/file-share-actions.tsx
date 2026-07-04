@@ -1,34 +1,46 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { Mail, MessageCircle } from "lucide-react";
 
 export function FileShareActions({ fileId, fileName }: { fileId: string; fileName: string }) {
-  const [origin, setOrigin] = useState("");
+  const [loading, setLoading] = useState<"whatsapp" | "email" | null>(null);
 
-  useEffect(() => {
-    setOrigin(window.location.origin);
-  }, []);
+  async function createPublicShareText() {
+    const response = await fetch(`/api/v1/files/${fileId}/share`);
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body?.data?.url) throw new Error(body?.error ?? "Could not create share link.");
+    return `${fileName}: ${body.data.url}`;
+  }
 
-  const share = useMemo(() => {
-    const url = origin ? `${origin}/api/v1/files/${fileId}/download` : `/api/v1/files/${fileId}/download`;
-    const text = `${fileName}: ${url}`;
-    return {
-      whatsapp: `https://wa.me/?text=${encodeURIComponent(text)}`,
-      email: `mailto:?subject=${encodeURIComponent(fileName)}&body=${encodeURIComponent(text)}`,
-    };
-  }, [fileId, fileName, origin]);
+  async function share(target: "whatsapp" | "email") {
+    setLoading(target);
+    const popup = target === "whatsapp" ? window.open("", "_blank", "noopener,noreferrer") : null;
+    try {
+      const text = await createPublicShareText();
+      const url = target === "whatsapp"
+        ? `https://wa.me/?text=${encodeURIComponent(text)}`
+        : `mailto:?subject=${encodeURIComponent(fileName)}&body=${encodeURIComponent(text)}`;
+      if (popup) popup.location.href = url;
+      else window.open(url, "_self");
+    } catch (error) {
+      popup?.close();
+      window.alert(error instanceof Error ? error.message : "Could not create share link.");
+    } finally {
+      setLoading(null);
+    }
+  }
 
   return (
     <>
-      <a className="btn-outline h-8 px-3 text-xs" href={share.whatsapp} target="_blank" rel="noreferrer">
+      <button className="btn-outline h-8 px-3 text-xs" type="button" disabled={Boolean(loading)} onClick={() => void share("whatsapp")}>
         <MessageCircle size={13} />
-        WhatsApp
-      </a>
-      <a className="btn-outline h-8 px-3 text-xs" href={share.email}>
+        {loading === "whatsapp" ? "Preparing" : "WhatsApp"}
+      </button>
+      <button className="btn-outline h-8 px-3 text-xs" type="button" disabled={Boolean(loading)} onClick={() => void share("email")}>
         <Mail size={13} />
-        Email
-      </a>
+        {loading === "email" ? "Preparing" : "Email"}
+      </button>
     </>
   );
 }

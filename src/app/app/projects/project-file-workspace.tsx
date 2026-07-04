@@ -32,16 +32,18 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
     });
   }
 
-  function shareText() {
-    const origin = typeof window === "undefined" ? "" : window.location.origin;
-    return selectedShareFiles
-      .map((file) => `${file.fileName}: ${origin}/api/v1/files/${file.id}/download`)
-      .join("\n");
+  async function shareText() {
+    const links = await Promise.all(selectedShareFiles.map(async (file) => {
+      const response = await fetch(`/api/v1/files/${file.id}/share`);
+      const body = await response.json().catch(() => null);
+      if (!response.ok || !body?.data?.url) throw new Error(body?.error ?? `Could not create share link for ${file.fileName}`);
+      return `${file.fileName}: ${body.data.url}`;
+    }));
+    return links.join("\n");
   }
 
   async function nativeShare() {
-    const text = shareText();
-    if (!text) return;
+    if (!selectedShareFiles.length) return;
     if (navigator.share) {
       const shareFiles = await Promise.all(selectedShareFiles.map(async (file) => {
         const response = await fetch(`/api/v1/files/${file.id}/download?proxy=1`);
@@ -53,19 +55,35 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
         await navigator.share({ title: "Project files", files: shareFiles }).catch(() => undefined);
         return;
       }
+      const text = await shareText();
       await navigator.share({ title: "Project files", text }).catch(() => undefined);
       return;
     }
+    const text = await shareText();
     await navigator.clipboard?.writeText(text).catch(() => undefined);
     window.alert("File links copied. You can paste them into any app.");
   }
 
-  function emailHref() {
-    return `mailto:?subject=${encodeURIComponent("Project files")}&body=${encodeURIComponent(shareText())}`;
+  async function shareViaEmail() {
+    try {
+      const text = await shareText();
+      window.open(`mailto:?subject=${encodeURIComponent("Project files")}&body=${encodeURIComponent(text)}`, "_self");
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Could not create share links.");
+    }
   }
 
-  function whatsappHref() {
-    return `https://wa.me/?text=${encodeURIComponent(shareText())}`;
+  async function shareViaWhatsApp() {
+    const popup = window.open("", "_blank", "noopener,noreferrer");
+    try {
+      const text = await shareText();
+      const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+      if (popup) popup.location.href = url;
+      else window.open(url, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      popup?.close();
+      window.alert(error instanceof Error ? error.message : "Could not create share links.");
+    }
   }
 
   return (
@@ -86,8 +104,8 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
               <div className="text-xs text-slate-600">Select files, then choose how to share their download links.</div>
               <div className="flex flex-wrap gap-2">
                 <button className="btn-primary h-8 px-3 text-xs" type="button" disabled={!shareIds.size} onClick={() => void nativeShare()}><Share2 size={13} /> Share</button>
-                <a className={`btn-outline h-8 px-3 text-xs ${!shareIds.size ? "pointer-events-none opacity-50" : ""}`} href={emailHref()}><Mail size={13} /> Email</a>
-                <a className={`btn-outline h-8 px-3 text-xs ${!shareIds.size ? "pointer-events-none opacity-50" : ""}`} href={whatsappHref()} target="_blank" rel="noreferrer"><MessageCircle size={13} /> WhatsApp</a>
+                <button className="btn-outline h-8 px-3 text-xs" type="button" disabled={!shareIds.size} onClick={() => void shareViaEmail()}><Mail size={13} /> Email</button>
+                <button className="btn-outline h-8 px-3 text-xs" type="button" disabled={!shareIds.size} onClick={() => void shareViaWhatsApp()}><MessageCircle size={13} /> WhatsApp</button>
               </div>
             </div>
           ) : null}
