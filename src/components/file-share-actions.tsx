@@ -15,16 +15,13 @@ export function FileShareActions({ fileId, fileName }: { fileId: string; fileNam
 
   async function share(target: "whatsapp" | "email") {
     setLoading(target);
-    const popup = target === "whatsapp" ? window.open("about:blank", "_blank") : null;
     try {
       const text = await createPublicShareText();
       const url = target === "whatsapp"
-        ? `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`
+        ? whatsAppShareUrl(text)
         : `mailto:?subject=${encodeURIComponent(fileName)}&body=${encodeURIComponent(text)}`;
-      if (popup) popup.location.href = url;
-      else window.open(url, "_self");
+      window.location.href = url;
     } catch (error) {
-      popup?.close();
       window.alert(error instanceof Error ? error.message : "Could not create share link.");
     } finally {
       setLoading(null);
@@ -43,4 +40,10 @@ export function FileShareActions({ fileId, fileName }: { fileId: string; fileNam
       </button>
     </>
   );
+}
+
+function whatsAppShareUrl(text: string) {
+  const encoded = encodeURIComponent(text);
+  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  return isMobile ? `whatsapp://send?text=${encoded}` : `https://api.whatsapp.com/send?text=${encoded}`;
 }

@@ -74,14 +74,10 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
   }
 
   async function shareViaWhatsApp() {
-    const popup = window.open("about:blank", "_blank");
     try {
       const text = await shareText();
-      const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
-      if (popup) popup.location.href = url;
-      else window.open(url, "_blank");
+      window.location.href = whatsAppShareUrl(text);
     } catch (error) {
-      popup?.close();
       window.alert(error instanceof Error ? error.message : "Could not create share links.");
     }
   }
@@ -126,4 +122,10 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
       </aside>
     </div>
   );
+}
+
+function whatsAppShareUrl(text: string) {
+  const encoded = encodeURIComponent(text);
+  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  return isMobile ? `whatsapp://send?text=${encoded}` : `https://api.whatsapp.com/send?text=${encoded}`;
 }
