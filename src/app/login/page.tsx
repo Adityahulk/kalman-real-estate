@@ -3,7 +3,7 @@
 import { FormEvent, Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { Building2, Loader2, LockKeyhole, Mail } from "lucide-react";
+import { Building2, Loader2, LockKeyhole, UserRound } from "lucide-react";
 
 export default function LoginPage() {
   return (
@@ -16,7 +16,7 @@ export default function LoginPage() {
 function LoginForm() {
   const router = useRouter();
   const search = useSearchParams();
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -29,7 +29,7 @@ function LoginForm() {
     const response = await fetch("/api/v1/auth/login", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ identifier, password }),
     });
     const payload = await response.json();
 
@@ -58,10 +58,10 @@ function LoginForm() {
             <p className="mt-2 text-center text-sm text-slate-500">Access your property workspace.</p>
 
             <label className="mt-6 block">
-              <span className="label">Email</span>
+              <span className="label">Email or User ID</span>
               <span className="relative block">
-                <Mail className="pointer-events-none absolute left-3 top-2.5 text-slate-400" size={17} />
-                <input className="input pl-10" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+                <UserRound className="pointer-events-none absolute left-3 top-2.5 text-slate-400" size={17} />
+                <input className="input pl-10" type="text" autoComplete="username" value={identifier} onChange={(event) => setIdentifier(event.target.value)} />
               </span>
             </label>
 
@@ -81,7 +81,7 @@ function LoginForm() {
 
             {error ? <div className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}
 
-            <button className="btn-primary mt-6 w-full" disabled={loading || !email || !password}>
+            <button className="btn-primary mt-6 w-full" disabled={loading || !identifier || !password}>
               {loading ? <Loader2 className="animate-spin" size={17} /> : null}
               Sign in
             </button>

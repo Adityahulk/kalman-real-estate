@@ -3,7 +3,17 @@ import { z } from "zod";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
-import { createNotification } from "./notifications";
+import { createNotification, notifyRoleWithPermission } from "./notifications";
+
+// Engineering task lifecycle statuses. SiteAsset.status is a free-form string, so these extend the
+// existing PLANNED/IN_PROGRESS/COMPLETED set with no enum migration.
+export const TASK_STATUS = {
+  PLANNED: "PLANNED",
+  IN_PROGRESS: "IN_PROGRESS",
+  SENT_FOR_VERIFICATION: "SENT_FOR_VERIFICATION",
+  COMPLETED: "COMPLETED",
+  RETURNED: "RETURNED",
+} as const;
 
 export const progressSchema = z.object({
   areaDone: z.number().nonnegative(),
@@ -196,6 +206,116 @@ export async function markDevelopmentTaskComplete(context: RequestContext, siteA
     before: before as unknown as Prisma.InputJsonValue,
     after: task as unknown as Prisma.InputJsonValue,
   });
+  return task;
+}
+
+// Head Engineer creates a task and assigns a site engineer + contractor with a priority and deadline.
+export const createDevelopmentTaskSchema = z.object({
+  projectId: z.string().min(1),
+  name: z.string().min(2),
+  category: z.string().min(2),
+  totalArea: z.number().nonnegative().optional(),
+  units: z.string().max(40).optional(),
+  deadline: z.string().datetime().optional(),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH"]).default("MEDIUM"),
+  assignedToId: z.string().optional(),
+  contractorId: z.string().optional(),
+});
+
+export async function createDevelopmentTask(context: RequestContext, input: z.infer<typeof createDevelopmentTaskSchema>) {
+  await prisma.project.findFirstOrThrow({ where: { id: input.projectId, tenantId: context.tenantId } });
+  const task = await prisma.siteAsset.create({
+    data: {
+      tenantId: context.tenantId,
+      projectId: input.projectId,
+      name: input.name,
+      type: input.category,
+      totalArea: input.totalArea ?? null,
+      units: input.units || null,
+      deadline: input.deadline ? new Date(input.deadline) : null,
+      priority: input.priority,
+      assignedToId: input.assignedToId || null,
+      contractorId: input.contractorId || null,
+      createdById: context.userId,
+      status: input.assignedToId ? TASK_STATUS.IN_PROGRESS : TASK_STATUS.PLANNED,
+    },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.CREATE,
+    entityType: "SiteAsset",
+    entityId: task.id,
+    after: task as unknown as Prisma.InputJsonValue,
+  });
+  if (task.assignedToId) {
+    await createNotification(context, {
+      userId: task.assignedToId,
+      title: "Task assigned",
+      body: `You have been assigned "${task.name}"${task.deadline ? ` (due ${task.deadline.toLocaleDateString()})` : ""}.`,
+      data: { siteAssetId: task.id, status: task.status },
+    });
+  }
+  return task;
+}
+
+// Site Engineer sends a task to the Head Engineer for verification once work is done.
+export async function submitTaskForVerification(context: RequestContext, siteAssetId: string) {
+  const before = await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
+  const task = await prisma.siteAsset.update({
+    where: { id: siteAssetId },
+    data: { status: TASK_STATUS.SENT_FOR_VERIFICATION },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.SUBMIT,
+    entityType: "SiteAsset",
+    entityId: siteAssetId,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: task as unknown as Prisma.InputJsonValue,
+  });
+  await notifyRoleWithPermission(context, "engineering.verify", {
+    title: "Task completed and awaiting verification",
+    body: `"${task.name}" has been marked complete and is awaiting your verification.`,
+    data: { siteAssetId: task.id, status: task.status },
+    excludeUserId: context.userId,
+  });
+  return task;
+}
+
+// Head Engineer verifies: approve → COMPLETED, or return → RETURNED with notes.
+export const verifyDevelopmentTaskSchema = z.object({
+  decision: z.enum(["APPROVE", "RETURN"]),
+  notes: z.string().optional(),
+});
+
+export async function verifyDevelopmentTask(context: RequestContext, siteAssetId: string, input: z.infer<typeof verifyDevelopmentTaskSchema>) {
+  const before = await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
+  const approved = input.decision === "APPROVE";
+  const task = await prisma.siteAsset.update({
+    where: { id: siteAssetId },
+    data: {
+      status: approved ? TASK_STATUS.COMPLETED : TASK_STATUS.RETURNED,
+      progressPct: approved ? 100 : before.progressPct,
+      verifiedById: approved ? context.userId : before.verifiedById,
+      verifiedAt: approved ? new Date() : before.verifiedAt,
+      verificationNotes: input.notes ?? before.verificationNotes,
+    },
+  });
+  await writeAuditEvent(context, {
+    action: approved ? AuditAction.VERIFY : AuditAction.RETURN,
+    entityType: "SiteAsset",
+    entityId: siteAssetId,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: { ...task, notes: input.notes } as unknown as Prisma.InputJsonValue,
+  });
+  if (task.assignedToId) {
+    await createNotification(context, {
+      userId: task.assignedToId,
+      title: approved ? "Task approved" : "Task returned",
+      body: approved
+        ? `"${task.name}" was verified and marked complete.`
+        : `"${task.name}" was returned for rework${input.notes ? `: ${input.notes}` : "."}`,
+      data: { siteAssetId: task.id, status: task.status },
+    });
+  }
   return task;
 }
 

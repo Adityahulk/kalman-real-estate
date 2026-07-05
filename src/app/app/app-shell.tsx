@@ -10,11 +10,15 @@ import {
   FileStack,
   Gauge,
   Hammer,
+  Landmark,
+  LayoutDashboard,
   LogOut,
+  ScrollText,
   Menu,
   MoreVertical,
   Plus,
   Settings,
+  ShieldCheck,
   Users,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -54,12 +58,16 @@ const globalNav = [
 export function AppShell({
   children,
   user,
+  canManageUsers = false,
+  canViewLiaison = false,
   projects,
   firms,
   activeFirmId,
 }: {
   children: React.ReactNode;
   user: ShellUser;
+  canManageUsers?: boolean;
+  canViewLiaison?: boolean;
   projects: ShellProject[];
   firms: ShellFirm[];
   activeFirmId: string;
@@ -226,6 +234,42 @@ export function AppShell({
               active={pathname.startsWith(item.href)}
             />
           ))}
+          {canManageUsers ? (
+            <ShellLink
+              href="/app/dashboard"
+              label="Dashboard"
+              icon={LayoutDashboard}
+              collapsed={collapsed}
+              active={pathname.startsWith("/app/dashboard")}
+            />
+          ) : null}
+          {canViewLiaison ? (
+            <ShellLink
+              href="/app/liaison"
+              label="Govt approvals"
+              icon={Landmark}
+              collapsed={collapsed}
+              active={pathname.startsWith("/app/liaison")}
+            />
+          ) : null}
+          {canManageUsers ? (
+            <ShellLink
+              href="/app/users"
+              label="Users & roles"
+              icon={ShieldCheck}
+              collapsed={collapsed}
+              active={pathname.startsWith("/app/users")}
+            />
+          ) : null}
+          {canManageUsers ? (
+            <ShellLink
+              href="/app/audit"
+              label="Audit trail"
+              icon={ScrollText}
+              collapsed={collapsed}
+              active={pathname.startsWith("/app/audit")}
+            />
+          ) : null}
         </nav>
 
         <div className="mt-auto space-y-2 border-t border-slate-200 p-3">

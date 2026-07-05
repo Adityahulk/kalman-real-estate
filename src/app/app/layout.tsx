@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/server/session";
 import { prisma } from "@/server/db";
+import { hasPermission } from "@/server/rbac";
 import { AppShell } from "./app-shell";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -35,6 +36,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         tenantName: tenant?.name ?? "Builder Workspace",
         tenantLogoDataUrl: tenant?.logoDataUrl ?? null,
       }}
+      canManageUsers={hasPermission(session.role, "users.manage")}
+      canViewLiaison={hasPermission(session.role, "liaison.view")}
       projects={projects}
       firms={memberships.map((membership) => membership.tenant)}
       activeFirmId={session.tenantId}

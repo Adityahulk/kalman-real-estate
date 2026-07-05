@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../db";
 import { RequestContext } from "../api";
+import { hasPermission, Permission } from "../rbac";
 
 export const notificationSchema = z.object({
   userId: z.string().optional(),
@@ -25,6 +26,37 @@ export async function createNotification(
       data: input.data as Prisma.InputJsonValue,
     },
   });
+}
+
+// Fan a notification out to every active user in the tenant whose role grants `permission`.
+// Used to alert "the approvers", "the signatories", etc. without hard-coding role names —
+// the recipient set follows the RBAC map, so adding a role to a permission auto-subscribes it.
+// `excludeUserId` avoids notifying the actor who just performed the action.
+export async function notifyRoleWithPermission(
+  context: Pick<RequestContext, "tenantId">,
+  permission: Permission,
+  input: { title: string; body: string; data?: Record<string, unknown>; excludeUserId?: string },
+) {
+  const users = await prisma.user.findMany({
+    where: { tenantId: context.tenantId, status: "ACTIVE" },
+    select: { id: true, role: true },
+  });
+  const recipients = users.filter(
+    (user) => user.id !== input.excludeUserId && hasPermission(user.role, permission),
+  );
+  if (!recipients.length) return { count: 0 };
+
+  await prisma.notification.createMany({
+    data: recipients.map((user) => ({
+      tenantId: context.tenantId,
+      userId: user.id,
+      channel: "in_app",
+      title: input.title,
+      body: input.body,
+      data: (input.data ?? {}) as Prisma.InputJsonValue,
+    })),
+  });
+  return { count: recipients.length };
 }
 
 export async function listNotifications(context: RequestContext) {

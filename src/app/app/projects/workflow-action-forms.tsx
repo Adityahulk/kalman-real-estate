@@ -990,6 +990,31 @@ export function LetterDraftStartForm({
   );
 }
 
+type LetterActivityEntry = { key: string; label: string; by: string | null; at: string };
+
+// Colour the status chip so the workflow stage is readable at a glance.
+function letterStatusChipClass(status: string) {
+  switch (status) {
+    case "SIGNED":
+    case "ISSUED":
+      return "bg-emerald-50 text-emerald-700";
+    case "APPROVED":
+    case "SENT_FOR_SIGNATURE":
+      return "bg-sky-50 text-sky-700";
+    case "SUBMITTED":
+      return "bg-amber-50 text-amber-800";
+    case "REJECTED":
+      return "bg-rose-50 text-rose-700";
+    default:
+      return "bg-slate-100 text-slate-700";
+  }
+}
+
+function formatActivityTime(iso: string) {
+  const date = new Date(iso);
+  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
 export function LetterStudioEditor({
   document: letter,
   missingVariables,
@@ -997,6 +1022,8 @@ export function LetterStudioEditor({
   eyebrow,
   arrangeHref,
   signedUploadPlotId,
+  can,
+  activity = [],
 }: {
   document: {
     id: string;
@@ -1005,20 +1032,24 @@ export function LetterStudioEditor({
     status: string;
     editableHtml: string | null;
     fileAssetId: string | null;
+    signedFileAssetId?: string | null;
   };
   missingVariables: string[];
   backHref?: string;
   eyebrow?: string;
   arrangeHref?: string;
   signedUploadPlotId?: string;
+  can?: { generate: boolean; submit: boolean; approve: boolean; sign: boolean };
+  activity?: LetterActivityEntry[];
 }) {
+  const permissions = can ?? { generate: true, submit: true, approve: true, sign: true };
   const router = useRouter();
   const editorRef = useRef<HTMLDivElement>(null);
   const savedRangeRef = useRef<Range | null>(null);
   const [mounted, setMounted] = useState(false);
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [loading, setLoading] = useState<"save" | "render" | "">("");
-  const [approvalLoading, setApprovalLoading] = useState<"APPROVED" | "ISSUED" | "REJECTED" | "">("");
+  const [approvalLoading, setApprovalLoading] = useState<"APPROVED" | "ISSUED" | "REJECTED" | "SUBMIT" | "SIGN" | "">("");
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [view, setView] = useState<"edit" | "preview">(letter.fileAssetId ? "preview" : "edit");
@@ -1148,6 +1179,41 @@ export function LetterStudioEditor({
     router.refresh();
   }
 
+  async function submitForApproval() {
+    if (!fileAssetId) return;
+    setApprovalLoading("SUBMIT");
+    setMessage(null);
+    const response = await fetch(`/api/v1/documents/${letter.id}/submit`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+    const body = await response.json();
+    setApprovalLoading("");
+    if (!response.ok) {
+      setMessage({ kind: "error", text: body.error ?? "Submit failed" });
+      return;
+    }
+    setStatus(body.data?.status ?? "SUBMITTED");
+    setMessage({ kind: "success", text: "Submitted for approval. The approving authority has been notified." });
+    router.refresh();
+  }
+
+  async function signLetter(signedFileAssetId: string) {
+    setApprovalLoading("SIGN");
+    setMessage(null);
+    const response = await fetch(`/api/v1/documents/${letter.id}/sign`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ signedFileAssetId }),
+    });
+    const body = await response.json();
+    setApprovalLoading("");
+    if (!response.ok) {
+      setMessage({ kind: "error", text: body.error ?? "Could not mark as signed" });
+      return;
+    }
+    setStatus(body.data?.status ?? "SIGNED");
+    setMessage({ kind: "success", text: "Signed copy recorded. The letter is now marked Signed." });
+    router.refresh();
+  }
+
   async function removeDocument() {
     if (!globalThis.confirm("Delete this rejected letter permanently? This cannot be undone.")) return;
     setDeleteLoading(true);
@@ -1167,7 +1233,15 @@ export function LetterStudioEditor({
   const documentTitle = letter.number ?? letter.type.replaceAll("_", " ");
   const canIssue = Boolean(fileAssetId);
   const isRejected = status === "REJECTED";
-  const canUploadSignedLetter = Boolean(signedUploadPlotId && fileAssetId && letter.type.includes("allotment") && status !== "REJECTED");
+  // Workflow-state derived flags. Editing/generating is only meaningful before submission; the
+  // approve/sign controls appear only for the right role at the right stage of the chain.
+  const isEditableStage = status === "DRAFT" || status === "GENERATED" || status === "REJECTED";
+  const showEditingTools = permissions.generate && isEditableStage;
+  const showSubmit = permissions.submit && isEditableStage && Boolean(fileAssetId);
+  const showApprovalDecision = permissions.approve && status === "SUBMITTED";
+  const awaitingSignature = status === "SENT_FOR_SIGNATURE" || status === "APPROVED";
+  const showSignControls = permissions.sign && awaitingSignature;
+  const canUploadSignedLetter = Boolean(signedUploadPlotId && fileAssetId && letter.type.includes("allotment") && showSignControls);
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-100">
@@ -1186,7 +1260,7 @@ export function LetterStudioEditor({
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-2">
                 <h1 className="text-lg font-semibold text-navy-900 md:text-xl">{documentTitle}</h1>
-                <span className="chip bg-slate-100 text-slate-700">{status.replaceAll("_", " ")}</span>
+                <span className={`chip ${letterStatusChipClass(status)}`}>{status.replaceAll("_", " ")}</span>
                 {dirty ? <span className="chip bg-amber-50 text-amber-800">Unsaved changes</span> : null}
                 {missingVariables.length ? (
                   <button type="button" className="chip bg-amber-50 text-amber-800" onClick={() => setMissingOpen((value) => !value)}>
@@ -1227,14 +1301,18 @@ export function LetterStudioEditor({
                   <option key={size} value={size}>{size} px</option>
                 ))}
               </select>
-              <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={saveDraft} disabled={Boolean(loading)}>
-                {loading === "save" ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
-                Save
-              </button>
-              <button type="button" className="btn-primary h-9 px-3 text-xs" onClick={renderPdf} disabled={Boolean(loading)}>
-                {loading === "render" ? <Loader2 className="animate-spin" size={14} /> : <Eye size={14} />}
-                Generate PDF
-              </button>
+              {showEditingTools ? (
+                <>
+                  <button type="button" className="btn-outline h-9 px-3 text-xs" onClick={saveDraft} disabled={Boolean(loading)}>
+                    {loading === "save" ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
+                    Save
+                  </button>
+                  <button type="button" className="btn-primary h-9 px-3 text-xs" onClick={renderPdf} disabled={Boolean(loading)}>
+                    {loading === "render" ? <Loader2 className="animate-spin" size={14} /> : <Eye size={14} />}
+                    Generate PDF
+                  </button>
+                </>
+              ) : null}
               {fileAssetId && arrangeHref ? (
                 <Link className="btn-outline h-9 px-3 text-xs" href={arrangeHref}>
                   <FileText size={14} />
@@ -1252,48 +1330,73 @@ export function LetterStudioEditor({
                   Download
                 </button>
               )}
-              {canUploadSignedLetter ? (
-                <FileUploader
-                  label="Upload signed letter"
-                  ownerType="Plot"
-                  ownerId={signedUploadPlotId!}
-                  visibility="OWNER_VISIBLE"
-                  accept="application/pdf,image/*"
-                  metadata={{
-                    categoryKey: "signed-allotment-letter",
-                    documentType: "ALLOTMENT_LETTER",
-                    documentNo: letter.number ?? undefined,
-                    notes: "Signed version of allotment letter",
-                  }}
-                  refreshOnUpload
-                />
+              {showSubmit ? (
+                <button type="button" className="btn-primary h-9 px-3 text-xs" disabled={Boolean(approvalLoading)} onClick={submitForApproval}>
+                  {approvalLoading === "SUBMIT" ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />}
+                  Submit for approval
+                </button>
               ) : null}
-              {isRejected ? (
+              {showApprovalDecision ? (
+                <>
+                  <button type="button" className="btn-primary h-9 px-3 text-xs" disabled={!canIssue || Boolean(approvalLoading)} onClick={() => decide("APPROVED")}>
+                    {approvalLoading === "APPROVED" ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />}
+                    Approve
+                  </button>
+                  <button type="button" className="btn-outline h-9 px-3 text-xs" disabled={Boolean(approvalLoading)} onClick={() => decide("REJECTED")}>
+                    {approvalLoading === "REJECTED" ? <Loader2 className="animate-spin" size={14} /> : <X size={14} />}
+                    Send back
+                  </button>
+                </>
+              ) : null}
+              {showSignControls ? (
+                canUploadSignedLetter ? (
+                  <FileUploader
+                    label={approvalLoading === "SIGN" ? "Recording signature…" : "Upload signed copy → mark Signed"}
+                    ownerType="Plot"
+                    ownerId={signedUploadPlotId!}
+                    visibility="OWNER_VISIBLE"
+                    accept="application/pdf,image/*"
+                    metadata={{
+                      categoryKey: "signed-allotment-letter",
+                      documentType: "ALLOTMENT_LETTER",
+                      documentNo: letter.number ?? undefined,
+                      notes: "Signed version of allotment letter",
+                    }}
+                    onUploaded={(file) => void signLetter(file.id)}
+                  />
+                ) : (
+                  <span className="chip bg-amber-50 text-amber-800">Awaiting signed upload</span>
+                )
+              ) : null}
+              {isRejected && (permissions.generate || permissions.approve) ? (
                 <button type="button" className="btn-outline h-9 border-rose-300 px-3 text-xs text-rose-600 hover:bg-rose-50" disabled={deleteLoading} onClick={removeDocument}>
                   {deleteLoading ? <Loader2 className="animate-spin" size={14} /> : <Trash2 size={14} />}
                   Delete
                 </button>
-              ) : (
-                <>
-                  <button type="button" className="btn-outline h-9 px-3 text-xs" disabled={!canIssue || Boolean(approvalLoading)} onClick={() => decide("APPROVED")}>
-                    {approvalLoading === "APPROVED" ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />}
-                    Approve
-                  </button>
-                  <button type="button" className="btn-outline h-9 px-3 text-xs" disabled={!canIssue || Boolean(approvalLoading)} onClick={() => decide("ISSUED")}>
-                    Issue
-                  </button>
-                  <button type="button" className="btn-outline h-9 px-3 text-xs" disabled={Boolean(approvalLoading)} onClick={() => decide("REJECTED")}>
-                    {approvalLoading === "REJECTED" ? <Loader2 className="animate-spin" size={14} /> : <X size={14} />}
-                    Reject
-                  </button>
-                </>
-              )}
+              ) : null}
             </div>
           </div>
 
           {message ? (
             <div className={`rounded-lg px-3 py-2 text-sm ${message.kind === "success" ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
               {message.text}
+            </div>
+          ) : null}
+
+          {activity.length ? (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              {activity.map((entry) => (
+                <span key={entry.key} className="inline-flex items-center gap-1.5">
+                  <span className="font-semibold text-slate-700">{entry.label}</span>
+                  {entry.by ? <span>by {entry.by}</span> : null}
+                  <span className="text-slate-400">{formatActivityTime(entry.at)}</span>
+                </span>
+              ))}
+              {letter.signedFileAssetId ? (
+                <a className="inline-flex items-center gap-1 font-medium text-navy-700 hover:text-navy-900" href={`/api/v1/files/${letter.signedFileAssetId}/download`}>
+                  <Download size={12} /> Signed copy
+                </a>
+              ) : null}
             </div>
           ) : null}
 

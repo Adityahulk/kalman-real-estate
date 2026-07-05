@@ -142,6 +142,53 @@ async function main() {
     },
   });
 
+  // Fixed super-admin owner account. Signs in with the login ID "Dakshdod" (not an email) and has
+  // unrestricted access to every module. Idempotent on the unique loginId.
+  const superAdminPasswordHash = await bcrypt.hash("252008", 12);
+  const existingSuperAdmin = await prisma.user.findUnique({ where: { loginId: "Dakshdod" } });
+  if (existingSuperAdmin) {
+    await prisma.user.update({
+      where: { id: existingSuperAdmin.id },
+      data: { tenantId: tenant.id, passwordHash: superAdminPasswordHash, name: "Daksh (Super Admin)", role: "SUPER_ADMIN", status: "ACTIVE" },
+    });
+  } else {
+    await prisma.user.create({
+      data: {
+        tenantId: tenant.id,
+        email: "dakshdod@widestate.in",
+        loginId: "Dakshdod",
+        passwordHash: superAdminPasswordHash,
+        name: "Daksh (Super Admin)",
+        role: "SUPER_ADMIN",
+        status: "ACTIVE",
+      },
+    });
+  }
+
+  // Allotment approval-chain demo users (standard demo password) so the workflow can be exercised end to end.
+  const allotmentChainUsers = [
+    { email: "executive@saldhaland.example", name: "Allotment Executive", role: "ALLOTMENT_EXECUTIVE", phone: "+91 98765 88881" },
+    { email: "approver@saldhaland.example", name: "Approving Authority", role: "APPROVING_AUTHORITY", phone: "+91 98765 88882" },
+    { email: "signatory@saldhaland.example", name: "Authorized Signatory", role: "AUTHORIZED_SIGNATORY", phone: "+91 98765 88883" },
+    { email: "headengineer@saldhaland.example", name: "Head Engineer", role: "HEAD_ENGINEER", phone: "+91 98765 88884" },
+    { email: "liaison@saldhaland.example", name: "Liaison Officer", role: "LIAISON_OFFICER", phone: "+91 98765 88885" },
+  ];
+  for (const u of allotmentChainUsers) {
+    await prisma.user.upsert({
+      where: { email: u.email },
+      update: { passwordHash, status: "ACTIVE", role: u.role, name: u.name },
+      create: {
+        tenantId: tenant.id,
+        email: u.email,
+        passwordHash,
+        name: u.name,
+        phone: u.phone,
+        role: u.role,
+        status: "ACTIVE",
+      },
+    });
+  }
+
   const firmUsers = await prisma.user.findMany({
     where: { tenantId: tenant.id },
     select: { id: true, role: true },
@@ -489,8 +536,12 @@ async function main() {
   console.log("CONTRACTOR       : contractor@saldhaland.example");
   console.log("VIEWER           : viewer@saldhaland.example");
   console.log("PLOT_OWNER       : amandeep@example.com");
+  console.log("ALLOTMENT_EXEC   : executive@saldhaland.example");
+  console.log("APPROVING_AUTH   : approver@saldhaland.example");
+  console.log("AUTH_SIGNATORY   : signatory@saldhaland.example");
   console.log("BUILDER_ADMIN    : companyadmin@widestate.in / WideState@2026");
   console.log("PLATFORM_ADMIN   : platformadmin@widestate.in / WideState@2026");
+  console.log("SUPER_ADMIN      : login ID 'Dakshdod' / 252008");
 }
 
 main()

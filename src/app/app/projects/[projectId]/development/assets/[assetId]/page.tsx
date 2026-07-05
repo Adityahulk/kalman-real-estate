@@ -4,6 +4,7 @@ import { BackButton } from "@/components/back-button";
 import { DevelopmentTaskForm, DevelopmentTaskUpdateForm } from "@/app/app/development/development-actions";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
+import { hasPermission } from "@/server/rbac";
 
 export const dynamic = "force-dynamic";
 
@@ -120,7 +121,7 @@ export default async function SiteAssetWorkspacePage({
       </header>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <DevelopmentTaskUpdateForm task={task} />
+        <DevelopmentTaskUpdateForm task={task} canVerify={hasPermission(session.role, "engineering.verify")} />
 
         <aside className="space-y-6">
           <section className="rounded-xl border border-slate-200 bg-white p-5">

@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getSessionUser } from "@/server/session";
 import { prisma } from "@/server/db";
+import { hasPermission } from "@/server/rbac";
 import { LetterStudioEditor } from "../../../../../workflow-action-forms";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +22,26 @@ export default async function LetterStudioPage({ params, searchParams }: { param
   const missingVariables = extractMissingVariables(document.data);
   const returnTo = safeReturnTo(searchParams.returnTo, plot.projectId);
 
+  // Resolve the people behind each workflow step so the letter can show a "who did what, when" trail.
+  const actorIds = [document.submittedById, document.approvedById, document.signedById].filter(
+    (value): value is string => Boolean(value),
+  );
+  const actors = actorIds.length
+    ? await prisma.user.findMany({ where: { id: { in: actorIds } }, select: { id: true, name: true } })
+    : [];
+  const actorName = (id: string | null) => (id ? actors.find((user) => user.id === id)?.name ?? null : null);
+  const activity = [
+    document.submittedAt
+      ? { key: "submitted", label: "Submitted", by: actorName(document.submittedById), at: document.submittedAt.toISOString() }
+      : null,
+    document.approvedAt
+      ? { key: "approved", label: "Approved", by: actorName(document.approvedById), at: document.approvedAt.toISOString() }
+      : null,
+    document.signedAt
+      ? { key: "signed", label: "Signed", by: actorName(document.signedById), at: document.signedAt.toISOString() }
+      : null,
+  ].filter((entry): entry is { key: string; label: string; by: string | null; at: string } => Boolean(entry));
+
   return (
       <LetterStudioEditor
         document={{
@@ -30,7 +51,15 @@ export default async function LetterStudioPage({ params, searchParams }: { param
           status: document.status,
           editableHtml: document.editableHtml,
           fileAssetId: document.fileAssetId,
+          signedFileAssetId: document.signedFileAssetId,
         }}
+        can={{
+          generate: hasPermission(session.role, "documents.generate"),
+          submit: hasPermission(session.role, "documents.submit"),
+          approve: hasPermission(session.role, "documents.approve"),
+          sign: hasPermission(session.role, "documents.sign"),
+        }}
+        activity={activity}
         missingVariables={missingVariables}
         backHref={returnTo ?? `/app/projects/${plot.projectId}/plots/${plot.id}?tab=documents`}
         arrangeHref={`/app/projects/${plot.projectId}/plots/${plot.id}/letters/${document.id}/pdf`}

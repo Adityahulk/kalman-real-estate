@@ -8,8 +8,36 @@ import { getObjectResilient } from "../storage";
 import { generatedDocumentStorageKey, putGeneratedObject } from "../storage";
 import { createGeneratedFileAsset } from "./files";
 import { buildGeneratedDocumentPdf, buildGeneratedDocumentPdfFromHtml } from "./document-pdf";
-import { createNotification } from "./notifications";
+import { createNotification, notifyRoleWithPermission } from "./notifications";
 import { defaultLetterBody, ensureProjectLetterTemplates } from "./document-templates";
+
+// Statuses in which a letter still counts as "accepted" for plot-ownership purposes. Approving a
+// letter reconciles the plot to its new owner; the letter then moves on to signature (SENT_FOR_SIGNATURE
+// → SIGNED) but the ownership must stay reconciled, so those later states are accepted too.
+const OWNERSHIP_ACCEPTED_STATUSES: DocumentStatus[] = [
+  DocumentStatus.APPROVED,
+  DocumentStatus.ISSUED,
+  DocumentStatus.SENT_FOR_SIGNATURE,
+  DocumentStatus.SIGNED,
+];
+
+// A letter can only be edited/re-rendered while it is a working draft. Once submitted for approval
+// (or approved/signed) it is locked so an executive cannot alter it behind the approver's back.
+const EDITABLE_STATUSES: DocumentStatus[] = [
+  DocumentStatus.DRAFT,
+  DocumentStatus.GENERATED,
+  DocumentStatus.REJECTED,
+];
+
+function assertDocumentEditable(status: DocumentStatus) {
+  if (!EDITABLE_STATUSES.includes(status)) {
+    const error = new Error(
+      `This letter is ${status.replaceAll("_", " ").toLowerCase()} and can no longer be edited.`,
+    );
+    error.name = "BadRequestError";
+    throw error;
+  }
+}
 
 export const generateDocumentSchema = z.object({
   templateId: z.string().optional(),
@@ -167,6 +195,7 @@ function applyDraftOverrides(
 
 export async function updateDocumentDraft(context: RequestContext, id: string, input: z.infer<typeof updateDocumentDraftSchema>) {
   const before = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  assertDocumentEditable(before.status);
   const document = await prisma.generatedDocument.update({
     where: { id },
     data: {
@@ -186,6 +215,7 @@ export async function updateDocumentDraft(context: RequestContext, id: string, i
 
 export async function renderDocumentDraft(context: RequestContext, id: string) {
   const document = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  assertDocumentEditable(document.status);
   const tenant = await prisma.tenant.findUnique({ where: { id: context.tenantId } });
   const html = await resolveFileUrlsToDataUris(context.tenantId, document.editableHtml ?? "");
   const pdf = await buildGeneratedDocumentPdfFromHtml({
@@ -234,6 +264,48 @@ async function persistRenderedDocument(
   return { document: rendered, file, storage: stored };
 }
 
+// Allotment Executive submits a generated draft for approval. Locks further editing and alerts
+// everyone who can approve. Requires the PDF to exist so the approver has something to review.
+export const submitDocumentSchema = z.object({
+  notes: z.string().optional(),
+});
+
+export async function submitDocument(context: RequestContext, id: string, input: z.infer<typeof submitDocumentSchema>) {
+  const current = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  if (!EDITABLE_STATUSES.includes(current.status)) {
+    const error = new Error(`This letter is already ${current.status.replaceAll("_", " ").toLowerCase()}.`);
+    error.name = "BadRequestError";
+    throw error;
+  }
+  if (!current.fileAssetId) {
+    const error = new Error("Generate the PDF before submitting for approval.");
+    error.name = "BadRequestError";
+    throw error;
+  }
+  const document = await prisma.generatedDocument.update({
+    where: { id, tenantId: context.tenantId },
+    data: {
+      status: DocumentStatus.SUBMITTED,
+      submittedById: context.userId,
+      submittedAt: new Date(),
+      reviewNotes: null,
+    },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.SUBMIT,
+    entityType: "GeneratedDocument",
+    entityId: id,
+    after: { ...document, notes: input.notes } as unknown as Prisma.InputJsonValue,
+  });
+  await notifyRoleWithPermission(context, "documents.approve", {
+    title: "New allotment awaiting approval",
+    body: `${document.number ?? document.type} has been submitted and is awaiting your approval.`,
+    data: { documentId: id, status: document.status },
+    excludeUserId: context.userId,
+  });
+  return document;
+}
+
 export const approveDocumentSchema = z.object({
   status: z.enum(["APPROVED", "REJECTED", "ISSUED"]),
   notes: z.string().optional(),
@@ -241,27 +313,128 @@ export const approveDocumentSchema = z.object({
 
 export async function approveDocument(context: RequestContext, id: string, input: z.infer<typeof approveDocumentSchema>) {
   const current = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
-  if (input.status === "APPROVED" || input.status === "ISSUED") {
-    if (!current.fileAssetId) {
-      const error = new Error("Generate the PDF before approving or issuing it.");
-      error.name = "BadRequestError";
-      throw error;
+  const accepting = input.status === "APPROVED" || input.status === "ISSUED";
+  if (accepting && !current.fileAssetId) {
+    const error = new Error("Generate the PDF before approving or issuing it.");
+    error.name = "BadRequestError";
+    throw error;
+  }
+  // Approving an allotment moves it straight into the signature queue so the signatory is notified
+  // immediately ("after approval → automatically notify signatory"). ISSUED keeps its legacy meaning.
+  const nextStatus =
+    input.status === "APPROVED"
+      ? DocumentStatus.SENT_FOR_SIGNATURE
+      : input.status === "ISSUED"
+        ? DocumentStatus.ISSUED
+        : DocumentStatus.REJECTED;
+  const document = await prisma.generatedDocument.update({
+    where: { id, tenantId: context.tenantId },
+    data: {
+      status: nextStatus,
+      approvedById: accepting ? context.userId : current.approvedById,
+      approvedAt: accepting ? new Date() : current.approvedAt,
+      reviewNotes: input.status === "REJECTED" ? input.notes ?? null : current.reviewNotes,
+    },
+  });
+  await reconcilePlotOwnershipForDocument(context, document);
+  await writeAuditEvent(context, {
+    action: input.status === "REJECTED" ? AuditAction.REJECT : AuditAction.APPROVE,
+    entityType: "GeneratedDocument",
+    entityId: id,
+    after: { ...document, notes: input.notes } as unknown as Prisma.InputJsonValue,
+  });
+  if (input.status === "APPROVED") {
+    await notifyRoleWithPermission(context, "documents.sign", {
+      title: "Allotment approved — ready for signature",
+      body: `${document.number ?? document.type} has been approved and is ready for signature.`,
+      data: { documentId: id, status: document.status },
+      excludeUserId: context.userId,
+    });
+    if (document.submittedById) {
+      await createNotification(context, {
+        userId: document.submittedById,
+        title: "Allotment approved",
+        body: `${document.number ?? document.type} was approved and sent for signature.`,
+        data: { documentId: id, status: document.status },
+      });
     }
+  } else if (input.status === "REJECTED") {
+    if (document.submittedById) {
+      await createNotification(context, {
+        userId: document.submittedById,
+        title: "Allotment returned for correction",
+        body: `${document.number ?? document.type} was returned${input.notes ? `: ${input.notes}` : "."}`,
+        data: { documentId: id, status: document.status },
+      });
+    }
+    await notifyRoleWithPermission(context, "documents.submit", {
+      title: "Allotment returned for correction",
+      body: `${document.number ?? document.type} was returned for correction.`,
+      data: { documentId: id, status: document.status },
+      excludeUserId: context.userId,
+    });
+  } else {
+    await createNotification(context, {
+      title: "Document issued",
+      body: `${document.number ?? document.type} was issued.`,
+      data: { documentId: id, status: document.status },
+    });
+  }
+  return document;
+}
+
+// Authorized Signatory records a physical signature: uploads the scanned signed PDF and marks the
+// letter SIGNED. Permanently stores who signed and the exact date/time (via signedAt + the audit log).
+export const signDocumentSchema = z.object({
+  signedFileAssetId: z.string().min(1),
+  notes: z.string().optional(),
+});
+
+export async function signDocument(context: RequestContext, id: string, input: z.infer<typeof signDocumentSchema>) {
+  const current = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  if (current.status !== DocumentStatus.SENT_FOR_SIGNATURE && current.status !== DocumentStatus.APPROVED) {
+    const error = new Error("Only approved letters awaiting signature can be signed.");
+    error.name = "BadRequestError";
+    throw error;
+  }
+  const signedFile = await prisma.fileAsset.findFirst({
+    where: { id: input.signedFileAssetId, tenantId: context.tenantId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!signedFile) {
+    const error = new Error("Uploaded signed copy could not be found.");
+    error.name = "BadRequestError";
+    throw error;
   }
   const document = await prisma.generatedDocument.update({
     where: { id, tenantId: context.tenantId },
     data: {
-      status: input.status,
-      approvedById: context.userId,
-      approvedAt: input.status === "APPROVED" || input.status === "ISSUED" ? new Date() : undefined,
+      status: DocumentStatus.SIGNED,
+      signedById: context.userId,
+      signedAt: new Date(),
+      signedFileAssetId: input.signedFileAssetId,
     },
   });
-  await reconcilePlotOwnershipForDocument(context, document);
-  await writeAuditEvent(context, { action: input.status === "APPROVED" ? AuditAction.APPROVE : AuditAction.REJECT, entityType: "GeneratedDocument", entityId: id, after: { ...document, notes: input.notes } });
-  await createNotification(context, {
-    title: `Document ${input.status.toLowerCase()}`,
-    body: `${document.number ?? document.type} was marked ${input.status}.`,
-    data: { documentId: id, status: input.status },
+  await writeAuditEvent(context, {
+    action: AuditAction.SIGN,
+    entityType: "GeneratedDocument",
+    entityId: id,
+    after: { ...document, notes: input.notes } as unknown as Prisma.InputJsonValue,
+  });
+  // Alert the executive who submitted it and everyone who can approve, so the loop is closed.
+  if (document.submittedById) {
+    await createNotification(context, {
+      userId: document.submittedById,
+      title: "Signed document uploaded",
+      body: `${document.number ?? document.type} has been signed and uploaded.`,
+      data: { documentId: id, status: document.status },
+    });
+  }
+  await notifyRoleWithPermission(context, "documents.approve", {
+    title: "Signed document uploaded",
+    body: `${document.number ?? document.type} has been signed and uploaded.`,
+    data: { documentId: id, status: document.status },
+    excludeUserId: context.userId,
   });
   return document;
 }
@@ -306,7 +479,7 @@ async function reconcilePlotOwnershipForDocument(context: RequestContext, docume
   });
   if (!linked || (linked.kind !== OwnershipKind.ALLOTMENT && linked.kind !== OwnershipKind.TRANSFER)) return;
 
-  if (document.status === DocumentStatus.APPROVED || document.status === DocumentStatus.ISSUED) {
+  if (OWNERSHIP_ACCEPTED_STATUSES.includes(document.status)) {
     await prisma.plot.update({
       where: { id: document.recordId },
       data: {
@@ -339,7 +512,7 @@ async function previousAcceptedOwnership(tenantId: string, plotId: string, exclu
     if (record.kind === OwnershipKind.COMPANY_INVENTORY) return record;
     if (!record.documentId) return record;
     const document = await prisma.generatedDocument.findFirst({
-      where: { id: record.documentId, tenantId, status: { in: [DocumentStatus.APPROVED, DocumentStatus.ISSUED] } },
+      where: { id: record.documentId, tenantId, status: { in: OWNERSHIP_ACCEPTED_STATUSES } },
       select: { id: true },
     });
     if (document) return record;

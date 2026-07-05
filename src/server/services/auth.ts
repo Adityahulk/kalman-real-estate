@@ -2,9 +2,17 @@ import bcrypt from "bcryptjs";
 import { prisma } from "../db";
 import { createSessionToken } from "../session";
 
-export async function login(email: string, password: string) {
-  const user = await prisma.user.findUnique({
-    where: { email: email.toLowerCase().trim() },
+export async function login(identifier: string, password: string) {
+  const trimmed = identifier.trim();
+  // A user can sign in with their email (case-insensitive) or their login ID. Login IDs
+  // are matched case-insensitively too so "Dakshdod" and "dakshdod" both work.
+  const user = await prisma.user.findFirst({
+    where: {
+      OR: [
+        { email: trimmed.toLowerCase() },
+        { loginId: { equals: trimmed, mode: "insensitive" } },
+      ],
+    },
     include: { tenant: true },
   });
 
@@ -43,7 +51,7 @@ export async function login(email: string, password: string) {
 }
 
 function throwInvalidLogin(): never {
-  const error = new Error("Invalid email or password");
+  const error = new Error("Invalid credentials");
   error.name = "UnauthorizedError";
   throw error;
 }

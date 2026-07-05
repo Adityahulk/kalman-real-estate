@@ -377,7 +377,7 @@ export function DevelopmentTaskForm({
   );
 }
 
-export function DevelopmentTaskUpdateForm({ task }: { task: TaskDetail }) {
+export function DevelopmentTaskUpdateForm({ task, canVerify = false }: { task: TaskDetail; canVerify?: boolean }) {
   const router = useRouter();
   const [areaDone, setAreaDone] = useState(task.totalArea ?? "");
   const [recordedAt, setRecordedAt] = useState(new Date().toISOString().slice(0, 10));
@@ -385,6 +385,30 @@ export function DevelopmentTaskUpdateForm({ task }: { task: TaskDetail }) {
   const [attachments, setAttachments] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+
+  const awaitingVerification = task.status === "SENT_FOR_VERIFICATION";
+  const canSubmitForVerification = task.status === "IN_PROGRESS" || task.status === "RETURNED";
+
+  async function submitForVerification() {
+    setLoading(true);
+    const response = await fetch(`/api/v1/development/site-assets/${task.id}/submit-verification`, { method: "POST" });
+    setLoading(false);
+    if (!response.ok) window.alert((await response.json()).error ?? "Could not submit for verification.");
+    else router.refresh();
+  }
+
+  async function verify(decision: "APPROVE" | "RETURN") {
+    const notes = decision === "RETURN" ? window.prompt("Reason for returning this task (optional):") ?? "" : "";
+    setLoading(true);
+    const response = await fetch(`/api/v1/development/site-assets/${task.id}/verify`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ decision, notes }),
+    });
+    setLoading(false);
+    if (!response.ok) window.alert((await response.json()).error ?? "Could not verify task.");
+    else router.refresh();
+  }
 
   const numericTotalArea = Number(task.totalArea || 0);
   const nextProgress = numericTotalArea > 0 && Number(areaDone || 0) >= 0 ? Math.max(0, Math.min(100, Math.round((Number(areaDone || 0) / numericTotalArea) * 100))) : task.progressPct;
@@ -434,7 +458,29 @@ export function DevelopmentTaskUpdateForm({ task }: { task: TaskDetail }) {
   return (
     <div className="space-y-5">
       <section className="rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="font-semibold">Task details</h2>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-semibold">Task details</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            {canSubmitForVerification ? (
+              <button className="btn-primary h-9 px-3 text-xs" type="button" disabled={loading} onClick={() => void submitForVerification()}>
+                <CheckCircle2 size={14} /> Send for verification
+              </button>
+            ) : null}
+            {awaitingVerification && canVerify ? (
+              <>
+                <button className="btn-primary h-9 px-3 text-xs" type="button" disabled={loading} onClick={() => void verify("APPROVE")}>
+                  <CheckCircle2 size={14} /> Approve
+                </button>
+                <button className="btn-outline h-9 px-3 text-xs" type="button" disabled={loading} onClick={() => void verify("RETURN")}>
+                  Return
+                </button>
+              </>
+            ) : null}
+            {awaitingVerification && !canVerify ? (
+              <span className="chip bg-amber-50 text-amber-800">Awaiting verification</span>
+            ) : null}
+          </div>
+        </div>
         <div className="mt-4 grid gap-4 md:grid-cols-2">
           <Fact label="Task" value={task.name} />
           <Fact label="Category" value={task.category} />

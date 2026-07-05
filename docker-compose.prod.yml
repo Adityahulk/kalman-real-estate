@@ -69,6 +69,18 @@ services:
       - postgres
       - redis
 
+  reminder-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    command: ["npm", "run", "worker:reminders"]
+    env_file:
+      - .env.production
+    depends_on:
+      - postgres
+      - redis
+
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped

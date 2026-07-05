@@ -14,6 +14,7 @@
     "db:studio": "prisma studio",
     "worker:documents": "tsx src/workers/document-worker.ts",
     "worker:ai": "tsx src/workers/ai-worker.ts",
+    "worker:reminders": "tsx src/workers/reminder-worker.ts",
     "test:smoke": "node tests/smoke.mjs",
     "start": "next start"
   },

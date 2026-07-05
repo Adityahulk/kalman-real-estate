@@ -279,7 +279,10 @@ async function ownerCanAccessFile(ownerId: string, file: FileAsset) {
       where: { tenantId: file.tenantId, fileAssetId: file.id },
       select: { status: true },
     });
-    if (document && document.status !== "APPROVED" && document.status !== "ISSUED") return false;
+    // A letter is owner-visible once it has been approved. Approval now advances the letter into the
+    // signature stages (SENT_FOR_SIGNATURE → SIGNED), so those count as owner-visible too.
+    const ownerVisibleStatuses = ["APPROVED", "ISSUED", "SENT_FOR_SIGNATURE", "SIGNED"];
+    if (document && !ownerVisibleStatuses.includes(document.status)) return false;
 
     const plot = await prisma.plot.findFirst({
       where: { id: file.ownerId, tenantId: file.tenantId, currentOwnerId: ownerId, ownerVisible: true, archivedAt: null },
