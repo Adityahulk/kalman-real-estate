@@ -385,6 +385,86 @@ export function PlotAllotmentForm({ plotId, owners }: { plotId: string; owners: 
   );
 }
 
+export function HistoricalAllotteeStep({ plotId, owners }: { plotId: string; owners: OwnerDetailOption[] }) {
+  const router = useRouter();
+  const [mode, setMode] = useState<"new" | "existing">("existing");
+  const [ownerId, setOwnerId] = useState("");
+  const [ownerType, setOwnerType] = useState("INDIVIDUAL");
+  const [name, setName] = useState("");
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setLoading(true);
+    setMessage("");
+    let resolvedOwnerId = ownerId;
+
+    if (mode === "new") {
+      const ownerResponse = await fetch("/api/v1/ownership/owners", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: ownerType, name }),
+      });
+      const ownerBody = await ownerResponse.json();
+      if (!ownerResponse.ok) {
+        setLoading(false);
+        setMessage(ownerBody.error ?? "Owner creation failed");
+        return;
+      }
+      resolvedOwnerId = ownerBody.data.id;
+    }
+
+    const response = await fetch(`/api/v1/ownership/plots/${plotId}/allot`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ownerId: resolvedOwnerId }),
+    });
+    const body = await response.json();
+    setLoading(false);
+    if (!response.ok) {
+      setMessage(body.error ?? "Could not record allottee");
+      return;
+    }
+    router.refresh();
+  }
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-5">
+      <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400">Step 1 of 2</div>
+      <h3 className="font-semibold">Who was the original allottee?</h3>
+      <p className="mt-1 text-sm text-slate-500">
+        This plot has no recorded allottee in the system. Enter the original allottee so the system can track ownership history before proceeding to the transfer.
+      </p>
+      <form onSubmit={submit} className="mt-4 grid gap-4">
+        <div className="grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 text-sm">
+          <button type="button" className={`px-3 py-2 ${mode === "existing" ? "bg-navy-100 text-navy-900" : "bg-white text-slate-700"}`} onClick={() => setMode("existing")}>Existing owner</button>
+          <button type="button" className={`px-3 py-2 ${mode === "new" ? "bg-navy-100 text-navy-900" : "bg-white text-slate-700"}`} onClick={() => setMode("new")}>New owner</button>
+        </div>
+        {mode === "existing" ? (
+          <label>
+            <span className="label">Owner</span>
+            <select className="input" value={ownerId} onChange={(event) => setOwnerId(event.target.value)}>
+              <option value="">Select owner</option>
+              {owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
+            </select>
+          </label>
+        ) : (
+          <div className="grid gap-3">
+            <label><span className="label">Owner type</span><select className="input" value={ownerType} onChange={(event) => setOwnerType(event.target.value)}><option value="INDIVIDUAL">Individual</option><option value="COMPANY">Company</option><option value="SHARED">Shared ownership group</option></select></label>
+            <label><span className="label">Name</span><input className="input" value={name} onChange={(event) => setName(event.target.value)} /></label>
+          </div>
+        )}
+        {message ? <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{message}</div> : null}
+        <button className="btn-primary w-fit" disabled={loading || (mode === "existing" ? !ownerId : !name)}>
+          {loading ? <Loader2 className="animate-spin" size={17} /> : <Send size={17} />}
+          Record allottee and continue
+        </button>
+      </form>
+    </div>
+  );
+}
+
 export function PlotTransferForm({
   plotId,
   projectId,

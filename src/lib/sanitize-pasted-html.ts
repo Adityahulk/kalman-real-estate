@@ -18,6 +18,36 @@ const DROP_TAGS = new Set(["script", "style", "meta", "link", "title", "head", "
 
 const ALLOWED_ATTRS = new Set(["href", "colspan", "rowspan", "src", "alt"]);
 
+// Inline CSS properties worth keeping from a paste (font/emphasis/alignment). Everything else —
+// including Office/Docs cruft like mso-*, positioning, and background hacks — is dropped. Keeping
+// font-family here means a font pasted from Word/Docs survives into the draft (and the PDF).
+const ALLOWED_STYLE_PROPS = new Set([
+  "font-family",
+  "font-size",
+  "font-weight",
+  "font-style",
+  "text-decoration",
+  "text-align",
+  "color",
+]);
+
+// Rebuild the style attribute from only the whitelisted, safe properties. Returns "" when nothing
+// survives, so the caller can drop the attribute entirely.
+function sanitizeStyleAttribute(style: string): string {
+  const kept: string[] = [];
+  for (const declaration of style.split(";")) {
+    const [rawProp, ...rawValue] = declaration.split(":");
+    const prop = rawProp?.trim().toLowerCase();
+    const value = rawValue.join(":").trim();
+    if (!prop || !value) continue;
+    if (!ALLOWED_STYLE_PROPS.has(prop)) continue;
+    // Block CSS that can smuggle behaviour/network requests (url(), expression(), javascript:).
+    if (/url\s*\(|expression\s*\(|javascript:/i.test(value)) continue;
+    kept.push(`${prop}: ${value}`);
+  }
+  return kept.join("; ");
+}
+
 function cleanElement(el: Element) {
   const tag = el.tagName.toLowerCase();
   // Drop images whose source isn't a safe data:/http(s): URL (blocks javascript:, file:, etc.).
@@ -28,12 +58,15 @@ function cleanElement(el: Element) {
       return;
     }
   }
-  // Remove disallowed attributes (drops inline style, class, lang, mso-*, etc.).
+  // Preserve a sanitized subset of inline styles before stripping the rest of the attributes.
+  const safeStyle = sanitizeStyleAttribute(el.getAttribute("style") ?? "");
+  // Remove disallowed attributes (drops class, lang, mso-*, and the raw style attribute).
   for (const attr of [...el.attributes]) {
     if (!ALLOWED_ATTRS.has(attr.name.toLowerCase())) {
       el.removeAttribute(attr.name);
     }
   }
+  if (safeStyle) el.setAttribute("style", safeStyle);
   // Force anchors to open safely.
   if (tag === "a" && el.getAttribute("href")) {
     el.setAttribute("rel", "noopener noreferrer");

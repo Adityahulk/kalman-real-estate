@@ -24,6 +24,7 @@ import { DeleteCadButton } from "@/components/delete-cad-button";
 import { FileActions } from "@/components/file-actions";
 import { FilePreview } from "@/components/file-preview";
 import { FileShareActions } from "@/components/file-share-actions";
+import { MultiFileShare } from "@/components/multi-file-share";
 import { FileUploader } from "@/components/file-uploader";
 import { DeleteDocumentButton, DocumentApprovalButtons } from "../../../../documents/document-actions";
 import { ManualPlotZoneForm } from "../../../manual-entry-actions";
@@ -323,6 +324,13 @@ export default async function ProjectPlotWorkspacePage({
             </div>
             <div className="card p-5">
               <h2 className="mb-4 font-semibold">Old documents</h2>
+              {oldDocumentFiles.length > 0 && !plot.currentOwnerId ? (
+                <div className="mb-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+                  <span className="font-medium">Old documents uploaded.</span> To use the transfer workflow, the system needs to know the current owner. Go to{" "}
+                  <Link className="underline" href={`/app/projects/${plot.projectId}/plots/${plot.id}/transfer`}>New transfer</Link>
+                  {" "}— the first step lets you record the original allottee.
+                </div>
+              ) : null}
               <DocumentGrid files={oldDocumentFiles} empty="No old allotment or transfer letter uploaded yet." showShare />
             </div>
             <div className="card p-5">
@@ -676,23 +684,26 @@ function uniqueFiles<T extends { id: string }>(files: T[]) {
 
 function DocumentGrid({ files, empty, showShare = false }: { files: Awaited<ReturnType<typeof getPlotWorkspace>>["plotFiles"]; empty: string; showShare?: boolean }) {
   return (
-    <div className="grid gap-3 md:grid-cols-2">
-      {files.map((file) => (
-        <div key={file.id} className="rounded-lg border border-slate-200 p-3 text-sm">
-          <div className="font-medium">{file.categoryKey === "signed-allotment-letter" ? "Signed version of allotment letter" : file.documentType?.replaceAll("_", " ") ?? "Document"}</div>
-          <div className="mt-1 truncate text-xs text-slate-500">{file.fileName}</div>
-          <div className="mt-2 text-xs text-slate-500">
-            {file.documentNo ?? "No reference"} · {(file.documentDate ?? file.createdAt).toLocaleDateString("en-IN")} · {file.visibility.replaceAll("_", " ")}
+    <div className="space-y-3">
+      {showShare && files.length ? <MultiFileShare files={files.map((file) => ({ id: file.id, fileName: file.fileName }))} /> : null}
+      <div className="grid gap-3 md:grid-cols-2">
+        {files.map((file) => (
+          <div key={file.id} className="rounded-lg border border-slate-200 p-3 text-sm">
+            <div className="font-medium">{file.categoryKey === "signed-allotment-letter" ? "Signed version of allotment letter" : file.documentType?.replaceAll("_", " ") ?? "Document"}</div>
+            <div className="mt-1 truncate text-xs text-slate-500">{file.fileName}</div>
+            <div className="mt-2 text-xs text-slate-500">
+              {file.documentNo ?? "No reference"} · {(file.documentDate ?? file.createdAt).toLocaleDateString("en-IN")} · {file.visibility.replaceAll("_", " ")}
+            </div>
+            {file.notes ? <div className="mt-2 text-xs text-slate-500">{file.notes}</div> : null}
+            <div className="mt-3 grid gap-2 sm:flex sm:flex-wrap sm:items-center">
+              <a className="btn-outline h-9 justify-center px-3 text-xs sm:h-8" href={`/api/v1/files/${file.id}/download`}>Download</a>
+              {showShare ? <FileShareActions fileId={file.id} fileName={file.fileName} /> : null}
+              <DeleteFileButton fileId={file.id} fileName={file.fileName} />
+            </div>
           </div>
-          {file.notes ? <div className="mt-2 text-xs text-slate-500">{file.notes}</div> : null}
-          <div className="mt-3 grid gap-2 sm:flex sm:flex-wrap sm:items-center">
-            <a className="btn-outline h-9 justify-center px-3 text-xs sm:h-8" href={`/api/v1/files/${file.id}/download`}>Download</a>
-            {showShare ? <FileShareActions fileId={file.id} fileName={file.fileName} /> : null}
-            <DeleteFileButton fileId={file.id} fileName={file.fileName} />
-          </div>
-        </div>
-      ))}
-      {!files.length ? <Empty label={empty} /> : null}
+        ))}
+        {!files.length ? <Empty label={empty} /> : null}
+      </div>
     </div>
   );
 }

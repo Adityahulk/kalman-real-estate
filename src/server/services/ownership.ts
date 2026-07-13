@@ -158,9 +158,6 @@ export const transferPlotSchema = z.object({
 export async function transferPlot(context: RequestContext, plotId: string, input: z.infer<typeof transferPlotSchema>) {
   const result = await prisma.$transaction(async (tx) => {
     const before = await tx.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
-    if (!before.currentOwnerId || before.status === PlotStatus.COMPANY_OWNED) {
-      throwBadRequest("Company-owned plots cannot be transferred. Record the first allotment instead.");
-    }
     const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: context.tenantId }, select: { maxTransfersPerPlot: true } });
     const transferRecords = await tx.ownershipRecord.findMany({
       where: { tenantId: context.tenantId, plotId, kind: OwnershipKind.TRANSFER, documentId: { not: null } },

@@ -990,6 +990,17 @@ export function LetterDraftStartForm({
   );
 }
 
+// Fonts offered in the Letter Studio. Each maps to a font the PDF render server has installed
+// (fonts-liberation + fonts-dejavu-core, both bundled in the Docker image), so the on-screen draft
+// and the generated PDF render identically. Do not add a family here without a matching server font.
+const LETTER_FONTS: { label: string; stack: string }[] = [
+  { label: "Arial", stack: "Arial, 'Liberation Sans', sans-serif" },
+  { label: "Times New Roman", stack: "'Times New Roman', 'Liberation Serif', serif" },
+  { label: "Courier New", stack: "'Courier New', 'Liberation Mono', monospace" },
+  { label: "DejaVu Sans", stack: "'DejaVu Sans', sans-serif" },
+  { label: "DejaVu Serif", stack: "'DejaVu Serif', serif" },
+];
+
 type LetterActivityEntry = { key: string; label: string; by: string | null; at: string };
 
 // Colour the status chip so the workflow stage is readable at a glance.
@@ -1099,6 +1110,33 @@ export function LetterStudioEditor({
     editor.querySelectorAll('font[size="7"]').forEach((node) => {
       const span = globalThis.document.createElement("span");
       span.style.fontSize = `${px}px`;
+      while (node.firstChild) span.appendChild(node.firstChild);
+      node.replaceWith(span);
+    });
+    setDirty(true);
+  }
+
+  // Apply a font family to the current selection. Mirrors applyFontSize: wrap the selection in a
+  // span carrying an inline font-family so the exact same font is honored in the editor AND the
+  // Chromium-rendered PDF. Only families with a metric-compatible font on the render server are
+  // offered, so the on-screen draft and the PDF never diverge.
+  function applyFontFamily(family: string) {
+    const editor = editorRef.current;
+    if (!editor || !family) return;
+    editor.focus();
+    const selection = globalThis.window.getSelection();
+    if (selection && (selection.rangeCount === 0 || selection.isCollapsed) && savedRangeRef.current) {
+      selection.removeAllRanges();
+      selection.addRange(savedRangeRef.current);
+    }
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      setMessage({ kind: "error", text: "Select some text first, then choose a font." });
+      return;
+    }
+    globalThis.document.execCommand("fontName", false, "__letter-font__");
+    editor.querySelectorAll('font[face="__letter-font__"]').forEach((node) => {
+      const span = globalThis.document.createElement("span");
+      span.style.fontFamily = family;
       while (node.firstChild) span.appendChild(node.firstChild);
       node.replaceWith(span);
     });
@@ -1289,6 +1327,18 @@ export function LetterStudioEditor({
               <button type="button" className="btn-outline h-9 px-3 text-xs" onMouseDown={(e) => e.preventDefault()} onClick={() => format("underline")} disabled={view !== "edit"}>
                 <Underline size={14} />
               </button>
+              <select
+                className="input h-9 w-auto px-2 py-0 text-xs"
+                title="Font for selected text"
+                value=""
+                onChange={(e) => { applyFontFamily(e.target.value); e.target.value = ""; }}
+                disabled={view !== "edit"}
+              >
+                <option value="" disabled>Font</option>
+                {LETTER_FONTS.map((font) => (
+                  <option key={font.label} value={font.stack}>{font.label}</option>
+                ))}
+              </select>
               <select
                 className="input h-9 w-auto px-2 py-0 text-xs"
                 title="Font size for selected text"

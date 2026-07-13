@@ -20,7 +20,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates openssl libreoffice-writer fonts-liberation chromium \
+  && apt-get install -y --no-install-recommends ca-certificates openssl libreoffice-writer fonts-liberation fonts-dejavu-core chromium \
   && rm -rf /var/lib/apt/lists/*
 
 # Puppeteer uses the system Chromium installed above (no bundled download).

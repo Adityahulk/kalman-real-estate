@@ -33,13 +33,17 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
   }
 
   async function shareText() {
-    const links = await Promise.all(selectedShareFiles.map(async (file) => {
-      const response = await fetch(`/api/v1/files/${file.id}/share`);
-      const body = await response.json().catch(() => null);
-      if (!response.ok || !body?.data?.url) throw new Error(body?.error ?? `Could not create share link for ${file.fileName}`);
-      return `${file.fileName}: ${body.data.url}`;
-    }));
-    return links.join("\n");
+    // One short bundle link for all selected files — avoids pasting many long signed URLs into a
+    // single WhatsApp message (which overflows the text limit and breaks link detection).
+    const response = await fetch("/api/v1/files/share-bundle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ fileIds: selectedShareFiles.map((file) => file.id) }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body?.data?.url) throw new Error(body?.error ?? "Could not create share link.");
+    const count = selectedShareFiles.length;
+    return `${count} file${count === 1 ? "" : "s"} shared with you:\n${body.data.url}`;
   }
 
   async function nativeShare() {

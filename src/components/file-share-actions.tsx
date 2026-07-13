@@ -7,10 +7,16 @@ export function FileShareActions({ fileId, fileName }: { fileId: string; fileNam
   const [loading, setLoading] = useState<"whatsapp" | "email" | null>(null);
 
   async function createPublicShareText() {
-    const response = await fetch(`/api/v1/files/${fileId}/share`);
+    // Use the bundle endpoint (single-file bundle) so the recipient gets one short, reliably
+    // clickable link to a download page rather than a long raw signed URL that some apps mangle.
+    const response = await fetch("/api/v1/files/share-bundle", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ fileIds: [fileId] }),
+    });
     const body = await response.json().catch(() => null);
     if (!response.ok || !body?.data?.url) throw new Error(body?.error ?? "Could not create share link.");
-    return `${fileName}: ${body.data.url}`;
+    return `${fileName}:\n${body.data.url}`;
   }
 
   async function share(target: "whatsapp" | "email") {
