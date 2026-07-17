@@ -21,7 +21,10 @@
     "cap:android": "cap run android",
     "cap:ios": "cap run ios",
     "mobile:add:android": "cap add android",
-    "mobile:add:ios": "cap add ios"
+    "mobile:add:ios": "cap add ios",
+    "desktop:install": "npm --prefix desktop install",
+    "desktop:dev": "npm --prefix desktop start",
+    "desktop:dist": "npm --prefix desktop run dist"
   },
   "dependencies": {
     "@aparajita/capacitor-biometric-auth": "^10.0.0",

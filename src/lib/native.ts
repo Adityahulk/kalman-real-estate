@@ -16,6 +16,17 @@ export function isNative(): boolean {
   }
 }
 
+// True inside the Electron desktop shell (which exposes window.widestateDesktop via preload).
+// The desktop app is same-origin and cookie-authed like the browser, so this is only for optional
+// UX tweaks (e.g. suppressing web-only install prompts) — not required for any core flow.
+export function isElectron(): boolean {
+  try {
+    return typeof window !== "undefined" && Boolean((window as unknown as { widestateDesktop?: unknown }).widestateDesktop);
+  } catch {
+    return false;
+  }
+}
+
 export function nativePlatform(): "ios" | "android" | "web" {
   try {
     const p = Capacitor.getPlatform();
