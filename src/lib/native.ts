@@ -1,0 +1,106 @@
+"use client";
+
+// Native (Capacitor) bridge. Every export is safe to call on the plain web build: `isNative()`
+// is false there and the heavy plugin modules are only ever dynamically imported inside the
+// native branch, so nothing native is bundled into or executed by the browser app.
+
+import { Capacitor } from "@capacitor/core";
+
+const SESSION_TOKEN_KEY = "kalman_session_token";
+
+export function isNative(): boolean {
+  try {
+    return Capacitor.isNativePlatform();
+  } catch {
+    return false;
+  }
+}
+
+export function nativePlatform(): "ios" | "android" | "web" {
+  try {
+    const p = Capacitor.getPlatform();
+    return p === "ios" || p === "android" ? p : "web";
+  } catch {
+    return "web";
+  }
+}
+
+// Persist the JWT returned in the login response body so native plugin-context requests (camera
+// upload, push registration) can authenticate with a bearer header, and so the session survives
+// an app relaunch. No-op on web, where the httpOnly cookie is the source of truth.
+export async function storeSessionToken(token: string | undefined | null): Promise<void> {
+  if (!isNative() || !token) return;
+  const { Preferences } = await import("@capacitor/preferences");
+  await Preferences.set({ key: SESSION_TOKEN_KEY, value: token });
+}
+
+export async function getSessionToken(): Promise<string | null> {
+  if (!isNative()) return null;
+  const { Preferences } = await import("@capacitor/preferences");
+  const { value } = await Preferences.get({ key: SESSION_TOKEN_KEY });
+  return value ?? null;
+}
+
+export async function clearSessionToken(): Promise<void> {
+  if (!isNative()) return;
+  const { Preferences } = await import("@capacitor/preferences");
+  await Preferences.remove({ key: SESSION_TOKEN_KEY });
+}
+
+// fetch wrapper that attaches the stored bearer token on native. On web it's a passthrough, so
+// existing cookie auth is untouched.
+export async function nativeFetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+  if (!isNative()) return fetch(input, init);
+  const token = await getSessionToken();
+  const headers = new Headers(init.headers);
+  if (token && !headers.has("Authorization")) headers.set("Authorization", `Bearer ${token}`);
+  return fetch(input, { ...init, headers });
+}
+
+// Register this device for push and forward the OS token to the backend. Called after login.
+export async function registerForPush(): Promise<void> {
+  if (!isNative()) return;
+  try {
+    const { PushNotifications } = await import("@capacitor/push-notifications");
+    const perm = await PushNotifications.requestPermissions();
+    if (perm.receive !== "granted") return;
+
+    PushNotifications.addListener("registration", (token) => {
+      void nativeFetch("/api/v1/notifications/devices", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: token.value, platform: nativePlatform() }),
+      }).catch(() => undefined);
+    });
+    await PushNotifications.register();
+  } catch {
+    // Push is best-effort; never block login on it.
+  }
+}
+
+// Optional biometric gate on cold start when a session token is present.
+export async function biometricUnlock(): Promise<boolean> {
+  if (!isNative()) return true;
+  try {
+    const { BiometricAuth } = await import("@aparajita/capacitor-biometric-auth");
+    await BiometricAuth.authenticate({
+      reason: "Unlock WIDESTATE OS",
+      cancelTitle: "Cancel",
+      allowDeviceCredential: true,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// One-time native shell setup: status bar + splash. Safe/no-op on web.
+export async function initNativeShell(): Promise<void> {
+  if (!isNative()) return;
+  try {
+    const { SplashScreen } = await import("@capacitor/splash-screen");
+    await SplashScreen.hide();
+  } catch {
+    // ignore
+  }
+}

@@ -25,6 +25,18 @@
   }
 }
 
+/* Safe-area helpers for the native (Capacitor) shell. On the web these insets are 0, so the
+   utilities are inert there. Use .safe-* on fixed/sticky chrome (headers, bottom nav). */
+@layer utilities {
+  .safe-top { padding-top: env(safe-area-inset-top, 0px); }
+  .safe-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .safe-x {
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+  .min-h-safe-screen { min-height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); }
+}
+
 @layer components {
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-navy-300 focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none;

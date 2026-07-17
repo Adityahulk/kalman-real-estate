@@ -3,7 +3,8 @@
 import { ChangeEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileStorageProvider, FileVisibility } from "@prisma/client";
-import { CheckCircle2, Loader2, UploadCloud, XCircle } from "lucide-react";
+import { Camera as CameraIcon, CheckCircle2, Loader2, UploadCloud, XCircle } from "lucide-react";
+import { isNative } from "@/lib/native";
 
 type UploadedFile = {
   id: string;
@@ -61,6 +62,31 @@ export function FileUploader({
   async function upload(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
+    await uploadFile(file);
+  }
+
+  // Capture a photo through the native camera (Capacitor) and route it through the exact same
+  // upload pipeline as a chosen file. No-op wiring on web — the button only renders on native.
+  async function capturePhoto() {
+    try {
+      const { Camera, CameraResultType, CameraSource } = await import("@capacitor/camera");
+      const photo = await Camera.getPhoto({
+        quality: 80,
+        resultType: CameraResultType.Uri,
+        source: CameraSource.Camera,
+      });
+      if (!photo.webPath) return;
+      const blob = await (await fetch(photo.webPath)).blob();
+      const ext = photo.format || "jpeg";
+      const file = new File([blob], `photo-${Date.now()}.${ext}`, { type: blob.type || `image/${ext}` });
+      await uploadFile(file);
+    } catch (error) {
+      setStatus("error");
+      setMessage(error instanceof Error ? error.message : "Camera capture failed");
+    }
+  }
+
+  async function uploadFile(file: File) {
     setStatus("uploading");
     setProgress(10);
     setMessage(file.name);
@@ -117,8 +143,29 @@ export function FileUploader({
           {icon}
           {compact ? null : label}
         </span>
-        <input className="hidden" type="file" accept={accept} onChange={upload} />
-        <span className="btn-outline h-8 px-3 text-xs">{compact ? label : "Choose file"}</span>
+        <input
+          className="hidden"
+          type="file"
+          accept={accept}
+          {...(accept?.includes("image") ? { capture: "environment" as const } : {})}
+          onChange={upload}
+        />
+        <span className="flex items-center gap-2">
+          {isNative() ? (
+            <button
+              type="button"
+              className="btn-outline h-8 px-3 text-xs"
+              onClick={(event) => {
+                event.preventDefault();
+                void capturePhoto();
+              }}
+            >
+              <CameraIcon size={14} />
+              Camera
+            </button>
+          ) : null}
+          <span className="btn-outline h-8 px-3 text-xs">{compact ? label : "Choose file"}</span>
+        </span>
       </label>
       {message && !compact ? <div className="mt-2 text-xs text-slate-500">{message}</div> : null}
       {status === "uploading" ? (

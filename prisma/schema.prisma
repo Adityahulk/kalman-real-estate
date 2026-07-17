@@ -1195,3 +1195,18 @@ model DemoRequest {
   @@index([status, createdAt])
   @@index([email, createdAt])
 }
+
+// Push-notification device registrations for the Capacitor mobile shell. Loose keys (no
+// relations) to match the Notification model convention. `token` is the FCM/APNs registration
+// token; a device can re-register (upsert on token) as the OS rotates it.
+model DeviceToken {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  platform  String
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, userId])
+}

@@ -15,8 +15,19 @@ export type RequestContext = {
 
 const roleSchema = z.nativeEnum(Role);
 
+function bearerToken(request: NextRequest): string | undefined {
+  const header = request.headers.get("authorization") ?? request.headers.get("Authorization");
+  if (!header) return undefined;
+  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
+  return match?.[1];
+}
+
 export async function getRequestContext(request: NextRequest, permission?: Permission): Promise<RequestContext> {
-  const session = await verifySessionToken(request.cookies.get("kalman_session")?.value);
+  // Cookie is the primary credential for the web app; native (Capacitor) clients that call the
+  // API directly from a plugin context send the same JWT as `Authorization: Bearer <token>`.
+  const session =
+    (await verifySessionToken(request.cookies.get("kalman_session")?.value)) ??
+    (await verifySessionToken(bearerToken(request)));
   const allowDevHeaderAuth = process.env.NODE_ENV !== "production" && process.env.ALLOW_DEV_HEADER_AUTH === "true";
   const role = roleSchema.safeParse(request.headers.get("x-role"));
   const devContext = allowDevHeaderAuth && request.headers.get("x-tenant-id") && request.headers.get("x-user-id") && role.success

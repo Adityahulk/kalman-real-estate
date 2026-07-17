@@ -4,6 +4,7 @@ import { FormEvent, Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Building2, Loader2, LockKeyhole, UserRound } from "lucide-react";
+import { registerForPush, storeSessionToken } from "@/lib/native";
 
 export default function LoginPage() {
   return (
@@ -38,6 +39,11 @@ function LoginForm() {
       setError(payload.error ?? "Login failed");
       return;
     }
+
+    // Native shell: mirror the JWT into secure storage for bearer auth + relaunch persistence,
+    // and register for push. Both are no-ops on the web build.
+    await storeSessionToken(payload?.data?.token);
+    void registerForPush();
 
     router.push(search.get("next") ?? "/firms");
     router.refresh();

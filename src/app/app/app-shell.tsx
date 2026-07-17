@@ -24,6 +24,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { requestJson } from "@/lib/api-client";
+import { clearSessionToken } from "@/lib/native";
 
 type ShellProject = {
   id: string;
@@ -97,6 +98,12 @@ export function AppShell({
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [firmMenuOpen]);
 
+  // Close the mobile drawer whenever the route changes so navigating from it doesn't leave the
+  // overlay covering the destination page.
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
   const selectedProjectId = useMemo(() => {
     const match = pathname.match(/^\/app\/projects\/([^/]+)/);
     return match?.[1] ?? "";
@@ -159,15 +166,23 @@ export function AppShell({
   return (
     <div className="min-h-screen bg-slate-50 text-navy-950">
       <button
-        className="fixed left-4 top-4 z-50 rounded-lg border border-slate-200 bg-white p-2 shadow-sm lg:hidden"
+        className="safe-top fixed left-4 top-4 z-50 rounded-lg border border-slate-200 bg-white p-2 shadow-sm lg:hidden"
         onClick={() => setMobileOpen((value) => !value)}
         aria-label="Open navigation"
       >
         <Menu size={18} />
       </button>
 
+      {mobileOpen ? (
+        <div
+          className="fixed inset-0 z-30 bg-navy-950/40 lg:hidden"
+          onClick={() => setMobileOpen(false)}
+          aria-hidden
+        />
+      ) : null}
+
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex flex-col overflow-y-auto border-r border-slate-200 bg-white transition-all ${
+        className={`safe-top safe-bottom fixed inset-y-0 left-0 z-40 flex flex-col overflow-y-auto border-r border-slate-200 bg-white transition-all ${
           collapsed ? "w-20" : "w-72"
         } ${mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
       >
@@ -293,7 +308,7 @@ export function AppShell({
             {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
             {!collapsed ? "Collapse" : null}
           </button>
-          <form action="/api/v1/auth/logout" method="post">
+          <form action="/api/v1/auth/logout" method="post" onSubmit={() => void clearSessionToken()}>
             <button className={`btn-ghost h-9 w-full px-2 ${collapsed ? "justify-center" : "justify-start"}`}>
               <LogOut size={17} />
               {!collapsed ? "Sign out" : null}
@@ -303,7 +318,7 @@ export function AppShell({
       </aside>
 
       <div className={`min-h-screen transition-all ${sidebarWidth}`}>
-        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 px-4 pl-16 backdrop-blur lg:px-8">
+        <header className="safe-top sticky top-0 z-20 flex h-16 items-center justify-between border-b border-slate-200 bg-white/95 px-4 pl-16 backdrop-blur lg:px-8">
           <div className="relative flex min-w-0 items-center gap-2" ref={firmMenuRef}>
             <div className="truncate text-sm font-semibold text-navy-950">Welcome to {user.tenantName}</div>
             <button className="btn-ghost h-9 w-9 px-0 text-slate-500" type="button" onClick={() => setFirmMenuOpen((value) => !value)} title="Change firm">

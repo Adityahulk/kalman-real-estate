@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../db";
 import { RequestContext } from "../api";
 import { hasPermission, Permission } from "../rbac";
+import { sendPushToUsers } from "./push";
 
 export const notificationSchema = z.object({
   userId: z.string().optional(),
@@ -16,7 +17,7 @@ export async function createNotification(
   context: Pick<RequestContext, "tenantId">,
   input: Omit<z.infer<typeof notificationSchema>, "channel"> & { channel?: string },
 ) {
-  return prisma.notification.create({
+  const notification = await prisma.notification.create({
     data: {
       tenantId: context.tenantId,
       userId: input.userId,
@@ -26,6 +27,16 @@ export async function createNotification(
       data: input.data as Prisma.InputJsonValue,
     },
   });
+  // Mirror to push (best-effort; sendPushToUsers never throws). A null userId is a tenant-wide
+  // broadcast which we don't push here — only targeted notifications reach a device.
+  if (input.userId) {
+    void sendPushToUsers(context.tenantId, [input.userId], {
+      title: input.title,
+      body: input.body,
+      data: input.data,
+    });
+  }
+  return notification;
 }
 
 // Fan a notification out to every active user in the tenant whose role grants `permission`.
@@ -56,6 +67,11 @@ export async function notifyRoleWithPermission(
       data: (input.data ?? {}) as Prisma.InputJsonValue,
     })),
   });
+  void sendPushToUsers(
+    context.tenantId,
+    recipients.map((user) => user.id),
+    { title: input.title, body: input.body, data: input.data },
+  );
   return { count: recipients.length };
 }
 
