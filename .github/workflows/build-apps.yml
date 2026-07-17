@@ -1,0 +1,152 @@
+name: Build Apps
+
+# Builds the installable artifacts for every shell that wraps the hosted web app:
+#   - Android APK (Capacitor)
+#   - iOS build (Capacitor, unsigned — a signed .ipa needs Apple certs; see notes below)
+#   - Desktop installers (Electron) for macOS, Windows, Linux
+#
+# The native projects (android/, ios/) and desktop/node_modules are gitignored, so each job
+# regenerates them from config before building — the same way a fresh clone would.
+#
+# Run it from the Actions tab (workflow_dispatch) or by pushing a version tag (e.g. v0.1.0).
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+env:
+  # Shells load the live web app from these origins. Override by setting repo Variables of the
+  # same name (Settings → Secrets and variables → Actions → Variables); otherwise the config
+  # defaults apply.
+  MOBILE_SERVER_URL: ${{ vars.MOBILE_SERVER_URL || 'https://kalman.estate' }}
+  DESKTOP_SERVER_URL: ${{ vars.DESKTOP_SERVER_URL || 'https://kalman.estate' }}
+  # These shells don't need Puppeteer's bundled Chromium; skip the slow download during install.
+  PUPPETEER_SKIP_DOWNLOAD: "true"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  android:
+    name: Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate & sync Android project
+        run: |
+          npx cap add android || true
+          npx cap sync android
+
+      - name: Build debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  ios:
+    name: iOS (unsigned)
+    runs-on: macos-14
+    # A distributable .ipa requires Apple signing certificates. Without them we can still compile
+    # the app to prove the iOS project is valid and produce a .app artifact, so this job is allowed
+    # to fail rather than block the release if the toolchain shifts.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate & sync iOS project
+        run: |
+          npx cap add ios || true
+          npx cap sync ios
+
+      - name: Build (no code signing)
+        run: |
+          cd ios/App
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package .app artifact
+        run: |
+          cd ios/App/build/Build/Products/Release-iphoneos
+          zip -r "$GITHUB_WORKSPACE/WIDESTATE-OS-ios-unsigned.zip" App.app
+
+      - name: Upload iOS build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-app-unsigned
+          path: WIDESTATE-OS-ios-unsigned.zip
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  desktop:
+    name: Desktop (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install desktop dependencies
+        run: npm --prefix desktop ci
+
+      - name: Build installers
+        # Skip auto code-sign discovery so unsigned CI builds don't hang looking for certs.
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: npm --prefix desktop run dist
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.zip
+            desktop/release/*.exe
+            desktop/release/*.AppImage
+            desktop/release/*.deb
+          if-no-files-found: warn
