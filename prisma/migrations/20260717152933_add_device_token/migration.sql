@@ -1,8 +1,8 @@
 -- DropForeignKey
-ALTER TABLE "MarketingTask" DROP CONSTRAINT "MarketingTask_projectId_fkey";
+ALTER TABLE "MarketingTask" DROP CONSTRAINT IF EXISTS "MarketingTask_projectId_fkey";
 
 -- DropIndex
-DROP INDEX "FileAsset_tenantId_documentType_idx";
+DROP INDEX IF EXISTS "FileAsset_tenantId_documentType_idx";
 
 -- AlterTable
 ALTER TABLE "DocumentTemplate" ALTER COLUMN "updatedAt" DROP DEFAULT;

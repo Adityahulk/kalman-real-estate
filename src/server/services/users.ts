@@ -37,6 +37,10 @@ export const createUserSchema = z
     loginId: z.string().min(3).optional().or(z.literal("")),
     phone: z.string().optional(),
     role: roleEnum,
+    customRoleId: z.string().optional().nullable(),
+    departmentId: z.string().optional().nullable(),
+    designationId: z.string().optional().nullable(),
+    profileData: z.record(z.unknown()).optional(),
     password: z.string().min(6),
   })
   .refine((value) => Boolean(value.email) || Boolean(value.loginId), {
@@ -45,7 +49,15 @@ export const createUserSchema = z
   });
 
 export const updateUserSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  email: z.string().email().optional(),
+  loginId: z.string().trim().min(3).optional().nullable(),
+  phone: z.string().optional().nullable(),
   role: roleEnum.optional(),
+  customRoleId: z.string().optional().nullable(),
+  departmentId: z.string().optional().nullable(),
+  designationId: z.string().optional().nullable(),
+  profileData: z.record(z.unknown()).optional(),
   status: z.nativeEnum(UserStatus).optional(),
 });
 
@@ -63,13 +75,26 @@ export async function listUsers(context: RequestContext) {
       loginId: true,
       phone: true,
       role: true,
+      customRoleId: true,
+      departmentId: true,
+      designationId: true,
+      profileData: true,
       status: true,
       lastLoginAt: true,
       createdAt: true,
+      customRole: { select: { id: true, name: true, permissions: true } },
+      department: { select: { id: true, name: true } },
+      designation: { select: { id: true, name: true } },
     },
     orderBy: { createdAt: "asc" },
   });
-  return { users, roles: ASSIGNABLE_ROLES };
+  const [customRoles, departments, designations, userFields] = await Promise.all([
+    prisma.customRole.findMany({ where: { tenantId: context.tenantId }, orderBy: { name: "asc" } }),
+    prisma.department.findMany({ where: { tenantId: context.tenantId }, orderBy: { name: "asc" } }),
+    prisma.designation.findMany({ where: { tenantId: context.tenantId }, orderBy: { name: "asc" } }),
+    prisma.userFieldDefinition.findMany({ where: { tenantId: context.tenantId }, orderBy: { createdAt: "asc" } }),
+  ]);
+  return { users, roles: ASSIGNABLE_ROLES, customRoles, departments, designations, userFields };
 }
 
 export async function createUser(context: RequestContext, input: z.infer<typeof createUserSchema>) {
@@ -89,6 +114,7 @@ export async function createUser(context: RequestContext, input: z.infer<typeof 
     throw error;
   }
 
+  const organization = await resolveOrganization(context, input);
   const passwordHash = await bcrypt.hash(input.password, 12);
   const user = await prisma.user.create({
     data: {
@@ -98,11 +124,15 @@ export async function createUser(context: RequestContext, input: z.infer<typeof 
       passwordHash,
       name: input.name.trim(),
       phone: input.phone?.trim() || null,
-      role: input.role,
+      role: organization.role,
+      customRoleId: organization.customRoleId,
+      departmentId: organization.departmentId,
+      designationId: organization.designationId,
+      profileData: (input.profileData ?? {}) as Prisma.InputJsonValue,
       status: UserStatus.ACTIVE,
-      firmMemberships: { create: { tenantId: context.tenantId, role: input.role } },
+      firmMemberships: { create: { tenantId: context.tenantId, role: organization.role } },
     },
-    select: { id: true, name: true, email: true, loginId: true, role: true, status: true },
+    select: { id: true, name: true, email: true, loginId: true, role: true, customRoleId: true, departmentId: true, designationId: true, profileData: true, status: true },
   });
   await writeAuditEvent(context, {
     action: AuditAction.CREATE,
@@ -121,19 +151,33 @@ export async function updateUser(context: RequestContext, id: string, input: z.i
     error.name = "BadRequestError";
     throw error;
   }
+  const organization = await resolveOrganization(context, {
+    role: input.role ?? before.role,
+    customRoleId: input.customRoleId === undefined ? before.customRoleId : input.customRoleId,
+    departmentId: input.departmentId === undefined ? before.departmentId : input.departmentId,
+    designationId: input.designationId === undefined ? before.designationId : input.designationId,
+  });
   const user = await prisma.user.update({
     where: { id },
     data: {
-      role: input.role ?? before.role,
+      name: input.name,
+      email: input.email?.toLowerCase().trim(),
+      loginId: input.loginId === undefined ? undefined : input.loginId || null,
+      phone: input.phone === undefined ? undefined : input.phone?.trim() || null,
+      role: organization.role,
+      customRoleId: organization.customRoleId,
+      departmentId: organization.departmentId,
+      designationId: organization.designationId,
+      profileData: input.profileData as Prisma.InputJsonValue | undefined,
       status: input.status ?? before.status,
     },
-    select: { id: true, name: true, email: true, loginId: true, role: true, status: true },
+    select: { id: true, name: true, email: true, loginId: true, phone: true, role: true, customRoleId: true, departmentId: true, designationId: true, profileData: true, status: true },
   });
   // Keep the firm-membership role in sync with the primary role so RBAC stays consistent.
-  if (input.role) {
+  if (organization.role !== before.role) {
     await prisma.userFirmMembership.updateMany({
       where: { userId: id, tenantId: context.tenantId },
-      data: { role: input.role },
+      data: { role: organization.role },
     });
   }
   await writeAuditEvent(context, {
@@ -144,6 +188,38 @@ export async function updateUser(context: RequestContext, id: string, input: z.i
     after: user as unknown as Prisma.InputJsonValue,
   });
   return user;
+}
+
+export async function deleteUser(context: RequestContext, id: string) {
+  if (context.role !== Role.SUPER_ADMIN) {
+    const error = new Error("Only a Super Admin can delete user accounts.");
+    error.name = "ForbiddenError";
+    throw error;
+  }
+  if (id === context.userId) {
+    const error = new Error("You cannot delete your own account.");
+    error.name = "BadRequestError";
+    throw error;
+  }
+  const before = await prisma.user.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  await prisma.$transaction(async (tx) => {
+    await tx.fileAsset.updateMany({
+      where: { tenantId: context.tenantId, ownerType: "User", ownerId: id, deletedAt: null },
+      data: { deletedAt: new Date(), deletedById: context.userId, deleteReason: "User account deleted" },
+    });
+    await tx.notification.deleteMany({ where: { tenantId: context.tenantId, userId: id } });
+    await tx.deviceToken.deleteMany({ where: { tenantId: context.tenantId, userId: id } });
+    await tx.ownershipRecord.updateMany({ where: { createdById: id }, data: { createdById: null } });
+    await tx.auditEvent.updateMany({ where: { actorUserId: id }, data: { actorUserId: null } });
+    await tx.user.delete({ where: { id } });
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.DELETE,
+    entityType: "User",
+    entityId: id,
+    before: { id: before.id, name: before.name, email: before.email, role: before.role } as Prisma.InputJsonValue,
+  });
+  return { id };
 }
 
 export async function resetUserPassword(context: RequestContext, id: string, input: z.infer<typeof resetPasswordSchema>) {
@@ -157,4 +233,37 @@ export async function resetUserPassword(context: RequestContext, id: string, inp
     after: { id, passwordReset: true } as unknown as Prisma.InputJsonValue,
   });
   return { ok: true };
+}
+
+async function resolveOrganization(
+  context: RequestContext,
+  input: {
+    role: Role;
+    customRoleId?: string | null;
+    departmentId?: string | null;
+    designationId?: string | null;
+  },
+) {
+  const [customRole, department, designation] = await Promise.all([
+    input.customRoleId
+      ? prisma.customRole.findFirstOrThrow({ where: { id: input.customRoleId, tenantId: context.tenantId } })
+      : null,
+    input.departmentId
+      ? prisma.department.findFirstOrThrow({ where: { id: input.departmentId, tenantId: context.tenantId } })
+      : null,
+    input.designationId
+      ? prisma.designation.findFirstOrThrow({ where: { id: input.designationId, tenantId: context.tenantId } })
+      : null,
+  ]);
+  if (designation && department && designation.departmentId !== department.id) {
+    const error = new Error("The selected designation does not belong to the selected department.");
+    error.name = "BadRequestError";
+    throw error;
+  }
+  return {
+    role: customRole?.baseRole ?? input.role,
+    customRoleId: customRole?.id ?? null,
+    departmentId: department?.id ?? customRole?.departmentId ?? null,
+    designationId: designation?.id ?? customRole?.designationId ?? null,
+  };
 }

@@ -167,6 +167,10 @@ async function assertOwnerRecord(context: RequestContext, ownerType?: string, ow
     await prisma.progressUpdate.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
     return;
   }
+  if (ownerType === "SiteAsset") {
+    await prisma.siteAsset.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId, archivedAt: null } });
+    return;
+  }
   if (ownerType === "MarketingTask") {
     await prisma.marketingTask.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
     return;
@@ -177,6 +181,10 @@ async function assertOwnerRecord(context: RequestContext, ownerType?: string, ow
   }
   if (ownerType === "GeneratedDocument") {
     await prisma.generatedDocument.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
+    return;
+  }
+  if (ownerType === "User") {
+    await prisma.user.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
     return;
   }
 }

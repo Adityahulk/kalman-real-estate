@@ -270,7 +270,7 @@ export function AppShell({
           {canManageUsers ? (
             <ShellLink
               href="/app/users"
-              label="Users & roles"
+              label="Users"
               icon={ShieldCheck}
               collapsed={collapsed}
               active={pathname.startsWith("/app/users")}

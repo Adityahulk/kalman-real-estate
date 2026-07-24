@@ -54,10 +54,10 @@ export default async function LetterStudioPage({ params, searchParams }: { param
           signedFileAssetId: document.signedFileAssetId,
         }}
         can={{
-          generate: hasPermission(session.role, "documents.generate"),
-          submit: hasPermission(session.role, "documents.submit"),
-          approve: hasPermission(session.role, "documents.approve"),
-          sign: hasPermission(session.role, "documents.sign"),
+          generate: hasPermission(session.role, "documents.generate", session.permissions),
+          submit: hasPermission(session.role, "documents.submit", session.permissions),
+          approve: hasPermission(session.role, "documents.approve", session.permissions),
+          sign: hasPermission(session.role, "documents.sign", session.permissions),
         }}
         activity={activity}
         missingVariables={missingVariables}

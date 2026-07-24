@@ -3,6 +3,7 @@ import { z } from "zod";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
+import { assertPermission, hasPermission, normalizePermissions } from "../rbac";
 import { createNotification, notifyRoleWithPermission } from "./notifications";
 
 // Engineering task lifecycle statuses. SiteAsset.status is a free-form string, so these extend the
@@ -13,6 +14,7 @@ export const TASK_STATUS = {
   SENT_FOR_VERIFICATION: "SENT_FOR_VERIFICATION",
   COMPLETED: "COMPLETED",
   RETURNED: "RETURNED",
+  CLOSED: "CLOSED",
 } as const;
 
 export const progressSchema = z.object({
@@ -26,6 +28,9 @@ export const progressSchema = z.object({
 
 export async function updateSiteAssetProgress(context: RequestContext, siteAssetId: string, input: z.infer<typeof progressSchema>) {
   const assetBefore = await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
+  if ([TASK_STATUS.COMPLETED, TASK_STATUS.CLOSED].includes(assetBefore.status as typeof TASK_STATUS.COMPLETED | typeof TASK_STATUS.CLOSED)) {
+    throwBadRequest("Completed or closed tasks cannot receive new progress updates.");
+  }
   if (input.photoFileIds?.length) await assertFilesInTenant(context, input.photoFileIds);
   const totalArea = assetBefore.totalArea ? Number(assetBefore.totalArea) : 0;
   const progressPct = totalArea > 0 ? Math.max(0, Math.min(100, Math.round((input.areaDone / totalArea) * 100))) : assetBefore.progressPct;
@@ -34,7 +39,7 @@ export async function updateSiteAssetProgress(context: RequestContext, siteAsset
       where: { id: siteAssetId },
       data: {
         progressPct,
-        status: progressPct >= 100 ? "COMPLETED" : "IN_PROGRESS",
+        status: TASK_STATUS.IN_PROGRESS,
       },
     }),
     prisma.progressUpdate.create({
@@ -146,12 +151,23 @@ export const developmentTaskSchema = z.object({
   units: z.string().min(1).max(40),
   deadline: z.string().datetime().optional(),
   category: z.string().min(2),
-  assignedTo: z.string().optional(),
-  status: z.enum(["PLANNED", "IN_PROGRESS", "COMPLETED"]).default("PLANNED"),
+  assignedToId: z.string().optional().nullable(),
+  status: z.enum([
+    TASK_STATUS.PLANNED,
+    TASK_STATUS.IN_PROGRESS,
+    TASK_STATUS.SENT_FOR_VERIFICATION,
+    TASK_STATUS.COMPLETED,
+    TASK_STATUS.RETURNED,
+    TASK_STATUS.CLOSED,
+  ]).default(TASK_STATUS.PLANNED),
 });
 
 export async function updateDevelopmentTask(context: RequestContext, siteAssetId: string, input: z.infer<typeof developmentTaskSchema>) {
   const before = await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
+  if ((input.assignedToId ?? null) !== (before.assignedToId ?? null)) {
+    assertPermission(context.role, "engineering.assign", context.permissions);
+  }
+  if (input.assignedToId) await assertActiveTenantUser(context, input.assignedToId);
   const task = await prisma.siteAsset.update({
     where: { id: siteAssetId },
     data: {
@@ -160,7 +176,8 @@ export async function updateDevelopmentTask(context: RequestContext, siteAssetId
       totalArea: input.totalArea,
       units: input.units,
       deadline: input.deadline ? new Date(input.deadline) : null,
-      contractorId: input.assignedTo || null,
+      assignedToId: input.assignedToId || null,
+      contractorId: null,
       status: input.status,
     },
   });
@@ -174,39 +191,38 @@ export async function updateDevelopmentTask(context: RequestContext, siteAssetId
   return task;
 }
 
-export async function assignDevelopmentTask(context: RequestContext, siteAssetId: string, assignedTo: string) {
+export async function assignDevelopmentTask(context: RequestContext, siteAssetId: string, assignedToId: string) {
   const before = await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
+  if ([TASK_STATUS.COMPLETED, TASK_STATUS.CLOSED].includes(before.status as typeof TASK_STATUS.COMPLETED | typeof TASK_STATUS.CLOSED)) {
+    throwBadRequest("Completed or closed tasks cannot be reassigned.");
+  }
+  const assignee = await assertActiveTenantUser(context, assignedToId);
   const task = await prisma.siteAsset.update({
     where: { id: siteAssetId },
     data: {
-      contractorId: assignedTo,
-      status: "IN_PROGRESS",
+      assignedToId,
+      contractorId: null,
+      status: TASK_STATUS.IN_PROGRESS,
     },
   });
   await writeAuditEvent(context, {
-    action: AuditAction.UPDATE,
+    action: AuditAction.ASSIGN,
     entityType: "SiteAsset",
     entityId: siteAssetId,
     before: before as unknown as Prisma.InputJsonValue,
-    after: task as unknown as Prisma.InputJsonValue,
+    after: { ...task, assignedToName: assignee.name } as unknown as Prisma.InputJsonValue,
+  });
+  await createNotification(context, {
+    userId: assignee.id,
+    title: before.assignedToId ? "Task reassigned" : "Task assigned",
+    body: `You have been assigned "${task.name}"${task.deadline ? ` (due ${task.deadline.toLocaleDateString()})` : ""}.`,
+    data: { siteAssetId: task.id, status: task.status },
   });
   return task;
 }
 
 export async function markDevelopmentTaskComplete(context: RequestContext, siteAssetId: string) {
-  const before = await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
-  const task = await prisma.siteAsset.update({
-    where: { id: siteAssetId },
-    data: { progressPct: 100, status: "COMPLETED" },
-  });
-  await writeAuditEvent(context, {
-    action: AuditAction.UPDATE,
-    entityType: "SiteAsset",
-    entityId: siteAssetId,
-    before: before as unknown as Prisma.InputJsonValue,
-    after: task as unknown as Prisma.InputJsonValue,
-  });
-  return task;
+  return submitTaskForVerification(context, siteAssetId);
 }
 
 // Head Engineer creates a task and assigns a site engineer + contractor with a priority and deadline.
@@ -224,6 +240,10 @@ export const createDevelopmentTaskSchema = z.object({
 
 export async function createDevelopmentTask(context: RequestContext, input: z.infer<typeof createDevelopmentTaskSchema>) {
   await prisma.project.findFirstOrThrow({ where: { id: input.projectId, tenantId: context.tenantId } });
+  if (input.assignedToId) {
+    assertPermission(context.role, "engineering.assign", context.permissions);
+    await assertActiveTenantUser(context, input.assignedToId);
+  }
   const task = await prisma.siteAsset.create({
     data: {
       tenantId: context.tenantId,
@@ -260,6 +280,12 @@ export async function createDevelopmentTask(context: RequestContext, input: z.in
 // Site Engineer sends a task to the Head Engineer for verification once work is done.
 export async function submitTaskForVerification(context: RequestContext, siteAssetId: string) {
   const before = await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
+  if ([TASK_STATUS.COMPLETED, TASK_STATUS.CLOSED].includes(before.status as typeof TASK_STATUS.COMPLETED | typeof TASK_STATUS.CLOSED)) {
+    throwBadRequest("This task is already completed or closed.");
+  }
+  if (before.progressPct < 95) {
+    throwBadRequest("Task progress must be at least 95% before it can be sent for approval.");
+  }
   const task = await prisma.siteAsset.update({
     where: { id: siteAssetId },
     data: { status: TASK_STATUS.SENT_FOR_VERIFICATION },
@@ -288,6 +314,9 @@ export const verifyDevelopmentTaskSchema = z.object({
 
 export async function verifyDevelopmentTask(context: RequestContext, siteAssetId: string, input: z.infer<typeof verifyDevelopmentTaskSchema>) {
   const before = await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
+  if (before.status !== TASK_STATUS.SENT_FOR_VERIFICATION) {
+    throwBadRequest("Only tasks awaiting approval can be approved or returned.");
+  }
   const approved = input.decision === "APPROVE";
   const task = await prisma.siteAsset.update({
     where: { id: siteAssetId },
@@ -335,6 +364,49 @@ export async function deleteDevelopmentTask(context: RequestContext, siteAssetId
   return task;
 }
 
+export async function closeDevelopmentTask(context: RequestContext, siteAssetId: string) {
+  const before = await prisma.siteAsset.findFirstOrThrow({
+    where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null },
+  });
+  if (before.status === TASK_STATUS.CLOSED) throwBadRequest("This task is already closed.");
+  const task = await prisma.siteAsset.update({
+    where: { id: siteAssetId },
+    data: { status: TASK_STATUS.CLOSED },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.UPDATE,
+    entityType: "SiteAsset",
+    entityId: siteAssetId,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: { ...task, closedById: context.userId } as unknown as Prisma.InputJsonValue,
+  });
+  return task;
+}
+
+export async function listEngineeringAssignees(tenantId: string) {
+  const users = await prisma.user.findMany({
+    where: { tenantId, status: "ACTIVE" },
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      name: true,
+      role: true,
+      customRole: { select: { permissions: true } },
+      department: { select: { name: true } },
+      designation: { select: { name: true } },
+    },
+  });
+  return users
+    .filter((user) => hasPermission(user.role, "development.manage", normalizePermissions(user.customRole?.permissions)))
+    .map((user) => ({
+      id: user.id,
+      name: user.name,
+      role: user.role,
+      department: user.department?.name ?? null,
+      designation: user.designation?.name ?? null,
+    }));
+}
+
 async function assertFilesInTenant(context: RequestContext, fileAssetIds: string[]) {
   const files = await prisma.fileAsset.findMany({
     where: { id: { in: fileAssetIds }, tenantId: context.tenantId, deletedAt: null },
@@ -343,6 +415,15 @@ async function assertFilesInTenant(context: RequestContext, fileAssetIds: string
   if (files.length !== new Set(fileAssetIds).size) {
     throwBadRequest("One or more files are invalid for this tenant");
   }
+}
+
+async function assertActiveTenantUser(context: RequestContext, userId: string) {
+  const user = await prisma.user.findFirst({
+    where: { id: userId, tenantId: context.tenantId, status: "ACTIVE" },
+    select: { id: true, name: true },
+  });
+  if (!user) throwBadRequest("Select an active user from this firm.");
+  return user;
 }
 
 function throwBadRequest(message: string): never {

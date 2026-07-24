@@ -2,13 +2,36 @@
 
 import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
-import { AlertTriangle, CalendarDays, CheckCircle2, Clock3, ExternalLink, FileStack, Loader2, Pencil, Plus, Search, Trash2, Upload, UserRound, Wrench } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarDays,
+  CheckCircle2,
+  Clock3,
+  FileStack,
+  FolderArchive,
+  Loader2,
+  Pencil,
+  Plus,
+  Search,
+  Upload,
+  UserRound,
+  Wrench,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 
-type PlanFile = {
+export type EngineeringAssignee = {
+  id: string;
+  name: string;
+  role: string;
+  department: string | null;
+  designation: string | null;
+};
+
+type EngineeringFile = {
   id: string;
   fileName: string;
   mimeType: string;
+  categoryKey: string | null;
   taskId: string;
   taskName: string;
 };
@@ -22,8 +45,9 @@ type TaskItem = {
   deadline: string | null;
   status: string;
   progressPct: number;
+  assignedToId: string | null;
   assignedTo: string | null;
-  planFiles: PlanFile[];
+  files: EngineeringFile[];
 };
 
 type TaskUpdate = {
@@ -47,9 +71,16 @@ type TaskFormInput = {
   totalArea: string;
   units: string;
   deadline: string;
-  assignedTo?: string;
-  status?: "PLANNED" | "IN_PROGRESS" | "COMPLETED";
+  assignedToId?: string;
+  status?: string;
 };
+
+const TERMINAL_STATUSES = new Set(["COMPLETED", "CLOSED"]);
+const FILE_CATEGORIES = [
+  { key: "development-drawing", label: "Drawings" },
+  { key: "development-boq", label: "BOQs" },
+  { key: "development-estimate", label: "Estimates" },
+] as const;
 
 export function DevelopmentTaskDashboard({
   projectId,
@@ -57,29 +88,38 @@ export function DevelopmentTaskDashboard({
   projectLocation,
   categories,
   tasks,
+  assignees,
+  canManage,
+  canAssign,
 }: {
   projectId: string;
   projectName: string;
   projectLocation: string;
   categories: string[];
   tasks: TaskItem[];
+  assignees: EngineeringAssignee[];
+  canManage: boolean;
+  canAssign: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
+  const [status, setStatus] = useState("all");
   const [delayedOnly, setDelayedOnly] = useState(false);
   const [editingTask, setEditingTask] = useState<TaskFormInput | null>(null);
 
   const filteredTasks = useMemo(() => tasks.filter((task) => {
-    const matchesQuery = !query.trim() || `${task.name} ${task.category} ${task.assignedTo ?? ""}`.toLowerCase().includes(query.trim().toLowerCase());
+    const matchesQuery = !query.trim()
+      || `${task.name} ${task.category} ${task.assignedTo ?? ""} ${task.status}`.toLowerCase().includes(query.trim().toLowerCase());
     const matchesCategory = category === "all" || task.category === category;
-    const isDelayed = Boolean(task.deadline && new Date(task.deadline) < new Date() && task.status !== "COMPLETED");
-    return matchesQuery && matchesCategory && (!delayedOnly || isDelayed);
-  }), [category, delayedOnly, query, tasks]);
+    const matchesStatus = status === "all" || task.status === status;
+    const isDelayed = Boolean(task.deadline && new Date(task.deadline) < new Date() && !TERMINAL_STATUSES.has(task.status));
+    return matchesQuery && matchesCategory && matchesStatus && (!delayedOnly || isDelayed);
+  }), [category, delayedOnly, query, status, tasks]);
 
-  const ongoingTasks = filteredTasks.filter((task) => task.status === "IN_PROGRESS");
+  const ongoingTasks = filteredTasks.filter((task) => ["IN_PROGRESS", "RETURNED", "SENT_FOR_VERIFICATION"].includes(task.status));
   const upcomingTasks = filteredTasks.filter((task) => task.status === "PLANNED").sort(compareDeadlines);
-  const delayedTasks = filteredTasks.filter((task) => task.deadline && new Date(task.deadline) < new Date() && task.status !== "COMPLETED");
-  const planFiles = filteredTasks.flatMap((task) => task.planFiles);
+  const delayedTasks = filteredTasks.filter((task) => task.deadline && new Date(task.deadline) < new Date() && !TERMINAL_STATUSES.has(task.status));
+  const statuses = Array.from(new Set(tasks.map((task) => task.status))).sort();
 
   return (
     <div className="space-y-6">
@@ -88,107 +128,105 @@ export function DevelopmentTaskDashboard({
           <div className="text-sm text-slate-500">{projectLocation}</div>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">{projectName} development</h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-            Track plans, assign work, monitor delays, and record site progress in one place.
+            Assign work, monitor progress, verify completion, and keep every engineering file together.
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
           <Link className="btn-outline h-10 px-4" href={`/app/projects/${projectId}/development/plans`}>
             <FileStack size={16} />
-            View plans
+            Engineering files
           </Link>
-          <Link className="btn-outline h-10 px-4" href={`/app/projects/${projectId}/development/new-task`}>
-            <Plus size={16} />
-            Add task
-          </Link>
+          {canManage ? (
+            <Link className="btn-primary h-10 px-4" href={`/app/projects/${projectId}/development/new-task`}>
+              <Plus size={16} />
+              Add task
+            </Link>
+          ) : null}
         </div>
       </header>
 
-      <div className="space-y-6">
-        <section className="grid gap-4 md:grid-cols-3">
-          <MetricCard icon={Wrench} label="Ongoing task" value={ongoingTasks.length} accent="text-navy-900" />
-          <MetricCard icon={AlertTriangle} label="Delayed tasks" value={delayedTasks.length} accent="text-amber-600" />
-          <MetricCard icon={Clock3} label="Upcoming tasks" value={upcomingTasks.length} accent="text-slate-700" />
-        </section>
+      <section className="grid gap-4 md:grid-cols-3">
+        <MetricCard icon={Wrench} label="Ongoing tasks" value={ongoingTasks.length} accent="text-navy-900" />
+        <MetricCard icon={AlertTriangle} label="Delayed tasks" value={delayedTasks.length} accent="text-amber-600" />
+        <MetricCard icon={Clock3} label="Upcoming tasks" value={upcomingTasks.length} accent="text-slate-700" />
+      </section>
 
-        <section className="rounded-xl border border-slate-200 bg-white p-5">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <h2 className="font-semibold">Search and filters</h2>
-            <div className="grid gap-3 md:grid-cols-[minmax(220px,1fr)_180px_auto]">
-              <label className="relative">
-                <Search className="pointer-events-none absolute left-3 top-3 text-slate-400" size={16} />
-                <input className="input pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search tasks" />
-              </label>
-              <select className="input" value={category} onChange={(event) => setCategory(event.target.value)}>
-                <option value="all">All categories</option>
-                {categories.map((item) => <option key={item} value={item}>{item}</option>)}
-              </select>
-              <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm text-slate-700">
-                <input type="checkbox" checked={delayedOnly} onChange={(event) => setDelayedOnly(event.target.checked)} />
-                Delayed only
-              </label>
-            </div>
+      <section className="rounded-lg border border-slate-200 bg-white p-5">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+          <h2 className="font-semibold">Search and filters</h2>
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_170px_190px_auto]">
+            <label className="relative">
+              <Search className="pointer-events-none absolute left-3 top-3 text-slate-400" size={16} />
+              <input className="input pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search every task" />
+            </label>
+            <select className="input" value={category} onChange={(event) => setCategory(event.target.value)}>
+              <option value="all">All categories</option>
+              {categories.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+            <select className="input" value={status} onChange={(event) => setStatus(event.target.value)}>
+              <option value="all">All statuses</option>
+              {statuses.map((item) => <option key={item} value={item}>{statusLabel(item)}</option>)}
+            </select>
+            <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm text-slate-700">
+              <input type="checkbox" checked={delayedOnly} onChange={(event) => setDelayedOnly(event.target.checked)} />
+              Delayed only
+            </label>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section className="grid gap-6 xl:grid-cols-2">
-          <TaskListCard
-            title="All ongoing tasks"
-            empty="No ongoing tasks yet."
-            tasks={ongoingTasks}
-            projectId={projectId}
-            onEdit={(task) => setEditingTask(toTaskFormInput(task))}
-            showManageActions={false}
-          />
-          <TaskListCard
-            title="All upcoming tasks"
-            empty="No upcoming tasks yet."
-            tasks={upcomingTasks}
-            onEdit={(task) => setEditingTask(toTaskFormInput(task))}
-            projectId={projectId}
-            showManageActions
-          />
-        </section>
+      <section className="grid gap-6 xl:grid-cols-2">
+        <TaskListCard title="Ongoing tasks" empty="No ongoing tasks." tasks={ongoingTasks} projectId={projectId} />
+        <TaskListCard title="Upcoming tasks" empty="No upcoming tasks." tasks={upcomingTasks} projectId={projectId} />
+      </section>
 
-        {editingTask ? (
-          <DevelopmentTaskForm
-            projectId={projectId}
-            categories={categories}
-            initialTask={editingTask}
-            onDone={() => setEditingTask(null)}
-          />
-        ) : null}
-      </div>
+      <section className="rounded-lg border border-slate-200 bg-white p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold">All tasks</h2>
+            <p className="mt-1 text-sm text-slate-500">Planned, active, awaiting approval, returned, completed, and closed work.</p>
+          </div>
+          <span className="chip">{filteredTasks.length}</span>
+        </div>
+        <div className="mt-4 space-y-3">
+          {filteredTasks.map((task) => (
+            <TaskRow
+              key={task.id}
+              task={task}
+              projectId={projectId}
+              assignees={assignees}
+              canManage={canManage}
+              canAssign={canAssign}
+              onEdit={() => setEditingTask(toTaskFormInput(task))}
+            />
+          ))}
+          {!filteredTasks.length ? <EmptyBlock label="No tasks match these filters." /> : null}
+        </div>
+      </section>
+
+      {editingTask ? (
+        <DevelopmentTaskForm
+          projectId={projectId}
+          categories={categories}
+          assignees={assignees}
+          canAssign={canAssign}
+          initialTask={editingTask}
+          onDone={() => setEditingTask(null)}
+        />
+      ) : null}
     </div>
   );
 }
 
-function TaskListCard({
-  title,
-  tasks,
-  empty,
-  projectId,
-  onEdit,
-  showManageActions,
-}: {
-  title: string;
-  tasks: TaskItem[];
-  empty: string;
-  projectId?: string;
-  onEdit: (task: TaskItem) => void;
-  showManageActions: boolean;
-}) {
+function TaskListCard({ title, tasks, empty, projectId }: { title: string; tasks: TaskItem[]; empty: string; projectId: string }) {
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-5">
+    <section className="rounded-lg border border-slate-200 bg-white p-5">
       <h2 className="font-semibold">{title}</h2>
       <div className="mt-4 space-y-3">
         {tasks.map((task) => (
-          <TaskRow
-            key={task.id}
-            task={task}
-            projectId={projectId}
-            onEdit={() => onEdit(task)}
-            showManageActions={showManageActions}
-          />
+          <Link className="block rounded-lg border border-slate-200 p-4 transition hover:border-navy-300 hover:bg-slate-50" href={`/app/projects/${projectId}/development/assets/${task.id}`} key={task.id}>
+            <TaskSummary task={task} />
+          </Link>
         ))}
         {!tasks.length ? <EmptyBlock label={empty} /> : null}
       </div>
@@ -199,73 +237,118 @@ function TaskListCard({
 function TaskRow({
   task,
   projectId,
+  assignees,
+  canManage,
+  canAssign,
   onEdit,
-  showManageActions,
 }: {
   task: TaskItem;
-  projectId?: string;
+  projectId: string;
+  assignees: EngineeringAssignee[];
+  canManage: boolean;
+  canAssign: boolean;
   onEdit: () => void;
-  showManageActions: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [assignedToId, setAssignedToId] = useState(task.assignedToId ?? "");
 
   async function assignTask() {
-    const assignedTo = window.prompt("Assign task to", task.assignedTo ?? "");
-    if (!assignedTo?.trim()) return;
+    if (!assignedToId) return;
     setBusy(true);
-    const response = await fetch(`/api/v1/development/site-assets/${task.id}/assign`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ assignedTo: assignedTo.trim() }),
-    });
-    setBusy(false);
-    if (!response.ok) window.alert((await response.json()).error ?? "Could not assign task.");
-    else router.refresh();
+    try {
+      const response = await fetch(`/api/v1/development/site-assets/${task.id}/assign`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ assignedToId }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not assign task.");
+      setAssigning(false);
+      router.refresh();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Could not assign task.");
+    } finally {
+      setBusy(false);
+    }
   }
 
-  async function deleteTask() {
-    if (!window.confirm(`Delete "${task.name}"?`)) return;
+  async function closeTask() {
+    if (!window.confirm(`Close "${task.name}"? Its files and progress history will be preserved.`)) return;
     setBusy(true);
-    const response = await fetch(`/api/v1/development/site-assets/${task.id}`, { method: "DELETE" });
-    setBusy(false);
-    if (!response.ok) window.alert((await response.json()).error ?? "Could not delete task.");
-    else router.refresh();
+    try {
+      const response = await fetch(`/api/v1/development/site-assets/${task.id}/close`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not close task.");
+      router.refresh();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Could not close task.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
     <div className="rounded-lg border border-slate-200 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <Link className="min-w-0 flex-1" href={`/app/projects/${projectId ?? ""}/development/assets/${task.id}`}>
-          <div className="font-medium text-slate-900">{task.name}</div>
-          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <span className="rounded-full bg-slate-100 px-2 py-1">{task.category}</span>
-            {task.deadline ? <span className="inline-flex items-center gap-1"><CalendarDays size={12} /> {formatDate(task.deadline)}</span> : null}
-            {task.assignedTo ? <span className="inline-flex items-center gap-1"><UserRound size={12} /> {task.assignedTo}</span> : null}
-          </div>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <Link className="min-w-0 flex-1" href={`/app/projects/${projectId}/development/assets/${task.id}`}>
+          <TaskSummary task={task} />
         </Link>
-        <div className="shrink-0 text-right">
-          <div className="text-sm font-semibold text-slate-900">{task.progressPct}%</div>
-          <div className="text-xs text-slate-500">{task.totalArea ?? "-"} {task.units ?? ""}</div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {canManage ? <button className="btn-outline h-8 px-3 text-xs" type="button" onClick={onEdit} disabled={busy}><Pencil size={13} /> Edit</button> : null}
+          {canAssign && !TERMINAL_STATUSES.has(task.status) ? (
+            <button className="btn-outline h-8 px-3 text-xs" type="button" onClick={() => setAssigning((value) => !value)} disabled={busy}>
+              <UserRound size={13} /> {task.assignedToId ? "Reassign" : "Assign"}
+            </button>
+          ) : null}
+          {canManage && task.status !== "CLOSED" ? (
+            <button className="btn-outline h-8 px-3 text-xs text-slate-700" type="button" onClick={() => void closeTask()} disabled={busy}>
+              <FolderArchive size={13} /> Close
+            </button>
+          ) : null}
         </div>
       </div>
-      <div className="mt-3 h-2 rounded-full bg-slate-100">
-        <div className="h-2 rounded-full bg-gold-shine" style={{ width: `${task.progressPct}%` }} />
-      </div>
-      {showManageActions ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button className="btn-outline h-8 px-3 text-xs" type="button" onClick={onEdit} disabled={busy}><Pencil size={13} /> Edit</button>
-          <button className="btn-outline h-8 px-3 text-xs" type="button" onClick={() => void assignTask()} disabled={busy}><UserRound size={13} /> Assign</button>
-          <button className="btn-outline h-8 px-3 text-xs text-rose-700" type="button" onClick={() => void deleteTask()} disabled={busy}><Trash2 size={13} /> Delete</button>
+      {assigning ? (
+        <div className="mt-4 flex flex-col gap-2 rounded-lg bg-slate-50 p-3 sm:flex-row">
+          <select className="input flex-1" value={assignedToId} onChange={(event) => setAssignedToId(event.target.value)}>
+            <option value="">Select registered user</option>
+            {assignees.map((user) => <option value={user.id} key={user.id}>{assigneeLabel(user)}</option>)}
+          </select>
+          <button className="btn-primary sm:w-auto" type="button" disabled={busy || !assignedToId} onClick={() => void assignTask()}>
+            {busy ? <Loader2 className="animate-spin" size={15} /> : <UserRound size={15} />}
+            Save assignment
+          </button>
         </div>
       ) : null}
     </div>
   );
 }
 
+function TaskSummary({ task }: { task: TaskItem }) {
+  return (
+    <>
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="font-medium text-slate-900">{task.name}</div>
+        <span className={statusChipClass(task.status)}>{statusLabel(task.status)}</span>
+      </div>
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-500">
+        <span className="rounded-full bg-slate-100 px-2 py-1">{task.category}</span>
+        {task.deadline ? <span className="inline-flex items-center gap-1"><CalendarDays size={12} /> {formatDate(task.deadline)}</span> : null}
+        <span className="inline-flex items-center gap-1"><UserRound size={12} /> {task.assignedTo ?? "Unassigned"}</span>
+        <span>{task.totalArea ?? "-"} {task.units ?? ""}</span>
+        <span className="font-semibold text-slate-700">{task.progressPct}%</span>
+      </div>
+      <div className="mt-3 h-2 rounded-full bg-slate-100">
+        <div className="h-2 rounded-full bg-gold-shine" style={{ width: `${task.progressPct}%` }} />
+      </div>
+    </>
+  );
+}
+
 function MetricCard({ icon: Icon, label, value, accent }: { icon: typeof Wrench; label: string; value: number; accent: string }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-5">
+    <div className="rounded-lg border border-slate-200 bg-white p-5">
       <Icon className={accent} size={20} />
       <div className="mt-3 text-2xl font-semibold">{value}</div>
       <div className="mt-1 text-xs font-medium uppercase tracking-wide text-slate-500">{label}</div>
@@ -280,11 +363,15 @@ function EmptyBlock({ label }: { label: string }) {
 export function DevelopmentTaskForm({
   projectId,
   categories,
+  assignees,
+  canAssign,
   initialTask,
   onDone,
 }: {
   projectId: string;
   categories: string[];
+  assignees: EngineeringAssignee[];
+  canAssign: boolean;
   initialTask?: TaskFormInput;
   onDone?: () => void;
 }) {
@@ -294,8 +381,10 @@ export function DevelopmentTaskForm({
   const [units, setUnits] = useState(initialTask?.units ?? "");
   const [deadline, setDeadline] = useState(initialTask?.deadline ?? "");
   const [category, setCategory] = useState(initialTask?.category ?? categories[0] ?? "");
-  const [assignedTo, setAssignedTo] = useState(initialTask?.assignedTo ?? "");
-  const [planFiles, setPlanFiles] = useState<File[]>([]);
+  const [assignedToId, setAssignedToId] = useState(initialTask?.assignedToId ?? "");
+  const [drawings, setDrawings] = useState<File[]>([]);
+  const [boqs, setBoqs] = useState<File[]>([]);
+  const [estimates, setEstimates] = useState<File[]>([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -303,70 +392,85 @@ export function DevelopmentTaskForm({
     event.preventDefault();
     setLoading(true);
     setMessage("");
-    const payload = {
-      name,
-      totalArea: Number(totalArea),
-      units,
-      deadline: deadline ? new Date(deadline).toISOString() : undefined,
-      category,
-      assignedTo: assignedTo || undefined,
-      status: assignedTo ? "IN_PROGRESS" : "PLANNED",
-      type: category,
-      progressPct: initialTask ? undefined : 0,
-      contractorId: assignedTo || undefined,
-    };
-    const response = await fetch(initialTask?.id ? `/api/v1/development/site-assets/${initialTask.id}` : `/api/v1/projects/${projectId}/site-assets`, {
-      method: initialTask?.id ? "PATCH" : "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(initialTask?.id ? payload : {
-        name: payload.name,
-        totalArea: payload.totalArea,
-        units: payload.units,
-        deadline: payload.deadline,
-        type: payload.category,
-        contractorId: payload.contractorId,
-        status: payload.status,
-        progressPct: 0,
-      }),
-    });
-    const body = await response.json();
-    setLoading(false);
-    if (!response.ok) {
-      setMessage(body.error ?? "Could not save task.");
-      return;
-    }
+    try {
+      const payload = {
+        projectId,
+        name,
+        totalArea: Number(totalArea),
+        units,
+        deadline: deadline ? new Date(`${deadline}T00:00:00`).toISOString() : undefined,
+        category,
+        assignedToId: assignedToId || null,
+        status: initialTask?.status ?? (assignedToId ? "IN_PROGRESS" : "PLANNED"),
+        priority: "MEDIUM",
+      };
+      const response = await fetch(initialTask?.id ? `/api/v1/development/site-assets/${initialTask.id}` : "/api/v1/development/site-assets", {
+        method: initialTask?.id ? "PATCH" : "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not save task.");
 
-    const taskId = body.data?.id ?? body.data?.asset?.id ?? body.data?.assetId ?? body.data?.siteAsset?.id;
-    if (taskId && planFiles.length) await uploadFilesForOwner(taskId, "SiteAsset", "development-plan", planFiles);
-    setMessage(initialTask?.id ? "Task updated." : "Task created.");
-    setPlanFiles([]);
-    if (!initialTask) {
-      setName("");
-      setTotalArea("");
-      setUnits("");
-      setDeadline("");
-      setAssignedTo("");
-      if (categories[0]) setCategory(categories[0]);
+      const taskId = body.data?.id;
+      if (!taskId) throw new Error("Task was saved, but its file workspace could not be identified.");
+      await Promise.all([
+        drawings.length ? uploadFilesForOwner(taskId, "SiteAsset", "development-drawing", drawings) : Promise.resolve([]),
+        boqs.length ? uploadFilesForOwner(taskId, "SiteAsset", "development-boq", boqs) : Promise.resolve([]),
+        estimates.length ? uploadFilesForOwner(taskId, "SiteAsset", "development-estimate", estimates) : Promise.resolve([]),
+      ]);
+
+      setMessage(initialTask?.id ? "Task and engineering files updated." : "Task created.");
+      setDrawings([]);
+      setBoqs([]);
+      setEstimates([]);
+      if (!initialTask) {
+        setName("");
+        setTotalArea("");
+        setUnits("");
+        setDeadline("");
+        setAssignedToId("");
+      }
+      onDone?.();
+      router.refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not save task.");
+    } finally {
+      setLoading(false);
     }
-    onDone?.();
-    router.refresh();
   }
 
   return (
-    <form className="rounded-xl border border-slate-200 bg-white p-5" onSubmit={submit}>
+    <form className="rounded-lg border border-slate-200 bg-white p-5" onSubmit={submit}>
       <h2 className="font-semibold">{initialTask ? "Edit task" : "Add task"}</h2>
       <div className="mt-4 grid gap-3">
-        <label><span className="label">Name</span><input className="input" value={name} onChange={(event) => setName(event.target.value)} /></label>
+        <label><span className="label">Name</span><input className="input" value={name} onChange={(event) => setName(event.target.value)} required /></label>
         <div className="grid gap-3 md:grid-cols-2">
-          <label><span className="label">Area</span><input className="input" inputMode="decimal" value={totalArea} onChange={(event) => setTotalArea(event.target.value)} /></label>
-          <label><span className="label">Units</span><input className="input" value={units} onChange={(event) => setUnits(event.target.value)} placeholder="sq ft / running ft / meters" /></label>
+          <label><span className="label">Area</span><input className="input" type="number" min="0" step="any" value={totalArea} onChange={(event) => setTotalArea(event.target.value)} required /></label>
+          <label><span className="label">Units</span><input className="input" value={units} onChange={(event) => setUnits(event.target.value)} placeholder="sq ft / running ft / meters" required /></label>
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <label><span className="label">Deadline</span><input className="input" type="date" value={deadline} onChange={(event) => setDeadline(event.target.value)} /></label>
-          <label><span className="label">Category</span><select className="input" value={category} onChange={(event) => setCategory(event.target.value)}>{categories.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+          <label><span className="label">Category</span><select className="input" value={category} onChange={(event) => setCategory(event.target.value)} required>{categories.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         </div>
-        <label><span className="label">Assign to <span className="font-normal text-slate-400">(optional)</span></span><input className="input" value={assignedTo} onChange={(event) => setAssignedTo(event.target.value)} placeholder="Engineer / contractor / staff name" /></label>
-        <label><span className="label">Add plan file</span><input className="input pt-2" type="file" multiple onChange={(event) => setPlanFiles(Array.from(event.target.files ?? []))} /></label>
+        {canAssign ? (
+          <label>
+            <span className="label">Assign to <span className="font-normal text-slate-400">(optional)</span></span>
+            <select className="input" value={assignedToId} onChange={(event) => setAssignedToId(event.target.value)}>
+              <option value="">Leave unassigned</option>
+              {assignees.map((user) => <option value={user.id} key={user.id}>{assigneeLabel(user)}</option>)}
+            </select>
+          </label>
+        ) : null}
+
+        <fieldset className="mt-2 rounded-lg border border-slate-200 p-4">
+          <legend className="px-2 text-sm font-semibold text-slate-800">Engineering files</legend>
+          <div className="grid gap-4 md:grid-cols-3">
+            <FileInput label="Drawings" files={drawings} onChange={setDrawings} />
+            <FileInput label="BOQs" files={boqs} onChange={setBoqs} />
+            <FileInput label="Estimates" files={estimates} onChange={setEstimates} />
+          </div>
+        </fieldset>
       </div>
       {message ? <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
       <button className="btn-primary mt-4 w-full" disabled={loading || !name || !totalArea || !units || !category}>
@@ -377,7 +481,25 @@ export function DevelopmentTaskForm({
   );
 }
 
-export function DevelopmentTaskUpdateForm({ task, canVerify = false }: { task: TaskDetail; canVerify?: boolean }) {
+function FileInput({ label, files, onChange }: { label: string; files: File[]; onChange: (files: File[]) => void }) {
+  return (
+    <label>
+      <span className="label">{label}</span>
+      <input className="input pt-2" type="file" multiple onChange={(event) => onChange(Array.from(event.target.files ?? []))} />
+      {files.length ? <span className="mt-1 block text-xs text-slate-500">{files.length} file{files.length === 1 ? "" : "s"} selected</span> : null}
+    </label>
+  );
+}
+
+export function DevelopmentTaskUpdateForm({
+  task,
+  canManage = false,
+  canVerify = false,
+}: {
+  task: TaskDetail;
+  canManage?: boolean;
+  canVerify?: boolean;
+}) {
   const router = useRouter();
   const [areaDone, setAreaDone] = useState(task.totalArea ?? "");
   const [recordedAt, setRecordedAt] = useState(new Date().toISOString().slice(0, 10));
@@ -387,97 +509,130 @@ export function DevelopmentTaskUpdateForm({ task, canVerify = false }: { task: T
   const [message, setMessage] = useState("");
 
   const awaitingVerification = task.status === "SENT_FOR_VERIFICATION";
-  const canSubmitForVerification = task.status === "IN_PROGRESS" || task.status === "RETURNED";
+  const terminal = TERMINAL_STATUSES.has(task.status);
+  const canSubmitForVerification = canManage
+    && task.progressPct >= 95
+    && ["IN_PROGRESS", "RETURNED"].includes(task.status);
 
   async function submitForVerification() {
     setLoading(true);
-    const response = await fetch(`/api/v1/development/site-assets/${task.id}/submit-verification`, { method: "POST" });
-    setLoading(false);
-    if (!response.ok) window.alert((await response.json()).error ?? "Could not submit for verification.");
-    else router.refresh();
+    try {
+      const response = await fetch(`/api/v1/development/site-assets/${task.id}/submit-verification`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not submit task for approval.");
+      router.refresh();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Could not submit task for approval.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function verify(decision: "APPROVE" | "RETURN") {
-    const notes = decision === "RETURN" ? window.prompt("Reason for returning this task (optional):") ?? "" : "";
+    const notes = decision === "RETURN" ? window.prompt("Reason for returning this task:") ?? "" : "";
     setLoading(true);
-    const response = await fetch(`/api/v1/development/site-assets/${task.id}/verify`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ decision, notes }),
-    });
-    setLoading(false);
-    if (!response.ok) window.alert((await response.json()).error ?? "Could not verify task.");
-    else router.refresh();
+    try {
+      const response = await fetch(`/api/v1/development/site-assets/${task.id}/verify`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ decision, notes }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not verify task.");
+      router.refresh();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Could not verify task.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function closeTask() {
+    if (!window.confirm(`Close "${task.name}"? Progress and files will remain available.`)) return;
+    setLoading(true);
+    try {
+      const response = await fetch(`/api/v1/development/site-assets/${task.id}/close`, { method: "POST" });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not close task.");
+      router.refresh();
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Could not close task.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   const numericTotalArea = Number(task.totalArea || 0);
-  const nextProgress = numericTotalArea > 0 && Number(areaDone || 0) >= 0 ? Math.max(0, Math.min(100, Math.round((Number(areaDone || 0) / numericTotalArea) * 100))) : task.progressPct;
+  const nextProgress = numericTotalArea > 0 && Number(areaDone || 0) >= 0
+    ? Math.max(0, Math.min(100, Math.round((Number(areaDone || 0) / numericTotalArea) * 100)))
+    : task.progressPct;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setLoading(true);
     setMessage("");
-    const response = await fetch(`/api/v1/development/site-assets/${task.id}/progress`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        areaDone: Number(areaDone),
-        recordedAt: new Date(recordedAt).toISOString(),
-        summary: remarks,
-        visibleToOwner: false,
-      }),
-    });
-    const body = await response.json();
-    setLoading(false);
-    if (!response.ok) {
-      setMessage(body.error ?? "Could not update task.");
-      return;
-    }
-    const progressId = body.data?.update?.id ?? body.data?.id;
-    if (progressId && attachments.length) {
-      const files = await uploadFilesForOwner(progressId, "ProgressUpdate", "development-progress", attachments);
-      if (files.length) {
-        await fetch(`/api/v1/development/progress/${progressId}/photos`, {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ fileAssetIds: files.map((file) => file.id), visibleToOwner: false, summary: remarks || "Progress attachments uploaded." }),
-        });
+    try {
+      const response = await fetch(`/api/v1/development/site-assets/${task.id}/progress`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          areaDone: Number(areaDone),
+          recordedAt: new Date(`${recordedAt}T00:00:00`).toISOString(),
+          summary: remarks,
+          visibleToOwner: false,
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Could not update task.");
+      const progressId = body.data?.update?.id ?? body.data?.id;
+      if (progressId && attachments.length) {
+        const files = await uploadFilesForOwner(progressId, "ProgressUpdate", "development-site-photo", attachments);
+        if (files.length) {
+          const photoResponse = await fetch(`/api/v1/development/progress/${progressId}/photos`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ fileAssetIds: files.map((file) => file.id), visibleToOwner: false, summary: remarks || "Site photos uploaded." }),
+          });
+          const photoBody = await photoResponse.json();
+          if (!photoResponse.ok) throw new Error(photoBody.error ?? "Progress saved, but site photos could not be linked.");
+        }
       }
+      setAttachments([]);
+      setRemarks("");
+      router.refresh();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not update task.");
+    } finally {
+      setLoading(false);
     }
-    router.refresh();
-  }
-
-  async function markComplete() {
-    setLoading(true);
-    const response = await fetch(`/api/v1/development/site-assets/${task.id}/complete`, { method: "POST" });
-    setLoading(false);
-    if (!response.ok) window.alert((await response.json()).error ?? "Could not mark task complete.");
-    else router.refresh();
   }
 
   return (
     <div className="space-y-5">
-      <section className="rounded-xl border border-slate-200 bg-white p-5">
+      <section className="rounded-lg border border-slate-200 bg-white p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="font-semibold">Task details</h2>
           <div className="flex flex-wrap items-center gap-2">
             {canSubmitForVerification ? (
               <button className="btn-primary h-9 px-3 text-xs" type="button" disabled={loading} onClick={() => void submitForVerification()}>
-                <CheckCircle2 size={14} /> Send for verification
+                <CheckCircle2 size={14} /> Send for approval
               </button>
             ) : null}
             {awaitingVerification && canVerify ? (
               <>
                 <button className="btn-primary h-9 px-3 text-xs" type="button" disabled={loading} onClick={() => void verify("APPROVE")}>
-                  <CheckCircle2 size={14} /> Approve
+                  <CheckCircle2 size={14} /> Approve completed work
                 </button>
                 <button className="btn-outline h-9 px-3 text-xs" type="button" disabled={loading} onClick={() => void verify("RETURN")}>
                   Return
                 </button>
               </>
             ) : null}
-            {awaitingVerification && !canVerify ? (
-              <span className="chip bg-amber-50 text-amber-800">Awaiting verification</span>
+            {awaitingVerification && !canVerify ? <span className="chip bg-amber-50 text-amber-800">Awaiting approval</span> : null}
+            {canManage && task.status !== "CLOSED" ? (
+              <button className="btn-outline h-9 px-3 text-xs" type="button" disabled={loading} onClick={() => void closeTask()}>
+                <FolderArchive size={14} /> Close
+              </button>
             ) : null}
           </div>
         </div>
@@ -486,54 +641,63 @@ export function DevelopmentTaskUpdateForm({ task, canVerify = false }: { task: T
           <Fact label="Category" value={task.category} />
           <Fact label="Area" value={`${task.totalArea ?? "-"} ${task.units ?? ""}`.trim()} />
           <Fact label="Deadline" value={task.deadline ? formatDate(task.deadline) : "-"} />
-          <Fact label="Assigned to" value={task.assignedTo ?? "-"} />
-          <Fact label="Status" value={task.status.replaceAll("_", " ")} />
+          <Fact label="Assigned to" value={task.assignedTo ?? "Unassigned"} />
+          <Fact label="Status" value={statusLabel(task.status)} />
         </div>
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="font-semibold">Progress boundary</h2>
-            <p className="mt-1 text-sm text-slate-500">{task.progressPct}% done</p>
-          </div>
-          {task.progressPct >= 95 && task.progressPct < 100 ? <button className="btn-primary" type="button" onClick={() => void markComplete()} disabled={loading}><CheckCircle2 size={16} />Mark as complete</button> : null}
+      <section className="rounded-lg border border-slate-200 bg-white p-5">
+        <div>
+          <h2 className="font-semibold">Progress</h2>
+          <p className="mt-1 text-sm text-slate-500">{task.progressPct}% done</p>
         </div>
         <div className="mt-4 h-3 rounded-full bg-slate-100">
           <div className="h-3 rounded-full bg-gold-shine" style={{ width: `${task.progressPct}%` }} />
         </div>
-        <form className="mt-5 grid gap-3" onSubmit={submit}>
-          <div className="grid gap-3 md:grid-cols-2">
-            <label><span className="label">Area done</span><input className="input" inputMode="decimal" value={areaDone} onChange={(event) => setAreaDone(event.target.value)} /></label>
-            <label><span className="label">Date</span><input className="input" type="date" value={recordedAt} onChange={(event) => setRecordedAt(event.target.value)} /></label>
+        {terminal ? (
+          <div className="mt-5 rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600">
+            This task is {task.status.toLowerCase()}. Its progress and files remain available as a permanent record.
           </div>
-          <label><span className="label">Remarks</span><textarea className="input min-h-24" value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
-          <label><span className="label">Attachments</span><input className="input pt-2" type="file" multiple accept="image/*" onChange={(event) => setAttachments(Array.from(event.target.files ?? []))} /></label>
-          <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">This update will set progress to {nextProgress}% based on {areaDone || "0"} / {task.totalArea || "0"} {task.units ?? ""}.</div>
-          {message ? <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
-          <button className="btn-primary w-fit" disabled={loading || !areaDone || !remarks}>
-            {loading ? <Loader2 className="animate-spin" size={16} /> : <Upload size={16} />}
-            Update task
-          </button>
-        </form>
+        ) : canManage ? (
+          <form className="mt-5 grid gap-3" onSubmit={submit}>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label><span className="label">Area done</span><input className="input" type="number" min="0" step="any" value={areaDone} onChange={(event) => setAreaDone(event.target.value)} /></label>
+              <label><span className="label">Date</span><input className="input" type="date" value={recordedAt} onChange={(event) => setRecordedAt(event.target.value)} /></label>
+            </div>
+            <label><span className="label">Remarks</span><textarea className="input min-h-24" value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
+            <label><span className="label">Site photos</span><input className="input pt-2" type="file" multiple accept="image/*" onChange={(event) => setAttachments(Array.from(event.target.files ?? []))} /></label>
+            <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
+              This update will set progress to {nextProgress}% based on {areaDone || "0"} / {task.totalArea || "0"} {task.units ?? ""}.
+            </div>
+            {message ? <div className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{message}</div> : null}
+            <button className="btn-primary w-fit" disabled={loading || !areaDone || !remarks}>
+              {loading ? <Loader2 className="animate-spin" size={16} /> : <Upload size={16} />}
+              Update task
+            </button>
+          </form>
+        ) : (
+          <div className="mt-5 rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600">You have view-only access to this task.</div>
+        )}
       </section>
 
-      <section className="rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="font-semibold">Area, date, remarks history</h2>
+      <section className="rounded-lg border border-slate-200 bg-white p-5">
+        <h2 className="font-semibold">Progress history</h2>
         <div className="mt-4 overflow-x-auto">
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
               <tr>
                 <th className="px-3 py-2">Area done</th>
+                <th className="px-3 py-2">Progress</th>
                 <th className="px-3 py-2">Date</th>
                 <th className="px-3 py-2">Remarks</th>
-                <th className="px-3 py-2">Attachments</th>
+                <th className="px-3 py-2">Site photos</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {task.updates.map((update) => (
                 <tr key={update.id}>
                   <td className="px-3 py-2">{update.quantityDone ?? "-"} {task.units ?? ""}</td>
+                  <td className="px-3 py-2">{update.progressPct}%</td>
                   <td className="px-3 py-2">{update.recordedAt ? formatDate(update.recordedAt) : "-"}</td>
                   <td className="px-3 py-2">{update.remarks}</td>
                   <td className="px-3 py-2">
@@ -569,8 +733,8 @@ function toTaskFormInput(task: TaskItem): TaskFormInput {
     totalArea: task.totalArea ?? "",
     units: task.units ?? "",
     deadline: task.deadline ? task.deadline.slice(0, 10) : "",
-    assignedTo: task.assignedTo ?? "",
-    status: task.status === "COMPLETED" ? "COMPLETED" : task.status === "IN_PROGRESS" ? "IN_PROGRESS" : "PLANNED",
+    assignedToId: task.assignedToId ?? "",
+    status: task.status,
   };
 }
 
@@ -584,6 +748,39 @@ function compareDeadlines(a: TaskItem, b: TaskItem) {
 function formatDate(value: string) {
   return new Date(value).toLocaleDateString("en-IN");
 }
+
+function assigneeLabel(user: EngineeringAssignee) {
+  const position = user.designation ?? user.department ?? user.role.replaceAll("_", " ");
+  return `${user.name} · ${position}`;
+}
+
+function statusLabel(status: string) {
+  return status.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function statusChipClass(status: string) {
+  const colour = status === "COMPLETED"
+    ? "bg-emerald-50 text-emerald-700"
+    : status === "SENT_FOR_VERIFICATION"
+      ? "bg-amber-50 text-amber-800"
+      : status === "RETURNED"
+        ? "bg-rose-50 text-rose-700"
+        : status === "CLOSED"
+          ? "bg-slate-200 text-slate-700"
+          : status === "IN_PROGRESS"
+            ? "bg-blue-50 text-blue-700"
+            : "bg-slate-100 text-slate-600";
+  return `rounded-full px-2 py-1 text-xs font-medium ${colour}`;
+}
+
+export function engineeringFileLabel(categoryKey: string | null) {
+  if (categoryKey === "development-boq") return "BOQ";
+  if (categoryKey === "development-estimate") return "Estimate";
+  if (categoryKey === "development-site-photo") return "Site photo";
+  return "Drawing";
+}
+
+export const engineeringFileCategories = FILE_CATEGORIES;
 
 async function uploadFilesForOwner(ownerId: string, ownerType: string, categoryKey: string, files: File[]) {
   const uploaded: Array<{ id: string; fileName: string }> = [];
@@ -599,7 +796,7 @@ async function uploadFilesForOwner(ownerId: string, ownerType: string, categoryK
         ownerType,
         ownerId,
         categoryKey,
-        notes: `Uploaded from development task workflow (${categoryKey})`,
+        notes: `Uploaded from Engineering (${categoryKey})`,
       }),
     });
     const metaBody = await metaResponse.json();

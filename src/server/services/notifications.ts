@@ -2,7 +2,7 @@ import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../db";
 import { RequestContext } from "../api";
-import { hasPermission, Permission } from "../rbac";
+import { hasPermission, normalizePermissions, Permission } from "../rbac";
 import { sendPushToUsers } from "./push";
 
 export const notificationSchema = z.object({
@@ -50,10 +50,10 @@ export async function notifyRoleWithPermission(
 ) {
   const users = await prisma.user.findMany({
     where: { tenantId: context.tenantId, status: "ACTIVE" },
-    select: { id: true, role: true },
+    select: { id: true, role: true, customRole: { select: { permissions: true } } },
   });
   const recipients = users.filter(
-    (user) => user.id !== input.excludeUserId && hasPermission(user.role, permission),
+    (user) => user.id !== input.excludeUserId && hasPermission(user.role, permission, normalizePermissions(user.customRole?.permissions)),
   );
   if (!recipients.length) return { count: 0 };
 

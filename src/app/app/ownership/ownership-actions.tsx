@@ -2,14 +2,29 @@
 
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileUp, Loader2, Plus, Save, Send, Wand2 } from "lucide-react";
+import { FileUp, Loader2, Plus, Save, Send, Wand2, X } from "lucide-react";
 import { FileUploader } from "@/components/file-uploader";
 
 type PlotOption = { id: string; code: string };
 type OwnerOption = { id: string; name: string };
-type OwnerDetailOption = { id: string; name: string; email: string | null; phone: string | null };
+type OwnerDetailOption = {
+  id: string;
+  type?: "INDIVIDUAL" | "COMPANY" | "SHARED";
+  name: string;
+  email: string | null;
+  phone: string | null;
+  address?: string | null;
+  kyc?: unknown;
+};
 type StoredFileRef = { id: string; fileName: string };
 type ManualLetterField = { key: string; label: string; inputType?: "TEXT" | "FILE" };
+type TransferStamp = { number: string; dated: string };
+type TransferIdentityDocument = {
+  kind: "Aadhaar" | "PAN" | "DL" | "Other";
+  number: string;
+  files: File[];
+};
+type OriginalAllotmentReference = { number: string; date: string };
 type RealEstateDocumentType =
   | "ALLOTMENT_LETTER"
   | "TRANSFER_LETTER"
@@ -465,58 +480,175 @@ export function HistoricalAllotteeStep({ plotId, owners }: { plotId: string; own
   );
 }
 
+function ownerKycRecord(owner: OwnerDetailOption | undefined) {
+  return owner?.kyc && typeof owner.kyc === "object" && !Array.isArray(owner.kyc)
+    ? owner.kyc as Record<string, unknown>
+    : {};
+}
+
+function ownerKycValue(owner: OwnerDetailOption | undefined, keys: string[]) {
+  const kyc = ownerKycRecord(owner);
+  for (const key of keys) {
+    const value = kyc[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
 export function PlotTransferForm({
   plotId,
   projectId,
   owners,
+  currentOwner,
+  originalAllotment = { number: "", date: "" },
   manualLetterFields = [],
 }: {
   plotId: string;
   projectId?: string;
   owners: OwnerDetailOption[];
+  currentOwner?: OwnerDetailOption;
+  originalAllotment?: OriginalAllotmentReference;
   manualLetterFields?: ManualLetterField[];
 }) {
   const router = useRouter();
+  const today = new Date().toISOString().slice(0, 10);
   const [mode, setMode] = useState<"new" | "existing">("new");
   const [buyerOwnerId, setBuyerOwnerId] = useState("");
-  const [ownerType, setOwnerType] = useState("INDIVIDUAL");
+  const [ownerType, setOwnerType] = useState<"INDIVIDUAL" | "COMPANY" | "SHARED">("INDIVIDUAL");
   const [name, setName] = useState("");
+  const [relationPrefix, setRelationPrefix] = useState("s/o Sh.");
+  const [relationName, setRelationName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [address, setAddress] = useState("");
+  const [identityDocuments, setIdentityDocuments] = useState<TransferIdentityDocument[]>([
+    { kind: "Aadhaar", number: "", files: [] },
+    { kind: "PAN", number: "", files: [] },
+  ]);
+  const [sellerRelationPrefix, setSellerRelationPrefix] = useState(
+    ownerKycValue(currentOwner, ["relationPrefix", "relation"]) || "s/o Sh.",
+  );
+  const [sellerRelationName, setSellerRelationName] = useState(
+    ownerKycValue(currentOwner, ["fatherName", "father", "relationName"]),
+  );
+  const [originalAllotmentNumber, setOriginalAllotmentNumber] = useState(originalAllotment.number);
+  const [originalAllotmentDate, setOriginalAllotmentDate] = useState(originalAllotment.date);
+  const [effectiveAt, setEffectiveAt] = useState(today);
   const [amountInr, setAmountInr] = useState("");
   const [sharePct, setSharePct] = useState("100");
+  const [stamps, setStamps] = useState<TransferStamp[]>([
+    { number: "", dated: today },
+    { number: "", dated: today },
+  ]);
   const [notes, setNotes] = useState("");
   const [letterFields, setLetterFields] = useState<Record<string, string>>({});
   const [letterFieldFiles, setLetterFieldFiles] = useState<Record<string, File[]>>({});
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
+  function selectExistingBuyer(ownerId: string) {
+    setBuyerOwnerId(ownerId);
+    const owner = owners.find((item) => item.id === ownerId);
+    if (!owner) return;
+    setOwnerType(owner.type ?? "INDIVIDUAL");
+    setName(owner.name);
+    setEmail(owner.email ?? "");
+    setPhone(owner.phone ?? "");
+    setAddress(owner.address ?? "");
+    setRelationPrefix(ownerKycValue(owner, ["relationPrefix", "relation"]) || "s/o Sh.");
+    setRelationName(ownerKycValue(owner, ["fatherName", "father", "relationName"]));
+    setIdentityDocuments([
+      { kind: "Aadhaar", number: ownerKycValue(owner, ["aadhaarNo", "aadharNo", "aadhaar", "aadhar"]), files: [] },
+      { kind: "PAN", number: ownerKycValue(owner, ["panNo", "pan"]), files: [] },
+      { kind: "DL", number: ownerKycValue(owner, ["dlNo", "drivingLicenseNo"]), files: [] },
+    ]);
+  }
+
+  function startNewBuyer() {
+    setMode("new");
+    setBuyerOwnerId("");
+    setOwnerType("INDIVIDUAL");
+    setName("");
+    setEmail("");
+    setPhone("");
+    setAddress("");
+    setRelationPrefix("s/o Sh.");
+    setRelationName("");
+    setIdentityDocuments([
+      { kind: "Aadhaar", number: "", files: [] },
+      { kind: "PAN", number: "", files: [] },
+    ]);
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setLoading(true);
     setMessage("");
-    let resolvedBuyerId = buyerOwnerId;
 
-    if (mode === "new") {
-      const ownerResponse = await fetch("/api/v1/ownership/owners", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ type: ownerType, name, email: email || undefined, phone: phone || undefined, address: address || undefined }),
-      });
-      const ownerBody = await ownerResponse.json();
-      if (!ownerResponse.ok) {
-        setLoading(false);
-        setMessage(ownerBody.error ?? "Buyer creation failed");
-        return;
-      }
-      resolvedBuyerId = ownerBody.data.id;
-    }
-
-    let uploadedManualFieldFiles: Record<string, StoredFileRef[]> = {};
     try {
-      const uploaded = await uploadTransferDocumentGroups(
-        manualLetterFields
+      if (currentOwner) {
+        const sellerResponse = await fetch(`/api/v1/ownership/owners/${currentOwner.id}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            type: currentOwner.type ?? "INDIVIDUAL",
+            name: currentOwner.name,
+            email: currentOwner.email || undefined,
+            phone: currentOwner.phone || undefined,
+            address: currentOwner.address || undefined,
+            kyc: {
+              ...ownerKycRecord(currentOwner),
+              relationPrefix: sellerRelationPrefix || undefined,
+              fatherName: sellerRelationName || undefined,
+            },
+          }),
+        });
+        const sellerBody = await sellerResponse.json();
+        if (!sellerResponse.ok) throw new Error(sellerBody.error ?? "Transferor details could not be saved.");
+      }
+
+      const selectedExistingOwner = owners.find((owner) => owner.id === buyerOwnerId);
+      const aadhaarNo = identityDocuments.find((entry) => entry.kind === "Aadhaar")?.number.trim() ?? "";
+      const panNo = identityDocuments.find((entry) => entry.kind === "PAN")?.number.trim() ?? "";
+      const dlNo = identityDocuments.find((entry) => entry.kind === "DL")?.number.trim() ?? "";
+      const ownerPayload = {
+        type: ownerType,
+        name,
+        email: email || undefined,
+        phone: phone || undefined,
+        address: address || undefined,
+        kyc: {
+          ...ownerKycRecord(selectedExistingOwner),
+          relationPrefix: relationPrefix || undefined,
+          fatherName: relationName || undefined,
+          aadhaarNo: aadhaarNo || undefined,
+          panNo: panNo || undefined,
+          dlNo: dlNo || undefined,
+        },
+      };
+      const ownerResponse = await fetch(
+        mode === "existing" ? `/api/v1/ownership/owners/${buyerOwnerId}` : "/api/v1/ownership/owners",
+        {
+          method: mode === "existing" ? "PATCH" : "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(ownerPayload),
+        },
+      );
+      const ownerBody = await ownerResponse.json();
+      if (!ownerResponse.ok) throw new Error(ownerBody.error ?? "Transferee details could not be saved.");
+      const resolvedBuyerId = ownerBody.data.id as string;
+
+      const uploaded = await uploadTransferDocumentGroups([
+        ...identityDocuments
+          .map((entry, index) => ({
+            group: `identity-${entry.kind}-${index}`,
+            files: entry.files,
+            ownerType: "Owner",
+            ownerId: resolvedBuyerId,
+            categoryKey: "transfer-kyc",
+          }))
+          .filter((group) => group.files.length),
+        ...manualLetterFields
           .filter((field) => field.inputType === "FILE" && (letterFieldFiles[field.key]?.length ?? 0) > 0)
           .map((field) => ({
             group: `manual-${field.key}`,
@@ -525,8 +657,17 @@ export function PlotTransferForm({
             ownerId: plotId,
             categoryKey: `transfer-letter-${field.key}`,
           })),
-      );
-      uploadedManualFieldFiles = Object.fromEntries(
+      ]);
+      const mergedIdentityDocuments = identityDocuments
+        .map((entry, index) => ({
+          kind: entry.kind,
+          number: entry.number.trim() || undefined,
+          files: uploaded
+            .filter((file) => file.group === `identity-${entry.kind}-${index}`)
+            .map(({ group, ...file }) => file),
+        }))
+        .filter((entry) => entry.number || entry.files.length);
+      const uploadedManualFieldFiles: Record<string, StoredFileRef[]> = Object.fromEntries(
         manualLetterFields
           .filter((field) => field.inputType === "FILE")
           .map((field) => [
@@ -535,116 +676,195 @@ export function PlotTransferForm({
           ])
           .filter(([, files]) => (files as StoredFileRef[]).length),
       );
-    } catch (error) {
-      setLoading(false);
-      setMessage(error instanceof Error ? error.message : "Could not upload transfer letter files.");
-      return;
-    }
 
-    const response = await fetch(`/api/v1/ownership/plots/${plotId}/transfer`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        buyerOwnerId: resolvedBuyerId,
-        amountInr: amountInr ? Number(amountInr) : undefined,
-        sharePct: sharePct ? Number(sharePct) : undefined,
-        notes: notes || undefined,
-        extraDetails: {
-          transfer: {
-            notes: notes || undefined,
+      const response = await fetch(`/api/v1/ownership/plots/${plotId}/transfer`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          buyerOwnerId: resolvedBuyerId,
+          amountInr: amountInr ? Number(amountInr) : undefined,
+          sharePct: sharePct ? Number(sharePct) : undefined,
+          effectiveAt: effectiveAt ? new Date(effectiveAt).toISOString() : undefined,
+          notes: notes || undefined,
+          extraDetails: {
+            transfer: {
+              sellerRelationPrefix: sellerRelationPrefix || undefined,
+              sellerFatherName: sellerRelationName || undefined,
+              originalAllotmentNumber: originalAllotmentNumber || undefined,
+              originalAllotmentDate: originalAllotmentDate || undefined,
+              notes: notes || undefined,
+            },
+            allottee: {
+              name,
+              relationPrefix: relationPrefix || undefined,
+              fatherName: relationName || undefined,
+              address: address || undefined,
+              phone: phone || undefined,
+              documents: mergedIdentityDocuments,
+            },
+            eStampNumber: stamps.find((entry) => entry.number)?.number || undefined,
+            eStampDate: stamps.find((entry) => entry.number)?.dated || undefined,
+            stamps: stamps.filter((entry) => entry.number || entry.dated),
+            customLetterFields: letterFields,
+            customLetterFiles: uploadedManualFieldFiles,
           },
-          customLetterFields: letterFields,
-          customLetterFiles: uploadedManualFieldFiles,
-        },
-      }),
-    });
-    const body = await response.json();
-    if (!response.ok) {
-      setLoading(false);
-      setMessage(body.error ?? "Transfer failed");
-      return;
-    }
+        }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error ?? "Transfer failed");
 
-    const draftResponse = await fetch("/api/v1/documents/drafts", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        type: "transfer_letter",
-        recordType: "Plot",
-        recordId: plotId,
-        data: {
-          transferAmountInr: amountInr ? Number(amountInr) : undefined,
-          transferNotes: notes || undefined,
-          customLetterFields: letterFields,
-          customLetterFiles: uploadedManualFieldFiles,
-        },
-      }),
-    });
-    const draftBody = await draftResponse.json();
-    setLoading(false);
-    if (!draftResponse.ok) {
-      setMessage(draftBody.error ?? "Transfer recorded, but Transfer Letter could not be opened.");
+      const draftResponse = await fetch("/api/v1/documents/drafts", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "transfer_letter",
+          recordType: "Plot",
+          recordId: plotId,
+          data: {
+            transferAmountInr: amountInr ? Number(amountInr) : undefined,
+            transferNotes: notes || undefined,
+            customLetterFields: letterFields,
+            customLetterFiles: uploadedManualFieldFiles,
+          },
+        }),
+      });
+      const draftBody = await draftResponse.json();
+      if (!draftResponse.ok) {
+        setMessage(draftBody.error ?? "Transfer recorded, but Transfer Letter could not be opened.");
+        router.refresh();
+        return;
+      }
+      if (projectId) {
+        const returnTo = `/app/projects/${projectId}/plots/${plotId}/transfer`;
+        router.push(`/app/projects/${projectId}/plots/${plotId}/letters/${draftBody.data.document.id}?returnTo=${encodeURIComponent(returnTo)}`);
+        return;
+      }
+      setMessage("Transfer recorded. Open the plot documents to edit the transfer letter.");
       router.refresh();
-      return;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "The transfer could not be completed.");
+    } finally {
+      setLoading(false);
     }
-    if (projectId) {
-      const returnTo = `/app/projects/${projectId}/plots/${plotId}/transfer`;
-      router.push(`/app/projects/${projectId}/plots/${plotId}/letters/${draftBody.data.document.id}?returnTo=${encodeURIComponent(returnTo)}`);
-      return;
-    }
-    setMessage("Transfer recorded. Open the plot documents to edit the transfer letter.");
-    router.refresh();
   }
 
   return (
-    <form onSubmit={submit} className="rounded-lg border border-slate-200 bg-white p-4">
-      <h3 className="text-sm font-semibold">Transfer / resale</h3>
-      <p className="mt-1 text-xs leading-5 text-slate-500">Enter the transferee details. After saving, the transfer letter draft opens automatically.</p>
-      <div className="mt-3 grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 text-sm">
-        <button type="button" className={`px-3 py-2 ${mode === "new" ? "bg-navy-100 text-navy-900" : "bg-white text-slate-700"}`} onClick={() => setMode("new")}>New buyer</button>
-        <button type="button" className={`px-3 py-2 ${mode === "existing" ? "bg-navy-100 text-navy-900" : "bg-white text-slate-700"}`} onClick={() => setMode("existing")}>Existing buyer</button>
+    <form onSubmit={submit} className="space-y-4">
+      <div className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">1. Transferor details</div>
+        <h3 className="mt-1 font-semibold">Current owner</h3>
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <label><span className="label">Name</span><input className="input bg-slate-50" readOnly value={currentOwner?.name ?? "Current owner"} /></label>
+          <label>
+            <span className="label">Relationship</span>
+            <select className="input" value={sellerRelationPrefix} onChange={(event) => setSellerRelationPrefix(event.target.value)}>
+              <option value="s/o Sh.">s/o Sh.</option>
+              <option value="d/o Sh.">d/o Sh.</option>
+              <option value="w/o Sh.">w/o Sh.</option>
+              <option value="">None</option>
+            </select>
+          </label>
+          <label className="md:col-span-2">
+            <span className="label">Father&#39;s / spouse&#39;s name</span>
+            <input className="input" required={currentOwner?.type === "INDIVIDUAL"} value={sellerRelationName} onChange={(event) => setSellerRelationName(event.target.value)} placeholder="Required in the transfer letter after the current owner name" />
+          </label>
+        </div>
       </div>
-      {mode === "existing" ? (
-        <label className="mt-3 block">
-          <span className="label">Buyer</span>
-          <select className="input" value={buyerOwnerId} onChange={(event) => setBuyerOwnerId(event.target.value)}>
-            <option value="">Select buyer intentionally</option>
-            {owners.map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
-          </select>
-        </label>
-      ) : (
-        <div className="mt-3 grid gap-3">
-          <label><span className="label">Buyer type</span><select className="input" value={ownerType} onChange={(event) => setOwnerType(event.target.value)}><option value="INDIVIDUAL">Individual</option><option value="COMPANY">Company</option><option value="SHARED">Shared ownership group</option></select></label>
-          <label><span className="label">Name</span><input className="input" value={name} onChange={(event) => setName(event.target.value)} /></label>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">2. Transferee details</div>
+        <h3 className="mt-1 font-semibold">New owner</h3>
+        <div className="mt-3 grid grid-cols-2 overflow-hidden rounded-lg border border-slate-200 text-sm">
+          <button type="button" className={`px-3 py-2 ${mode === "new" ? "bg-navy-100 text-navy-900" : "bg-white text-slate-700"}`} onClick={startNewBuyer}>New buyer</button>
+          <button type="button" className={`px-3 py-2 ${mode === "existing" ? "bg-navy-100 text-navy-900" : "bg-white text-slate-700"}`} onClick={() => setMode("existing")}>Existing buyer</button>
+        </div>
+        {mode === "existing" ? (
+          <label className="mt-3 block">
+            <span className="label">Buyer</span>
+            <select className="input" value={buyerOwnerId} onChange={(event) => selectExistingBuyer(event.target.value)}>
+              <option value="">Select buyer intentionally</option>
+              {owners.filter((owner) => owner.id !== currentOwner?.id).map((owner) => <option key={owner.id} value={owner.id}>{owner.name}</option>)}
+            </select>
+          </label>
+        ) : null}
+        <div className="mt-3 grid gap-3 md:grid-cols-2">
+          <label><span className="label">Buyer type</span><select className="input" value={ownerType} onChange={(event) => setOwnerType(event.target.value as typeof ownerType)}><option value="INDIVIDUAL">Individual</option><option value="COMPANY">Company</option><option value="SHARED">Shared ownership group</option></select></label>
+          <label><span className="label">Name</span><input className="input" required value={name} onChange={(event) => setName(event.target.value)} /></label>
+          <label><span className="label">Relationship</span><select className="input" value={relationPrefix} onChange={(event) => setRelationPrefix(event.target.value)}><option value="s/o Sh.">s/o Sh.</option><option value="d/o Sh.">d/o Sh.</option><option value="w/o Sh.">w/o Sh.</option><option value="">None</option></select></label>
+          <label><span className="label">Father&#39;s / spouse&#39;s name</span><input className="input" required={ownerType === "INDIVIDUAL"} value={relationName} onChange={(event) => setRelationName(event.target.value)} /></label>
           <label><span className="label">Email</span><input className="input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></label>
           <label><span className="label">Phone</span><input className="input" value={phone} onChange={(event) => setPhone(event.target.value)} /></label>
-          <label><span className="label">Address</span><textarea className="input min-h-20" value={address} onChange={(event) => setAddress(event.target.value)} /></label>
+          <label className="md:col-span-2"><span className="label">Address</span><textarea className="input min-h-20" value={address} onChange={(event) => setAddress(event.target.value)} /></label>
         </div>
-      )}
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <label><span className="label">Transfer amount in INR</span><input className="input" inputMode="numeric" value={amountInr} onChange={(event) => setAmountInr(event.target.value)} /></label>
-        <label><span className="label">Share %</span><input className="input" inputMode="decimal" value={sharePct} onChange={(event) => setSharePct(event.target.value)} /></label>
+        <div className="mt-4">
+          <div className="flex items-center justify-between gap-3">
+            <span className="label">Identity documents</span>
+            <button type="button" className="btn-outline h-8 px-3 text-xs" onClick={() => setIdentityDocuments((items) => [...items, { kind: "Other", number: "", files: [] }])}><Plus size={14} />Add document</button>
+          </div>
+          <div className="space-y-3">
+            {identityDocuments.map((document, index) => (
+              <div className="grid gap-2 rounded-lg border border-slate-200 p-3 md:grid-cols-[150px_1fr_1fr_auto]" key={`${document.kind}-${index}`}>
+                <label><span className="label">Type</span><select className="input" value={document.kind} onChange={(event) => setIdentityDocuments((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, kind: event.target.value as TransferIdentityDocument["kind"] } : item))}><option>Aadhaar</option><option>PAN</option><option>DL</option><option>Other</option></select></label>
+                <label><span className="label">Number</span><input className="input" value={document.number} onChange={(event) => setIdentityDocuments((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, number: event.target.value } : item))} /></label>
+                <label><span className="label">Upload files</span><input className="input pt-2" type="file" multiple onChange={(event) => setIdentityDocuments((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, files: Array.from(event.target.files ?? []) } : item))} /></label>
+                <button type="button" className="btn-outline self-end px-3" disabled={identityDocuments.length === 1} onClick={() => setIdentityDocuments((items) => items.filter((_, itemIndex) => itemIndex !== index))} aria-label="Remove identity document"><X size={16} /></button>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
-      <label className="mt-3 block"><span className="label">Transfer notes</span><textarea className="input min-h-20" value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
-      {manualLetterFields.length ? <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
-        <div className="font-semibold text-amber-950">Transfer letter fields required before generation</div>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">3. Transfer details</div>
         <div className="mt-3 grid gap-3 md:grid-cols-2">
-          {manualLetterFields.map((field) => field.inputType === "FILE" ? (
-            <label key={field.key}>
-              <span className="label text-amber-950">{field.label}</span>
-              <input className="input bg-white pt-2" type="file" multiple required={(letterFieldFiles[field.key]?.length ?? 0) === 0} onChange={(event) => setLetterFieldFiles((current) => ({ ...current, [field.key]: Array.from(event.target.files ?? []) }))} />
-              {(letterFieldFiles[field.key]?.length ?? 0) > 0 ? <div className="mt-1 text-xs text-amber-900">{letterFieldFiles[field.key].map((file) => file.name).join(", ")}</div> : null}
-            </label>
-          ) : (
-            <label key={field.key}>
-              <span className="label text-amber-950">{field.label}</span>
-              <input className="input bg-white" required value={letterFields[field.key] ?? ""} onChange={(event) => setLetterFields((values) => ({ ...values, [field.key]: event.target.value }))} />
-            </label>
+          <label><span className="label">Original allotment letter number</span><input className="input" value={originalAllotmentNumber} onChange={(event) => setOriginalAllotmentNumber(event.target.value)} /></label>
+          <label><span className="label">Original allotment letter date</span><input className="input" type="date" value={originalAllotmentDate} onChange={(event) => setOriginalAllotmentDate(event.target.value)} /></label>
+          <label><span className="label">Transfer date</span><input className="input" type="date" value={effectiveAt} onChange={(event) => setEffectiveAt(event.target.value)} /></label>
+          <label><span className="label">Transfer amount in INR</span><input className="input" inputMode="numeric" value={amountInr} onChange={(event) => setAmountInr(event.target.value)} /></label>
+          <label><span className="label">Share %</span><input className="input" inputMode="decimal" value={sharePct} onChange={(event) => setSharePct(event.target.value)} /></label>
+        </div>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div><div className="text-xs font-semibold uppercase tracking-wide text-slate-400">4. Stamp details</div><h3 className="mt-1 font-semibold">Transfer affidavits</h3></div>
+          <button type="button" className="btn-outline h-8 px-3 text-xs" onClick={() => setStamps((items) => [...items, { number: "", dated: today }])}><Plus size={14} />Add stamp</button>
+        </div>
+        <div className="mt-3 space-y-3">
+          {stamps.map((stamp, index) => (
+            <div className="grid gap-2 rounded-lg border border-slate-200 p-3 md:grid-cols-[1fr_1fr_auto]" key={index}>
+              <label><span className="label">E-Stamp number</span><input className="input" value={stamp.number} onChange={(event) => setStamps((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, number: event.target.value } : item))} /></label>
+              <label><span className="label">Dated</span><input className="input" type="date" value={stamp.dated} onChange={(event) => setStamps((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, dated: event.target.value } : item))} /></label>
+              <button type="button" className="btn-outline self-end px-3" disabled={stamps.length === 1} onClick={() => setStamps((items) => items.filter((_, itemIndex) => itemIndex !== index))} aria-label="Remove stamp"><X size={16} /></button>
+            </div>
           ))}
         </div>
-      </div> : null}
-      {message ? <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
-      <button className="btn-primary mt-4 w-full" disabled={loading || (mode === "existing" ? !buyerOwnerId : !name)}>
+      </div>
+
+      <div className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">5. Extra</div>
+        <label className="mt-3 block"><span className="label">Transfer notes</span><textarea className="input min-h-20" value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+        {manualLetterFields.length ? <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <div className="font-semibold text-amber-950">Transfer letter fields required before generation</div>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            {manualLetterFields.map((field) => field.inputType === "FILE" ? (
+              <label key={field.key}>
+                <span className="label text-amber-950">{field.label}</span>
+                <input className="input bg-white pt-2" type="file" multiple required={(letterFieldFiles[field.key]?.length ?? 0) === 0} onChange={(event) => setLetterFieldFiles((current) => ({ ...current, [field.key]: Array.from(event.target.files ?? []) }))} />
+                {(letterFieldFiles[field.key]?.length ?? 0) > 0 ? <div className="mt-1 text-xs text-amber-900">{letterFieldFiles[field.key].map((file) => file.name).join(", ")}</div> : null}
+              </label>
+            ) : (
+              <label key={field.key}>
+                <span className="label text-amber-950">{field.label}</span>
+                <input className="input bg-white" required value={letterFields[field.key] ?? ""} onChange={(event) => setLetterFields((values) => ({ ...values, [field.key]: event.target.value }))} />
+              </label>
+            ))}
+          </div>
+        </div> : null}
+      </div>
+
+      {message ? <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
+      <button className="btn-primary w-full" disabled={loading || (mode === "existing" ? !buyerOwnerId || !name : !name)}>
         {loading ? <Loader2 className="animate-spin" size={17} /> : <Send size={17} />}
         Record transfer and open letter
       </button>

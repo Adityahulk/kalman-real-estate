@@ -36,8 +36,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         tenantName: tenant?.name ?? "Builder Workspace",
         tenantLogoDataUrl: tenant?.logoDataUrl ?? null,
       }}
-      canManageUsers={hasPermission(session.role, "users.manage")}
-      canViewLiaison={hasPermission(session.role, "liaison.view")}
+      canManageUsers={hasPermission(session.role, "users.manage", session.permissions)}
+      canViewLiaison={hasPermission(session.role, "liaison.view", session.permissions)}
       projects={projects}
       firms={memberships.map((membership) => membership.tenant)}
       activeFirmId={session.tenantId}

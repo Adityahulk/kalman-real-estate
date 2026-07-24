@@ -9,10 +9,23 @@ export const dynamic = "force-dynamic";
 export default async function UploadPlotDocumentPage({ params }: { params: { projectId: string; plotId: string } }) {
   const session = await getSessionUser();
   if (!session) return null;
-  const plot = await prisma.plot.findFirst({
-    where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId, archivedAt: null },
-    include: { project: true, currentOwner: true },
-  });
+  const [plot, generatedOwnershipLetterCount] = await Promise.all([
+    prisma.plot.findFirst({
+      where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId, archivedAt: null },
+      include: { project: true, currentOwner: true },
+    }),
+    prisma.generatedDocument.count({
+      where: {
+        tenantId: session.tenantId,
+        recordType: "Plot",
+        recordId: params.plotId,
+        OR: [
+          { type: { contains: "allotment", mode: "insensitive" } },
+          { type: { contains: "transfer", mode: "insensitive" } },
+        ],
+      },
+    }),
+  ]);
   if (!plot) notFound();
 
   return (
@@ -26,24 +39,26 @@ export default async function UploadPlotDocumentPage({ params }: { params: { pro
     >
       <div className="grid gap-5 lg:grid-cols-2">
         <OwnershipDocumentUpload ownerType="Plot" ownerId={plot.id} defaultVisibility="OWNER_VISIBLE" defaultDocumentType="ALLOTMENT_LETTER" title="Upload plot document" />
-        <OwnershipDocumentUpload
-          ownerType="Plot"
-          ownerId={plot.id}
-          defaultVisibility="OWNER_VISIBLE"
-          defaultDocumentType="ALLOTMENT_LETTER"
-          fixedCategoryKey="signed-allotment-letter"
-          defaultNotes="Signed version of allotment letter"
-          hideDocumentType
-          title="Upload signed allotment letter"
-        />
+        {generatedOwnershipLetterCount > 0 ? (
+          <OwnershipDocumentUpload
+            ownerType="Plot"
+            ownerId={plot.id}
+            defaultVisibility="OWNER_VISIBLE"
+            defaultDocumentType="ALLOTMENT_LETTER"
+            fixedCategoryKey="signed-allotment-letter"
+            defaultNotes="Signed copy of a generated ownership letter"
+            hideDocumentType
+            title="Upload signed copy of generated letter"
+          />
+        ) : null}
         <OwnershipDocumentUpload
           ownerType="Plot"
           ownerId={plot.id}
           defaultVisibility="OWNER_VISIBLE"
           defaultDocumentType="ALLOTMENT_LETTER"
           fixedCategoryKey="old-documents"
-          defaultNotes="Old allotment / transfer letter"
-          title="Upload old allotment / transfer letter"
+          defaultNotes="Old signed allotment / transfer letter"
+          title="Upload old signed allotment / transfer letter"
         />
         {plot.currentOwnerId ? (
           <OwnershipDocumentUpload ownerType="Owner" ownerId={plot.currentOwnerId} defaultVisibility="TEAM" defaultDocumentType="PAN_CARD" title="Upload owner PAN / Aadhaar / KYC" />

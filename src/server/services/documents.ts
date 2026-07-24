@@ -575,14 +575,15 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
   const registry = plot.registryRecords[0];
   const ownerKyc = jsonRecord(plot.currentOwner?.kyc);
   const fatherName = stringFromKyc(ownerKyc, ["fatherName", "father", "relationName"]);
+  const ownerRelationPrefix = stringFromKyc(ownerKyc, ["relationPrefix", "relation"]) || "s/o";
   const aadhaarNo = stringFromKyc(ownerKyc, ["aadhaarNo", "aadharNo", "aadhaar", "aadhar"]);
   const panNo = stringFromKyc(ownerKyc, ["panNo", "pan"]);
-  const ownerNameWithRelation = [plot.currentOwner?.name ?? "", fatherName ? `s/o ${fatherName}` : ""].filter(Boolean).join(" ");
+  const ownerNameWithRelation = [plot.currentOwner?.name ?? "", fatherName ? `${ownerRelationPrefix} ${fatherName}` : ""].filter(Boolean).join(" ");
   const ownerAddressRaw = plot.currentOwner?.address ?? "";
   const ownerAddress = normalizeAddressInline(ownerAddressRaw);
   const ownerAddressMultilineHtml = addressMultilineHtml(ownerAddressRaw);
   const areaSqft = plot.areaSqft ? Number(plot.areaSqft) : null;
-  const areaSqyd = areaSqft ? areaSqft / 9 : null;
+  const areaSqyd = plot.areaSqYards ? Number(plot.areaSqYards) : areaSqft ? areaSqft / 9 : null;
   const priceInr = ownership?.amountInr ? Number(ownership.amountInr) : plot.priceInr ? Number(plot.priceInr) : null;
   const bspRate = areaSqyd && priceInr ? Math.round(priceInr / areaSqyd) : null;
   const effectiveAt = ownership?.effectiveAt ?? new Date();
@@ -599,6 +600,7 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
   });
   const boundaries = jsonRecord(plot.boundaries);
   const extraDetails = jsonRecord(ownership?.extraDetails);
+  const transferDetails = jsonRecord(extraDetails.transfer);
   const pricing = jsonRecord(extraDetails.pricing);
   const payments = Array.isArray(extraDetails.payments) ? extraDetails.payments.map(jsonRecord) : [];
   const firmDetails = jsonRecord(extraDetails.firm);
@@ -665,8 +667,14 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     (record) => record.ownerId && ownership?.ownerId && record.ownerId !== ownership.ownerId,
   );
   const sellerKyc = jsonRecord(sellerRecord?.owner?.kyc);
-  const sellerFatherName = stringFromKyc(sellerKyc, ["fatherName", "father", "relationName"]);
-  const sellerNameWithRelation = [sellerRecord?.owner?.name ?? "", sellerFatherName ? `s/o Sh. ${sellerFatherName}` : ""]
+  const sellerFatherName =
+    stringFromKyc(transferDetails, ["sellerFatherName", "sellerRelationName"])
+    || stringFromKyc(sellerKyc, ["fatherName", "father", "relationName"]);
+  const sellerRelationPrefix =
+    stringFromKyc(transferDetails, ["sellerRelationPrefix"])
+    || stringFromKyc(sellerKyc, ["relationPrefix", "relation"])
+    || "s/o Sh.";
+  const sellerNameWithRelation = [sellerRecord?.owner?.name ?? "", sellerFatherName ? `${sellerRelationPrefix} ${sellerFatherName}` : ""]
     .filter(Boolean)
     .join(" ");
   const originalAllotmentDoc = await prisma.generatedDocument.findFirst({
@@ -680,6 +688,18 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     orderBy: { createdAt: "desc" },
     select: { number: true, finalizedAt: true, createdAt: true },
   });
+  const originalAllotmentNumber =
+    stringFromKyc(transferDetails, ["originalAllotmentNumber", "allotmentNumber"])
+    || originalAllotmentDoc?.number
+    || "";
+  const originalAllotmentDateRaw = stringFromKyc(transferDetails, ["originalAllotmentDate", "allotmentDate"]);
+  const originalAllotmentDate = originalAllotmentDateRaw
+    ? /^\d{4}-\d{2}-\d{2}$/.test(originalAllotmentDateRaw)
+      ? formatDateDots(new Date(originalAllotmentDateRaw))
+      : originalAllotmentDateRaw
+    : originalAllotmentDoc
+      ? formatDateDots(originalAllotmentDoc.finalizedAt ?? originalAllotmentDoc.createdAt)
+      : "";
   const additionalFields = Array.isArray(extraDetails.additionalFields) ? extraDetails.additionalFields.map(jsonRecord) : [];
   const customLetterFields = jsonRecord(extraDetails.customLetterFields);
   const customLetterFiles = jsonRecord(extraDetails.customLetterFiles);
@@ -795,11 +815,15 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     // Transfer letters: transferor + the original allotment letter reference.
     "seller.name": sellerRecord?.owner?.name ?? "",
     "seller.nameWithRelation": sellerNameWithRelation,
+    "seller.fatherName": sellerFatherName,
+    "seller.relationPrefix": sellerRelationPrefix,
     "seller.address": normalizeAddressInline(sellerRecord?.owner?.address ?? ""),
-    "original.allotmentNumber": originalAllotmentDoc?.number ?? "",
-    "original.allotmentDate": originalAllotmentDoc
-      ? formatDateDots(originalAllotmentDoc.finalizedAt ?? originalAllotmentDoc.createdAt)
-      : "",
+    "seller.phone": sellerRecord?.owner?.phone ?? "",
+    "seller.email": sellerRecord?.owner?.email ?? "",
+    "seller.aadhaarNo": stringFromKyc(sellerKyc, ["aadhaarNo", "aadharNo", "aadhaar", "aadhar"]),
+    "seller.panNo": stringFromKyc(sellerKyc, ["panNo", "pan"]),
+    "original.allotmentNumber": originalAllotmentNumber,
+    "original.allotmentDate": originalAllotmentDate,
     "ownership.amountInr": ownership?.amountInr?.toString() ?? "",
     "ownership.effectiveDate": ownership?.effectiveAt.toLocaleDateString("en-IN") ?? "",
     "ownership.effectiveDateDots": formatDateDots(effectiveAt),
@@ -838,7 +862,7 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "today": new Date().toLocaleDateString("en-IN"),
     "todayDots": formatDateDots(new Date()),
     "rera.number": plot.project.reraNumber ?? "",
-    "stamp.amount": "50/-",
+    "stamp.amount": "50",
     "stamp.estampNo": stampNo(0) || eStampNumber,
     "stamp.date": stampDateDots(0) || eStampDateDots || formatDateDots(new Date()),
     "stamp.2.estampNo": stampNo(1),
@@ -975,7 +999,10 @@ async function collectSupportingFileIds(tenantId: string, plotId: string, ownerI
       OR: [
         { ownerType: "Plot", ownerId: plotId, categoryKey: "allotment-payment" },
         { ownerType: "Plot", ownerId: plotId, categoryKey: "allotment-extra" },
-        ...(ownerId ? [{ ownerType: "Owner", ownerId, categoryKey: "allottee-kyc" }] : []),
+        ...(ownerId ? [
+          { ownerType: "Owner", ownerId, categoryKey: "allottee-kyc" },
+          { ownerType: "Owner", ownerId, categoryKey: "transfer-kyc" },
+        ] : []),
       ],
     },
     select: { id: true },

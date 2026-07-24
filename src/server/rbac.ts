@@ -63,7 +63,7 @@ export const ALL_PERMISSIONS: Permission[] = [
   "owner.portal",
 ];
 
-const permissionsByRole: Record<Role, Permission[]> = {
+export const permissionsByRole: Record<Role, Permission[]> = {
   SUPER_ADMIN: ALL_PERMISSIONS,
   PLATFORM_ADMIN: [
     "tenant.manage",
@@ -201,12 +201,19 @@ const permissionsByRole: Record<Role, Permission[]> = {
   VIEWER: ["cad.view", "ownership.view", "documents.view", "development.view", "finance.view", "liaison.view"],
 };
 
-export function hasPermission(role: Role, permission: Permission) {
-  return permissionsByRole[role]?.includes(permission) ?? false;
+export function normalizePermissions(value: unknown): Permission[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const allowed = new Set<Permission>(ALL_PERMISSIONS);
+  return value.filter((permission): permission is Permission =>
+    typeof permission === "string" && allowed.has(permission as Permission));
 }
 
-export function assertPermission(role: Role, permission: Permission) {
-  if (!hasPermission(role, permission)) {
+export function hasPermission(role: Role, permission: Permission, customPermissions?: Permission[]) {
+  return (customPermissions ?? permissionsByRole[role] ?? []).includes(permission);
+}
+
+export function assertPermission(role: Role, permission: Permission, customPermissions?: Permission[]) {
+  if (!hasPermission(role, permission, customPermissions)) {
     const error = new Error(`Missing permission: ${permission}`);
     error.name = "ForbiddenError";
     throw error;

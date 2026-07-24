@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function LiaisonPage() {
   const session = await getSessionUser();
   if (!session) return null;
-  if (!hasPermission(session.role, "liaison.view")) notFound();
+  if (!hasPermission(session.role, "liaison.view", session.permissions)) notFound();
 
   const context = { tenantId: session.tenantId, userId: session.id, role: session.role };
   const [approvals, projects] = await Promise.all([
@@ -46,7 +46,7 @@ export default async function LiaisonPage() {
           expiryState: a.expiryState,
         }))}
         projects={projects}
-        canManage={hasPermission(session.role, "liaison.manage")}
+        canManage={hasPermission(session.role, "liaison.manage", session.permissions)}
       />
     </main>
   );

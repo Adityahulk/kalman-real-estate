@@ -1,12 +1,12 @@
 import { NextRequest } from "next/server";
 import { apiError, getRequestContext, ok } from "@/server/api";
-import { submitTaskForVerification } from "@/server/services/development";
+import { closeDevelopmentTask } from "@/server/services/development";
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const context = await getRequestContext(request, "development.manage");
-    return ok(await submitTaskForVerification(context, params.id));
+    return ok(await closeDevelopmentTask(context, params.id));
   } catch (error) {
-    return apiError(error, { route: "POST /api/v1/development/site-assets/[id]/submit-verification", siteAssetId: params.id });
+    return apiError(error, { route: "POST /api/v1/development/site-assets/[id]/close", siteAssetId: params.id });
   }
 }

@@ -1,8 +1,9 @@
-import { AuditAction, OwnershipKind, PlotStatus, Prisma } from "@prisma/client";
+import { AuditAction, OwnershipKind, PlotStatus, Prisma, Role } from "@prisma/client";
 import { z } from "zod";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
+import { deleteObjectResilient } from "../storage";
 
 export const ownerSchema = z.object({
   type: z.enum(["INDIVIDUAL", "COMPANY", "SHARED"]),
@@ -158,6 +159,12 @@ export const transferPlotSchema = z.object({
 export async function transferPlot(context: RequestContext, plotId: string, input: z.infer<typeof transferPlotSchema>) {
   const result = await prisma.$transaction(async (tx) => {
     const before = await tx.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
+    if (!before.currentOwnerId) {
+      throwBadRequest("This plot is still with the company. Complete an allotment before recording a transfer.");
+    }
+    if (before.currentOwnerId === input.buyerOwnerId) {
+      throwBadRequest("Select a different transferee. This person is already the current owner.");
+    }
     const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: context.tenantId }, select: { maxTransfersPerPlot: true } });
     const transferRecords = await tx.ownershipRecord.findMany({
       where: { tenantId: context.tenantId, plotId, kind: OwnershipKind.TRANSFER, documentId: { not: null } },
@@ -195,6 +202,233 @@ export async function transferPlot(context: RequestContext, plotId: string, inpu
   });
   await writeAuditEvent(context, { action: AuditAction.TRANSFER, entityType: "Plot", entityId: plotId, before: result.before as unknown as Prisma.InputJsonValue, after: result.plot as unknown as Prisma.InputJsonValue });
   return result;
+}
+
+export const historicalAllotmentSchema = z.object({
+  type: z.enum(["INDIVIDUAL", "COMPANY", "SHARED"]).default("INDIVIDUAL"),
+  name: z.string().trim().min(2),
+  email: z.string().trim().email().optional(),
+  phone: z.string().trim().optional(),
+  address: z.string().trim().optional(),
+  effectiveAt: z.string().datetime().optional(),
+});
+
+export async function recordHistoricalAllotment(
+  context: RequestContext,
+  plotId: string,
+  input: z.infer<typeof historicalAllotmentSchema>,
+) {
+  assertSuperAdmin(context, "Only a Super Admin can mark an old allotment as completed.");
+  const result = await prisma.$transaction(async (tx) => {
+    const before = await tx.plot.findFirstOrThrow({
+      where: { id: plotId, tenantId: context.tenantId, archivedAt: null },
+    });
+    if (before.currentOwnerId) {
+      throwBadRequest("This plot already has a current owner.");
+    }
+
+    const sourceFiles = await tx.fileAsset.findMany({
+      where: {
+        tenantId: context.tenantId,
+        ownerType: "Plot",
+        ownerId: plotId,
+        deletedAt: null,
+        categoryKey: { in: ["old-documents", "signed-allotment-letter"] },
+      },
+      select: { id: true, fileName: true, mimeType: true, categoryKey: true },
+    });
+    if (!sourceFiles.length) {
+      throwBadRequest("Upload the old signed allotment or transfer letter before marking the allotment as completed.");
+    }
+
+    const owner = await tx.owner.create({
+      data: {
+        tenantId: context.tenantId,
+        type: input.type,
+        name: input.name,
+        email: input.email || undefined,
+        phone: input.phone || undefined,
+        address: input.address || undefined,
+      },
+    });
+    const plot = await tx.plot.update({
+      where: { id: plotId },
+      data: { currentOwnerId: owner.id, status: PlotStatus.ALLOTTED },
+    });
+    const record = await tx.ownershipRecord.create({
+      data: {
+        tenantId: context.tenantId,
+        plotId,
+        ownerId: owner.id,
+        kind: OwnershipKind.ALLOTMENT,
+        sharePct: new Prisma.Decimal(100),
+        notes: "Historical allotment recorded from an uploaded signed letter.",
+        effectiveAt: input.effectiveAt ? new Date(input.effectiveAt) : undefined,
+        createdById: context.userId,
+        extraDetails: {
+          historicalImport: true,
+          sourceFiles,
+        },
+      },
+    });
+    return { before, owner, plot, record };
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.ALLOT,
+    entityType: "Plot",
+    entityId: plotId,
+    before: result.before as unknown as Prisma.InputJsonValue,
+    after: {
+      plot: result.plot,
+      ownershipRecordId: result.record.id,
+      historicalImport: true,
+    } as unknown as Prisma.InputJsonValue,
+  });
+  return result;
+}
+
+export async function cancelLatestOwnershipRecord(context: RequestContext, plotId: string, recordId: string) {
+  assertSuperAdmin(context, "Only a Super Admin can cancel an allotment or transfer.");
+  const cleanup = await prisma.$transaction(async (tx) => {
+    const plot = await tx.plot.findFirstOrThrow({
+      where: { id: plotId, tenantId: context.tenantId, archivedAt: null },
+    });
+    const ownershipRecords = await tx.ownershipRecord.findMany({
+      where: {
+        tenantId: context.tenantId,
+        plotId,
+        kind: { in: [OwnershipKind.ALLOTMENT, OwnershipKind.TRANSFER] },
+      },
+      orderBy: [{ effectiveAt: "desc" }, { createdAt: "desc" }],
+    });
+    const latest = ownershipRecords[0];
+    if (!latest || latest.id !== recordId) {
+      throwBadRequest("Only the latest allotment or transfer can be cancelled.");
+    }
+
+    const documentKeyword = latest.kind === OwnershipKind.TRANSFER ? "transfer" : "allotment";
+    const documentFilters: Prisma.GeneratedDocumentWhereInput[] = [
+      {
+        type: { contains: documentKeyword, mode: "insensitive" },
+        createdAt: { gte: latest.createdAt },
+      },
+    ];
+    if (latest.documentId) documentFilters.push({ id: latest.documentId });
+    const documents = await tx.generatedDocument.findMany({
+      where: {
+        tenantId: context.tenantId,
+        recordType: "Plot",
+        recordId: plotId,
+        OR: documentFilters,
+      },
+      select: {
+        id: true,
+        number: true,
+        fileAssetId: true,
+        signedFileAssetId: true,
+        data: true,
+      },
+    });
+    const documentIds = documents.map((document) => document.id);
+    const revisions = documentIds.length
+      ? await tx.generatedDocumentRevision.findMany({
+          where: { tenantId: context.tenantId, documentId: { in: documentIds } },
+          select: { baseFileId: true, outputFileId: true },
+        })
+      : [];
+
+    const referencedFileIds = uniqueStrings([
+      ...collectReferencedFileIds(latest.extraDetails),
+      ...documents.flatMap((document) => collectReferencedFileIds(document.data)),
+      ...documents.flatMap((document) => [document.fileAssetId, document.signedFileAssetId]),
+      ...revisions.flatMap((revision) => [revision.baseFileId, revision.outputFileId]),
+    ]);
+    const documentNumbers = documents.map((document) => document.number).filter((value): value is string => Boolean(value));
+    const relatedFiles = await tx.fileAsset.findMany({
+      where: {
+        tenantId: context.tenantId,
+        OR: [
+          ...(referencedFileIds.length ? [{ id: { in: referencedFileIds } }] : []),
+          ...(documentNumbers.length
+            ? [{
+                ownerType: "Plot",
+                ownerId: plotId,
+                categoryKey: "signed-allotment-letter",
+                documentNo: { in: documentNumbers },
+              }]
+            : []),
+        ],
+      },
+      select: { id: true, storageKey: true, fallbackStorageKey: true },
+    });
+    const fileIds = relatedFiles.map((file) => file.id);
+
+    const auditFilters: Prisma.AuditEventWhereInput[] = [];
+    if (documentIds.length) auditFilters.push({ entityType: "GeneratedDocument", entityId: { in: documentIds } });
+    if (fileIds.length) auditFilters.push({ entityType: "FileAsset", entityId: { in: fileIds } });
+    if (auditFilters.length) {
+      await tx.auditEvent.deleteMany({ where: { tenantId: context.tenantId, OR: auditFilters } });
+    }
+    if (documentIds.length) {
+      await tx.approval.deleteMany({
+        where: { tenantId: context.tenantId, recordType: "GeneratedDocument", recordId: { in: documentIds } },
+      });
+      await tx.generatedDocumentRevision.deleteMany({
+        where: { tenantId: context.tenantId, documentId: { in: documentIds } },
+      });
+      await tx.generatedDocument.deleteMany({
+        where: { tenantId: context.tenantId, id: { in: documentIds } },
+      });
+    }
+    await tx.ownershipRecord.delete({ where: { id: latest.id } });
+    if (fileIds.length) {
+      await tx.fileAsset.deleteMany({ where: { tenantId: context.tenantId, id: { in: fileIds } } });
+    }
+
+    const previous = ownershipRecords[1] ?? null;
+    const updatedPlot = await tx.plot.update({
+      where: { id: plotId },
+      data: previous
+        ? {
+            currentOwnerId: previous.ownerId,
+            status: previous.kind === OwnershipKind.TRANSFER ? PlotStatus.TRANSFERRED : PlotStatus.ALLOTTED,
+          }
+        : { currentOwnerId: null, status: PlotStatus.COMPANY_OWNED },
+    });
+    return {
+      plotBefore: plot,
+      plot: updatedPlot,
+      cancelled: latest,
+      documentCount: documentIds.length,
+      fileCount: fileIds.length,
+      storageKeys: uniqueStrings(relatedFiles.flatMap((file) => [file.storageKey, file.fallbackStorageKey])),
+    };
+  });
+
+  const storageWarnings = (await Promise.all(cleanup.storageKeys.map((key) => deleteObjectResilient(key)))).flat();
+  await writeAuditEvent(context, {
+    action: AuditAction.DELETE,
+    entityType: "Plot",
+    entityId: plotId,
+    before: {
+      plot: cleanup.plotBefore,
+      ownershipRecord: cleanup.cancelled,
+    } as unknown as Prisma.InputJsonValue,
+    after: {
+      plot: cleanup.plot,
+      cancelledOwnershipRecordId: recordId,
+      deletedDocuments: cleanup.documentCount,
+      deletedFiles: cleanup.fileCount,
+      storageWarnings,
+    } as unknown as Prisma.InputJsonValue,
+  });
+  return {
+    plot: cleanup.plot,
+    cancelledRecordId: recordId,
+    deletedDocuments: cleanup.documentCount,
+    deletedFiles: cleanup.fileCount,
+    storageWarnings,
+  };
 }
 
 export const registrySchema = z.object({
@@ -243,4 +477,38 @@ function throwBadRequest(message: string): never {
   const error = new Error(message);
   error.name = "BadRequestError";
   throw error;
+}
+
+function assertSuperAdmin(context: RequestContext, message: string) {
+  if (context.role !== Role.SUPER_ADMIN) {
+    const error = new Error(message);
+    error.name = "ForbiddenError";
+    throw error;
+  }
+}
+
+function uniqueStrings(values: Array<string | null | undefined>) {
+  return [...new Set(values.filter((value): value is string => Boolean(value)))];
+}
+
+function collectReferencedFileIds(value: unknown): string[] {
+  const ids = new Set<string>();
+  visitReferencedFiles(value, ids);
+  return [...ids];
+}
+
+function visitReferencedFiles(value: unknown, ids: Set<string>) {
+  if (!value || typeof value !== "object") return;
+  if (Array.isArray(value)) {
+    for (const item of value) visitReferencedFiles(item, ids);
+    return;
+  }
+  const record = value as Record<string, unknown>;
+  if (
+    typeof record.id === "string"
+    && (typeof record.fileName === "string" || typeof record.mimeType === "string" || typeof record.storageKey === "string")
+  ) {
+    ids.add(record.id);
+  }
+  for (const item of Object.values(record)) visitReferencedFiles(item, ids);
 }

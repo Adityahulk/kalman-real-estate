@@ -20,7 +20,7 @@ const ACTION_CHIP: Record<string, string> = {
 export default async function AuditPage({ searchParams }: { searchParams: { entityType?: string; action?: string } }) {
   const session = await getSessionUser();
   if (!session) return null;
-  if (!hasPermission(session.role, "users.manage")) notFound();
+  if (!hasPermission(session.role, "users.manage", session.permissions)) notFound();
 
   const events = await prisma.auditEvent.findMany({
     where: {

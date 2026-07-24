@@ -33,7 +33,7 @@ import {
 } from "../../../../ownership/ownership-actions";
 import { BackButton } from "@/components/back-button";
 import { CadUploadForm } from "../../../../cad/cad-upload-form";
-import { PlotHistoryTable } from "./plot-history-table";
+import { HistoricalAllotmentToggle, OwnershipEventHistory } from "./ownership-history-controls";
 
 export const dynamic = "force-dynamic";
 
@@ -75,9 +75,16 @@ export default async function ProjectPlotWorkspacePage({
     if (file.documentNo && !latestSignedByDocumentNo.has(file.documentNo)) latestSignedByDocumentNo.set(file.documentNo, file);
   }
   const latestAllotmentRecord = plot.ownershipRecords.find((record) => record.kind === "ALLOTMENT") ?? null;
+  const ownershipEventRecords = plot.ownershipRecords.filter(
+    (record): record is typeof record & { kind: "ALLOTMENT" | "TRANSFER" } => record.kind === "ALLOTMENT" || record.kind === "TRANSFER",
+  );
+  const latestOwnershipEvent = ownershipEventRecords[0] ?? null;
+  const historicalAllotmentRecord = ownershipEventRecords.find(
+    (record) => record.kind === "ALLOTMENT" && isHistoricalAllotment(record.extraDetails),
+  ) ?? null;
   const allotmentSupportFiles = uniqueFiles([
     ...workspace.allotmentSupportingFiles,
-    ...workspace.ownerFiles.filter((file) => file.categoryKey === "allottee-kyc"),
+    ...workspace.ownerFiles.filter((file) => file.categoryKey === "allottee-kyc" || file.categoryKey === "transfer-kyc"),
     ...workspace.plotFiles.filter((file) => file.categoryKey === "allotment-payment"),
     ...workspace.plotFiles.filter((file) => file.categoryKey === "allotment-extra" || file.categoryKey?.startsWith("manual-letter-")),
   ]);
@@ -324,18 +331,20 @@ export default async function ProjectPlotWorkspacePage({
             </div>
             <div className="card p-5">
               <h2 className="mb-4 font-semibold">Old documents</h2>
-              {oldDocumentFiles.length > 0 && !plot.currentOwnerId ? (
-                <div className="mb-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-                  <span className="font-medium">Old documents uploaded.</span> To use the transfer workflow, the system needs to know the current owner. Go to{" "}
-                  <Link className="underline" href={`/app/projects/${plot.projectId}/plots/${plot.id}/transfer`}>New transfer</Link>
-                  {" "}— the first step lets you record the original allottee.
-                </div>
+              {session.role === "SUPER_ADMIN" && (historicalAllotmentRecord || (!plot.currentOwnerId && oldDocumentFiles.length > 0)) ? (
+                <HistoricalAllotmentToggle
+                  plotId={plot.id}
+                  sourceFileCount={oldDocumentFiles.length}
+                  active={Boolean(historicalAllotmentRecord)}
+                  historicalRecordId={historicalAllotmentRecord?.id ?? null}
+                  latestRecordId={latestOwnershipEvent?.id ?? null}
+                />
               ) : null}
               <DocumentGrid files={oldDocumentFiles} empty="No old allotment or transfer letter uploaded yet." showShare />
             </div>
             <div className="card p-5">
-              <h2 className="mb-4 font-semibold">Allotment supporting documents</h2>
-              <DocumentGrid files={allotmentSupportFiles} empty="No Aadhaar, cheque, or allotment support files uploaded yet." />
+              <h2 className="mb-4 font-semibold">Ownership supporting documents</h2>
+              <DocumentGrid files={allotmentSupportFiles} empty="No identity, payment, or ownership support files uploaded yet." />
             </div>
           </div>
           <aside className="space-y-6">
@@ -466,7 +475,18 @@ export default async function ProjectPlotWorkspacePage({
 
       {activeTab === "history" ? (
         <section className="mt-4">
-          <PlotHistoryTable items={workspace.timeline} projectId={plot.projectId} plotId={plot.id} />
+          <OwnershipEventHistory
+            plotId={plot.id}
+            canCancel={session.role === "SUPER_ADMIN"}
+            records={ownershipEventRecords.map((record) => ({
+              id: record.id,
+              kind: record.kind,
+              ownerName: record.owner?.name ?? "Unknown owner",
+              effectiveAt: record.effectiveAt,
+              actorName: record.createdBy?.name ?? record.createdBy?.email ?? null,
+              notes: record.notes,
+            }))}
+          />
         </section>
       ) : null}
     </main>
@@ -680,6 +700,15 @@ function uniqueFiles<T extends { id: string }>(files: T[]) {
     seen.add(file.id);
     return true;
   });
+}
+
+function isHistoricalAllotment(value: unknown) {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && (value as Record<string, unknown>).historicalImport === true,
+  );
 }
 
 function DocumentGrid({ files, empty, showShare = false }: { files: Awaited<ReturnType<typeof getPlotWorkspace>>["plotFiles"]; empty: string; showShare?: boolean }) {

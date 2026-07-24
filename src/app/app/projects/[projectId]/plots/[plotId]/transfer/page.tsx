@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function TransferPlotPage({ params }: { params: { projectId: string; plotId: string } }) {
   const session = await getSessionUser();
   if (!session) return null;
-  const [plot, firm, letterTemplate, letterCategories] = await Promise.all([
+  const [plot, firm, letterTemplate, letterCategories, originalAllotment] = await Promise.all([
     prisma.plot.findFirst({
       where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId, archivedAt: null },
       include: { project: true, currentOwner: true },
@@ -20,6 +20,17 @@ export default async function TransferPlotPage({ params }: { params: { projectId
     prisma.tenant.findUniqueOrThrow({ where: { id: session.tenantId }, select: { maxTransfersPerPlot: true } }),
     prisma.documentTemplate.findFirst({ where: { tenantId: session.tenantId, projectId: params.projectId, type: "transfer_letter", active: true }, orderBy: { createdAt: "desc" } }),
     listLetterFieldSettings(session.tenantId),
+    prisma.generatedDocument.findFirst({
+      where: {
+        tenantId: session.tenantId,
+        recordId: params.plotId,
+        type: "allotment_letter",
+        number: { not: null },
+        status: { not: "REJECTED" },
+      },
+      orderBy: { createdAt: "desc" },
+      select: { number: true, finalizedAt: true, createdAt: true },
+    }),
   ]);
   if (!plot) notFound();
   const [owners, acceptedTransfers] = await Promise.all([
@@ -54,12 +65,25 @@ export default async function TransferPlotPage({ params }: { params: { projectId
         plotId={plot.id}
         projectId={plot.projectId}
         owners={owners}
+        currentOwner={plot.currentOwner ?? undefined}
+        originalAllotment={{
+          number: originalAllotment?.number ?? "",
+          date: dateInput(originalAllotment?.finalizedAt ?? originalAllotment?.createdAt),
+        }}
         manualLetterFields={resolvedTemplateFields
           .filter((field) => !field.mapping || field.mapping.startsWith("manual."))
           .map((field) => ({ key: field.key, label: field.label, inputType: field.inputType }))}
       />}
     </ActionPageShell>
   );
+}
+
+function dateInput(value: Date | null | undefined) {
+  if (!value) return "";
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 async function acceptedTransferCount(tenantId: string, plotId: string) {

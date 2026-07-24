@@ -4,9 +4,9 @@ import { createDevelopmentTask, createDevelopmentTaskSchema } from "@/server/ser
 
 export async function POST(request: NextRequest) {
   try {
-    const context = await getRequestContext(request, "engineering.assign");
+    const context = await getRequestContext(request, "development.manage");
     return created(await createDevelopmentTask(context, await parseJson(request, createDevelopmentTaskSchema)));
   } catch (error) {
-    return apiError(error);
+    return apiError(error, { route: "POST /api/v1/development/site-assets" });
   }
 }

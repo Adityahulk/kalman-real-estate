@@ -1,14 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma, Role } from "@prisma/client";
 import { z } from "zod";
-import { assertPermission, Permission } from "./rbac";
+import { assertPermission, normalizePermissions, Permission } from "./rbac";
 import { verifySessionToken } from "./session";
 import { formatValidationError, logServerError, namedErrorStatus, normalizeZodIssues, prismaStatus } from "./logger";
+import { prisma } from "./db";
 
 export type RequestContext = {
   tenantId: string;
   userId: string;
   role: Role;
+  permissions?: Permission[];
   ipAddress?: string;
   userAgent?: string;
 };
@@ -35,10 +37,28 @@ export async function getRequestContext(request: NextRequest, permission?: Permi
         tenantId: request.headers.get("x-tenant-id") as string,
         userId: request.headers.get("x-user-id") as string,
         role: role.data,
+        permissions: undefined,
       }
     : null;
-  const context = session
-    ? { tenantId: session.tenantId, userId: session.id, role: session.role }
+  const tokenContext = session
+    ? await prisma.user.findUnique({
+        where: { id: session.id },
+        select: {
+          id: true,
+          tenantId: true,
+          role: true,
+          status: true,
+          customRole: { select: { permissions: true } },
+        },
+      })
+    : null;
+  const context = tokenContext?.status === "ACTIVE"
+    ? {
+        tenantId: tokenContext.tenantId ?? "__unselected__",
+        userId: tokenContext.id,
+        role: tokenContext.role,
+        permissions: normalizePermissions(tokenContext.customRole?.permissions),
+      }
     : devContext;
 
   if (!context) {
@@ -48,13 +68,14 @@ export async function getRequestContext(request: NextRequest, permission?: Permi
   }
 
   if (permission) {
-    assertPermission(context.role, permission);
+    assertPermission(context.role, permission, context.permissions);
   }
 
   return {
     tenantId: context.tenantId,
     userId: context.userId,
     role: context.role,
+    permissions: context.permissions,
     ipAddress: request.headers.get("x-forwarded-for") ?? undefined,
     userAgent: request.headers.get("user-agent") ?? undefined,
   };

@@ -22,7 +22,7 @@ function StatCard({ label, value, href, tone = "slate" }: { label: string; value
 export default async function DashboardPage() {
   const session = await getSessionUser();
   if (!session) return null;
-  if (!hasPermission(session.role, "users.manage")) notFound();
+  if (!hasPermission(session.role, "users.manage", session.permissions)) notFound();
   const tenantId = session.tenantId;
 
   const [

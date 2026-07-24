@@ -34,6 +34,12 @@ enum UserStatus {
   DISABLED
 }
 
+enum UserFieldType {
+  TEXT
+  IMAGE
+  DOCUMENT
+}
+
 enum OwnerType {
   INDIVIDUAL
   COMPANY
@@ -236,31 +242,118 @@ model Tenant {
   files                 FileAsset[]
   auditEvents           AuditEvent[]
   memberships           UserFirmMembership[]
+  departments           Department[]
+  designations          Designation[]
+  customRoles           CustomRole[]
+  userFieldDefinitions  UserFieldDefinition[]
   projectFileFields     ProjectFileField[]
   letterFieldCategories LetterFieldCategory[]
 }
 
 model User {
-  id           String     @id @default(cuid())
-  tenantId     String?
-  email        String     @unique
-  loginId      String?    @unique
-  passwordHash String
-  name         String
-  phone        String?
-  role         Role
-  status       UserStatus @default(INVITED)
-  lastLoginAt  DateTime?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id            String     @id @default(cuid())
+  tenantId      String?
+  email         String     @unique
+  loginId       String?    @unique
+  passwordHash  String
+  name          String
+  phone         String?
+  role          Role
+  customRoleId  String?
+  departmentId  String?
+  designationId String?
+  profileData   Json?
+  status        UserStatus @default(INVITED)
+  lastLoginAt   DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
 
   tenant                  Tenant?              @relation(fields: [tenantId], references: [id])
+  customRole              CustomRole?          @relation(fields: [customRoleId], references: [id], onDelete: SetNull)
+  department              Department?          @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  designation             Designation?         @relation(fields: [designationId], references: [id], onDelete: SetNull)
   firmMemberships         UserFirmMembership[]
   firmCustomFields        FirmCustomField[]
   createdAuditEvents      AuditEvent[]         @relation("AuditActor")
   createdOwnershipRecords OwnershipRecord[]    @relation("OwnershipRecordCreator")
 
   @@index([tenantId, role])
+  @@index([customRoleId])
+  @@index([departmentId])
+  @@index([designationId])
+}
+
+model Department {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  designations Designation[]
+  roles        CustomRole[]
+  users        User[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
+model Designation {
+  id           String   @id @default(cuid())
+  tenantId     String
+  departmentId String
+  name         String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant     Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  department Department   @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  roles      CustomRole[]
+  users      User[]
+
+  @@unique([departmentId, name])
+  @@index([tenantId])
+  @@index([departmentId])
+}
+
+model CustomRole {
+  id            String   @id @default(cuid())
+  tenantId      String
+  name          String
+  description   String?
+  baseRole      Role     @default(VIEWER)
+  permissions   Json
+  departmentId  String?
+  designationId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  department  Department?  @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  designation Designation? @relation(fields: [designationId], references: [id], onDelete: SetNull)
+  users       User[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@index([departmentId])
+  @@index([designationId])
+}
+
+model UserFieldDefinition {
+  id        String        @id @default(cuid())
+  tenantId  String
+  label     String
+  key       String
+  type      UserFieldType
+  required  Boolean       @default(false)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
 }
 
 model FirmCustomField {
@@ -775,31 +868,31 @@ model DocumentTemplate {
 }
 
 model GeneratedDocument {
-  id             String                      @id @default(cuid())
-  tenantId       String
-  templateId     String?
-  type           String
-  status         DocumentStatus              @default(DRAFT)
-  recordType     String
-  recordId       String
-  fileAssetId    String?
-  number         String?
-  editableHtml   String?
-  editableLayout Json?
-  data           Json
-  createdById    String?
-  submittedById  String?
-  submittedAt    DateTime?
-  approvedById   String?
-  approvedAt     DateTime?
-  signedById     String?
-  signedAt       DateTime?
+  id                String                      @id @default(cuid())
+  tenantId          String
+  templateId        String?
+  type              String
+  status            DocumentStatus              @default(DRAFT)
+  recordType        String
+  recordId          String
+  fileAssetId       String?
+  number            String?
+  editableHtml      String?
+  editableLayout    Json?
+  data              Json
+  createdById       String?
+  submittedById     String?
+  submittedAt       DateTime?
+  approvedById      String?
+  approvedAt        DateTime?
+  signedById        String?
+  signedAt          DateTime?
   signedFileAssetId String?
-  reviewNotes    String?
-  finalizedAt    DateTime?
-  createdAt      DateTime                    @default(now())
-  updatedAt      DateTime                    @updatedAt
-  revisions      GeneratedDocumentRevision[]
+  reviewNotes       String?
+  finalizedAt       DateTime?
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
+  revisions         GeneratedDocumentRevision[]
 
   @@index([tenantId, recordType, recordId])
 }
@@ -828,29 +921,29 @@ model GeneratedDocumentRevision {
 }
 
 model SiteAsset {
-  id            String    @id @default(cuid())
-  tenantId      String
-  projectId     String
-  name          String
-  type          String
-  totalArea     Decimal?  @db.Decimal(14, 2)
-  units         String?
-  contractorId  String?
-  assignedToId  String?
-  priority      String?
-  createdById   String?
-  verifiedById  String?
-  verifiedAt    DateTime?
+  id                String    @id @default(cuid())
+  tenantId          String
+  projectId         String
+  name              String
+  type              String
+  totalArea         Decimal?  @db.Decimal(14, 2)
+  units             String?
+  contractorId      String?
+  assignedToId      String?
+  priority          String?
+  createdById       String?
+  verifiedById      String?
+  verifiedAt        DateTime?
   verificationNotes String?
-  progressPct   Int       @default(0)
-  deadline      DateTime?
-  geometry      Json?
-  status        String    @default("PLANNED")
-  archivedAt    DateTime?
-  archiveReason String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  project       Project   @relation(fields: [projectId], references: [id])
+  progressPct       Int       @default(0)
+  deadline          DateTime?
+  geometry          Json?
+  status            String    @default("PLANNED")
+  archivedAt        DateTime?
+  archiveReason     String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  project           Project   @relation(fields: [projectId], references: [id])
 
   @@index([tenantId, projectId, type])
   @@index([tenantId, projectId, archivedAt])
@@ -887,18 +980,18 @@ model ChecklistItem {
 }
 
 model ProgressUpdate {
-  id             String   @id @default(cuid())
+  id             String    @id @default(cuid())
   tenantId       String
   parentType     String
   parentId       String
   progressPct    Int
-  quantityDone   Decimal? @db.Decimal(14, 2)
+  quantityDone   Decimal?  @db.Decimal(14, 2)
   summary        String
   recordedAt     DateTime?
   photoFileIds   Json?
-  visibleToOwner Boolean  @default(false)
+  visibleToOwner Boolean   @default(false)
   createdById    String?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime  @default(now())
 
   @@index([tenantId, parentType, parentId, createdAt])
 }

@@ -7,6 +7,6 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
     const context = await getRequestContext(request, "development.manage");
     return ok(await updateSiteAssetProgress(context, params.id, await parseJson(request, progressSchema)));
   } catch (error) {
-    return apiError(error);
+    return apiError(error, { route: "POST /api/v1/development/site-assets/[id]/progress", siteAssetId: params.id });
   }
 }

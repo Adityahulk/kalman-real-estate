@@ -1,10 +1,15 @@
 import { notFound } from "next/navigation";
 import { ExternalLink, FileStack } from "lucide-react";
 import { BackButton } from "@/components/back-button";
-import { DevelopmentTaskForm, DevelopmentTaskUpdateForm } from "@/app/app/development/development-actions";
+import {
+  DevelopmentTaskForm,
+  DevelopmentTaskUpdateForm,
+  engineeringFileLabel,
+} from "@/app/app/development/development-actions";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
 import { hasPermission } from "@/server/rbac";
+import { listEngineeringAssignees } from "@/server/services/development";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +21,9 @@ export default async function SiteAssetWorkspacePage({
   const session = await getSessionUser();
   if (!session) return null;
 
-  const [asset, configuredCategories, planFiles, updates] = await Promise.all([
+  if (!hasPermission(session.role, "development.view", session.permissions)) notFound();
+
+  const [asset, configuredCategories, engineeringFiles, updates, users] = await Promise.all([
     prisma.siteAsset.findFirst({
       where: {
         id: params.assetId,
@@ -36,11 +43,11 @@ export default async function SiteAssetWorkspacePage({
         tenantId: session.tenantId,
         ownerType: "SiteAsset",
         ownerId: params.assetId,
-        categoryKey: "development-plan",
+        categoryKey: { in: ["development-plan", "development-drawing", "development-boq", "development-estimate"] },
         deletedAt: null,
       },
       orderBy: { createdAt: "desc" },
-      select: { id: true, fileName: true, mimeType: true },
+      select: { id: true, fileName: true, mimeType: true, categoryKey: true },
     }),
     prisma.progressUpdate.findMany({
       where: {
@@ -50,6 +57,7 @@ export default async function SiteAssetWorkspacePage({
       },
       orderBy: [{ recordedAt: "desc" }, { createdAt: "desc" }],
     }),
+    listEngineeringAssignees(session.tenantId),
   ]);
 
   if (!asset) notFound();
@@ -72,6 +80,7 @@ export default async function SiteAssetWorkspacePage({
     : [];
 
   const attachmentMap = new Map(attachmentFiles.map((file) => [file.id, file]));
+  const userMap = new Map(users.map((user) => [user.id, user]));
   const categories = Array.from(
     new Set([...configuredCategories.map((item) => item.label), asset.type, "General"].filter(Boolean)),
   );
@@ -86,11 +95,13 @@ export default async function SiteAssetWorkspacePage({
     deadline: asset.deadline?.toISOString() ?? null,
     status: asset.status,
     progressPct: asset.progressPct,
-    assignedTo: asset.contractorId ?? null,
-    planFiles: planFiles.map((file) => ({
+    assignedToId: asset.assignedToId ?? null,
+    assignedTo: (asset.assignedToId ? userMap.get(asset.assignedToId)?.name : null) ?? asset.contractorId ?? null,
+    files: engineeringFiles.map((file) => ({
       id: file.id,
       fileName: file.fileName,
       mimeType: file.mimeType,
+      categoryKey: file.categoryKey,
       taskId: asset.id,
       taskName: asset.name,
     })),
@@ -121,17 +132,22 @@ export default async function SiteAssetWorkspacePage({
       </header>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <DevelopmentTaskUpdateForm task={task} canVerify={hasPermission(session.role, "engineering.verify")} />
+        <DevelopmentTaskUpdateForm
+          task={task}
+          canManage={hasPermission(session.role, "development.manage", session.permissions)}
+          canVerify={hasPermission(session.role, "engineering.verify", session.permissions)}
+        />
 
         <aside className="space-y-6">
           <section className="rounded-xl border border-slate-200 bg-white p-5">
             <div className="mb-4 flex items-center gap-2">
               <FileStack size={18} />
-              <h2 className="font-semibold">Task plans</h2>
+              <h2 className="font-semibold">Engineering files</h2>
             </div>
             <div className="space-y-3">
-              {planFiles.map((file) => (
+              {engineeringFiles.map((file) => (
                 <div className="rounded-lg border border-slate-200 p-3 text-sm" key={file.id}>
+                  <div className="text-xs font-medium uppercase tracking-wide text-slate-500">{engineeringFileLabel(file.categoryKey)}</div>
                   <div className="font-medium">{file.fileName}</div>
                   <div className="mt-3">
                     <a
@@ -141,14 +157,14 @@ export default async function SiteAssetWorkspacePage({
                       rel="noreferrer"
                     >
                       <ExternalLink size={13} />
-                      Open plan
+                      Open file
                     </a>
                   </div>
                 </div>
               ))}
-              {!planFiles.length ? (
+              {!engineeringFiles.length ? (
                 <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">
-                  No plan file uploaded for this task yet.
+                  No drawings, BOQs, or estimates uploaded yet.
                 </div>
               ) : null}
             </div>
@@ -157,6 +173,8 @@ export default async function SiteAssetWorkspacePage({
           <DevelopmentTaskForm
             projectId={asset.projectId}
             categories={categories}
+            assignees={users}
+            canAssign={hasPermission(session.role, "engineering.assign", session.permissions)}
             initialTask={{
               id: asset.id,
               name: asset.name,
@@ -164,13 +182,8 @@ export default async function SiteAssetWorkspacePage({
               totalArea: asset.totalArea?.toString() ?? "",
               units: asset.units ?? "",
               deadline: asset.deadline ? asset.deadline.toISOString().slice(0, 10) : "",
-              assignedTo: asset.contractorId ?? "",
-              status:
-                asset.status === "COMPLETED"
-                  ? "COMPLETED"
-                  : asset.status === "IN_PROGRESS"
-                    ? "IN_PROGRESS"
-                    : "PLANNED",
+              assignedToId: asset.assignedToId ?? "",
+              status: asset.status,
             }}
           />
         </aside>

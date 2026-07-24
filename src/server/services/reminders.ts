@@ -1,5 +1,5 @@
 import { prisma } from "../db";
-import { hasPermission } from "../rbac";
+import { hasPermission, normalizePermissions } from "../rbac";
 
 // Scans every tenant's active government approvals and notifies the liaison team about documents that
 // have expired or will expire within `withinDays`. Debounced by `lastReminderAt` so the same document
@@ -25,8 +25,8 @@ export async function sendExpiryReminders(opts?: { withinDays?: number; cooldown
   const recipientsByTenant = new Map<string, { id: string }[]>();
   async function recipients(tenantId: string) {
     if (!recipientsByTenant.has(tenantId)) {
-      const users = await prisma.user.findMany({ where: { tenantId, status: "ACTIVE" }, select: { id: true, role: true } });
-      recipientsByTenant.set(tenantId, users.filter((u) => hasPermission(u.role, "liaison.view")).map((u) => ({ id: u.id })));
+      const users = await prisma.user.findMany({ where: { tenantId, status: "ACTIVE" }, select: { id: true, role: true, customRole: { select: { permissions: true } } } });
+      recipientsByTenant.set(tenantId, users.filter((u) => hasPermission(u.role, "liaison.view", normalizePermissions(u.customRole?.permissions))).map((u) => ({ id: u.id })));
     }
     return recipientsByTenant.get(tenantId)!;
   }

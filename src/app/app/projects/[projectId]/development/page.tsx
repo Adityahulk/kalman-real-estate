@@ -1,15 +1,19 @@
+import { notFound } from "next/navigation";
 import { BackButton } from "@/components/back-button";
 import { DevelopmentTaskDashboard } from "@/app/app/development/development-actions";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
+import { hasPermission } from "@/server/rbac";
+import { listEngineeringAssignees } from "@/server/services/development";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProjectDevelopmentPage({ params }: { params: { projectId: string } }) {
   const session = await getSessionUser();
   if (!session) return null;
+  if (!hasPermission(session.role, "development.view", session.permissions)) notFound();
 
-  const [project, assets, configuredCategories, taskPlanFiles] = await Promise.all([
+  const [project, assets, configuredCategories, taskFiles, users] = await Promise.all([
     prisma.project.findFirstOrThrow({
       where: { id: params.projectId, tenantId: session.tenantId },
     }),
@@ -26,14 +30,16 @@ export default async function ProjectDevelopmentPage({ params }: { params: { pro
       where: {
         tenantId: session.tenantId,
         ownerType: "SiteAsset",
-        categoryKey: "development-plan",
+        categoryKey: { in: ["development-plan", "development-drawing", "development-boq", "development-estimate"] },
         deletedAt: null,
       },
       orderBy: { createdAt: "desc" },
-      select: { id: true, ownerId: true, fileName: true, mimeType: true },
+      select: { id: true, ownerId: true, fileName: true, mimeType: true, categoryKey: true },
     }),
+    listEngineeringAssignees(session.tenantId),
   ]);
 
+  const userMap = new Map(users.map((user) => [user.id, user]));
   const tasks = assets.map((asset) => ({
     id: asset.id,
     name: asset.name,
@@ -43,13 +49,15 @@ export default async function ProjectDevelopmentPage({ params }: { params: { pro
     deadline: asset.deadline?.toISOString() ?? null,
     status: asset.status,
     progressPct: asset.progressPct,
-    assignedTo: asset.contractorId ?? null,
-    planFiles: taskPlanFiles
+    assignedToId: asset.assignedToId ?? null,
+    assignedTo: (asset.assignedToId ? userMap.get(asset.assignedToId)?.name : null) ?? asset.contractorId ?? null,
+    files: taskFiles
       .filter((file) => file.ownerId === asset.id)
       .map((file) => ({
         id: file.id,
         fileName: file.fileName,
         mimeType: file.mimeType,
+        categoryKey: file.categoryKey,
         taskId: asset.id,
         taskName: asset.name,
       })),
@@ -72,6 +80,9 @@ export default async function ProjectDevelopmentPage({ params }: { params: { pro
         projectLocation={project.state ?? project.city}
         categories={categories}
         tasks={tasks}
+        assignees={users}
+        canManage={hasPermission(session.role, "development.manage", session.permissions)}
+        canAssign={hasPermission(session.role, "engineering.assign", session.permissions)}
       />
     </main>
   );

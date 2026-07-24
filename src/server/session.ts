@@ -1,6 +1,8 @@
 import { cookies } from "next/headers";
 import { jwtVerify, SignJWT } from "jose";
 import { Role } from "@prisma/client";
+import { prisma } from "./db";
+import { normalizePermissions, Permission } from "./rbac";
 
 const secret = new TextEncoder().encode(process.env.JWT_SECRET ?? "development-secret-change-me");
 
@@ -9,6 +11,7 @@ export type SessionUser = {
   tenantId: string;
   role: Role;
   email: string;
+  permissions?: Permission[];
 };
 
 export async function verifySessionToken(token?: string): Promise<SessionUser | null> {
@@ -29,7 +32,27 @@ export async function verifySessionToken(token?: string): Promise<SessionUser | 
 }
 
 export async function getSessionUser() {
-  return verifySessionToken(cookies().get("kalman_session")?.value);
+  const tokenUser = await verifySessionToken(cookies().get("kalman_session")?.value);
+  if (!tokenUser) return null;
+  const user = await prisma.user.findUnique({
+    where: { id: tokenUser.id },
+    select: {
+      id: true,
+      tenantId: true,
+      email: true,
+      role: true,
+      status: true,
+      customRole: { select: { permissions: true } },
+    },
+  });
+  if (!user || user.status !== "ACTIVE") return null;
+  return {
+    id: user.id,
+    tenantId: user.tenantId ?? "__unselected__",
+    role: user.role,
+    email: user.email,
+    permissions: normalizePermissions(user.customRole?.permissions),
+  };
 }
 
 export async function createSessionToken(user: SessionUser) {

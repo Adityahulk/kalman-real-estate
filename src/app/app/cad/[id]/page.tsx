@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export default async function CadEntryPage({ params }: { params: { id: string } }) {
   const session = await getSessionUser();
-  if (!session || !hasPermission(session.role, "cad.review")) notFound();
+  if (!session || !hasPermission(session.role, "cad.review", session.permissions)) notFound();
   const cadFile = await prisma.cadFile.findFirst({
     where: { id: params.id, tenantId: session.tenantId },
     select: { format: true },
