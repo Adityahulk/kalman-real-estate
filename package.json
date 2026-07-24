@@ -28,7 +28,6 @@
     "desktop:dist": "npm --prefix desktop run dist"
   },
   "dependencies": {
-    "@aparajita/capacitor-biometric-auth": "^10.0.0",
     "@aws-sdk/client-s3": "^3.699.0",
     "@aws-sdk/s3-request-presigner": "^3.699.0",
     "@capacitor/android": "^6.2.1",

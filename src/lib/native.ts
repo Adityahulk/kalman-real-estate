@@ -89,20 +89,12 @@ export async function registerForPush(): Promise<void> {
   }
 }
 
-// Optional biometric gate on cold start when a session token is present.
+// Optional biometric gate hook. Intentionally a no-op: the only Capacitor biometric plugin
+// (@aparajita/capacitor-biometric-auth) drags in a BouncyCastle build that breaks the Android
+// Gradle build, so it is not bundled. The signature is kept so a future, build-compatible
+// biometric plugin can be wired in here without touching callers. Returns true = proceed.
 export async function biometricUnlock(): Promise<boolean> {
-  if (!isNative()) return true;
-  try {
-    const { BiometricAuth } = await import("@aparajita/capacitor-biometric-auth");
-    await BiometricAuth.authenticate({
-      reason: "Unlock WIDESTATE OS",
-      cancelTitle: "Cancel",
-      allowDeviceCredential: true,
-    });
-    return true;
-  } catch {
-    return false;
-  }
+  return true;
 }
 
 // One-time native shell setup: status bar + splash. Safe/no-op on web.
