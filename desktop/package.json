@@ -4,7 +4,11 @@
   "private": true,
   "description": "WIDESTATE OS desktop shell (Electron)",
   "main": "main.js",
-  "author": "WIDESTATE OS",
+  "author": {
+    "name": "WIDESTATE OS",
+    "email": "support@kalman.estate"
+  },
+  "homepage": "https://kalman.estate",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder",
@@ -46,7 +50,8 @@
     "linux": {
       "target": ["AppImage", "deb"],
       "category": "Office",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "maintainer": "WIDESTATE OS <support@kalman.estate>"
     }
   }
 }
