@@ -9,7 +9,7 @@ import { generatedDocumentStorageKey, putGeneratedObject } from "../storage";
 import { createGeneratedFileAsset } from "./files";
 import { buildGeneratedDocumentPdf, buildGeneratedDocumentPdfFromHtml } from "./document-pdf";
 import { createNotification, notifyRoleWithPermission } from "./notifications";
-import { defaultLetterBody, ensureProjectLetterTemplates } from "./document-templates";
+import { defaultLetterBody, ensureProjectLetterTemplates, jointAllotmentTemplateBody } from "./document-templates";
 
 // Statuses in which a letter still counts as "accepted" for plot-ownership purposes. Approving a
 // letter reconciles the plot to its new owner; the letter then moves on to signature (SENT_FOR_SIGNATURE
@@ -143,7 +143,13 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
     ?? await prisma.documentTemplate.findFirst({ where: { tenantId: context.tenantId, projectId: snapshot.projectId, type: input.type, active: true }, orderBy: { createdAt: "desc" } })
     ?? templateByProject;
   const hasRealBody = template?.body && template.body.length > 100 && !template.body.includes("data-pdf-layout-template") && !template.body.includes("data-exact-pdf-draft");
-  const templateBody = hasRealBody ? template.body : defaultLetterBody(input.type);
+  // Joint/partnership allotments use the two-allottee variant of the letter. The variant is an
+  // explicit request from the draft form (data.templateVariant) and never changes the default.
+  const wantsJointVariant =
+    input.type === "allotment_letter" && !input.templateId && input.data.templateVariant === "joint";
+  const templateBody = wantsJointVariant
+    ? await jointAllotmentTemplateBody(context.tenantId, snapshot.projectId)
+    : hasRealBody ? template.body : defaultLetterBody(input.type);
   const { html, missingVariables, usedFileVariables } = renderTemplate(templateBody, snapshot.variables, snapshot.fileVariables);
   const reconciledHtml = reconcileStructuredBlocks(html, snapshot.variables);
   const draftHtml = usedFileVariables ? reconciledHtml : appendSupportingDocumentPages(reconciledHtml, snapshot.supportingDocumentPages);
@@ -633,6 +639,47 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
   const newPlotCode = stringFromKyc(extraPlot, ["newCode"]) || plot.code;
   const paymentTableRows = buildPaymentTableRows(payments);
   const allottee = jsonRecord(extraDetails.allottee);
+  // Joint (partnership) allotments: the second allottee is captured on the allotment form and
+  // stored alongside the other letter inputs in extraDetails. Accept a couple of key spellings so
+  // older records keep working.
+  const secondAllottee = jsonRecord(
+    extraDetails.secondAllottee ?? extraDetails.jointAllottee ?? extraDetails.coAllottee,
+  );
+  const secondName = stringFromKyc(secondAllottee, ["name"]);
+  const secondRelationPrefix = stringFromKyc(secondAllottee, ["relationPrefix", "relation"]) || "s/o";
+  const secondFatherName = stringFromKyc(secondAllottee, ["fatherName", "father", "relationName"]);
+  const secondNameWithRelation = [secondName, secondFatherName ? `${secondRelationPrefix} ${secondFatherName}` : ""]
+    .filter(Boolean)
+    .join(" ");
+  const secondAddressRaw = stringFromKyc(secondAllottee, ["address"]);
+  const secondAddress = normalizeAddressInline(secondAddressRaw);
+  const hasSecondAllottee = Boolean(secondName);
+  // Share split: explicit values win; a joint allotment defaults to 50/50, a single one to 100%.
+  const ownerShare = stringFromKyc(extraDetails, ["ownerShare", "firstAllotteeShare"])
+    || (hasSecondAllottee ? "50%" : ownership?.sharePct ? `${ownership.sharePct}%` : "100%");
+  const secondShare = stringFromKyc(secondAllottee, ["share", "sharePct"]) || (hasSecondAllottee ? "50%" : "");
+  // Transfer letters: the seller (transferor) is the most recent prior ownership held by a
+  // different owner, and the original allotment letter is the latest issued allotment document
+  // for this plot — both are auto-filled so the transfer set matches the signed reference.
+  const sellerRecord = plot.ownershipRecords.find(
+    (record) => record.ownerId && ownership?.ownerId && record.ownerId !== ownership.ownerId,
+  );
+  const sellerKyc = jsonRecord(sellerRecord?.owner?.kyc);
+  const sellerFatherName = stringFromKyc(sellerKyc, ["fatherName", "father", "relationName"]);
+  const sellerNameWithRelation = [sellerRecord?.owner?.name ?? "", sellerFatherName ? `s/o Sh. ${sellerFatherName}` : ""]
+    .filter(Boolean)
+    .join(" ");
+  const originalAllotmentDoc = await prisma.generatedDocument.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      recordId: plot.id,
+      type: "allotment_letter",
+      status: { notIn: [DocumentStatus.REJECTED] },
+      number: { not: null },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { number: true, finalizedAt: true, createdAt: true },
+  });
   const additionalFields = Array.isArray(extraDetails.additionalFields) ? extraDetails.additionalFields.map(jsonRecord) : [];
   const customLetterFields = jsonRecord(extraDetails.customLetterFields);
   const customLetterFiles = jsonRecord(extraDetails.customLetterFiles);
@@ -730,6 +777,29 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "owner.addressUpper": ownerAddress.toUpperCase(),
     "owner.aadhaarNo": aadhaarNo,
     "owner.panNo": panNo,
+    "owner.share": ownerShare,
+    // Second (joint) allottee — blank for single allotments, filled from the allotment form's
+    // "Joint allottee" section for partnership allotments.
+    "owner2.name": secondName,
+    "owner2.nameUpper": secondName.toUpperCase(),
+    "owner2.nameWithRelation": secondNameWithRelation,
+    "owner2.nameWithRelationUpper": secondNameWithRelation.toUpperCase(),
+    "owner2.fatherName": secondFatherName,
+    "owner2.address": secondAddress,
+    "owner2.addressUpper": secondAddress.toUpperCase(),
+    "owner2.addressMultilineHtml": addressMultilineHtml(secondAddressRaw),
+    "owner2.aadhaarNo": stringFromKyc(secondAllottee, ["aadhaarNo", "aadharNo", "aadhaar", "aadhar"]),
+    "owner2.panNo": stringFromKyc(secondAllottee, ["panNo", "pan"]),
+    "owner2.mobileNo": stringFromKyc(secondAllottee, ["mobileNo", "phone", "mobile"]),
+    "owner2.share": secondShare,
+    // Transfer letters: transferor + the original allotment letter reference.
+    "seller.name": sellerRecord?.owner?.name ?? "",
+    "seller.nameWithRelation": sellerNameWithRelation,
+    "seller.address": normalizeAddressInline(sellerRecord?.owner?.address ?? ""),
+    "original.allotmentNumber": originalAllotmentDoc?.number ?? "",
+    "original.allotmentDate": originalAllotmentDoc
+      ? formatDateDots(originalAllotmentDoc.finalizedAt ?? originalAllotmentDoc.createdAt)
+      : "",
     "ownership.amountInr": ownership?.amountInr?.toString() ?? "",
     "ownership.effectiveDate": ownership?.effectiveAt.toLocaleDateString("en-IN") ?? "",
     "ownership.effectiveDateDots": formatDateDots(effectiveAt),

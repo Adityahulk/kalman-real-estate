@@ -196,6 +196,86 @@ export function ambeyAllotmentTemplate() {
 </div>`;
 }
 
+// Joint / partnership allotment letter — exact port of the "Allotment Ambey Homes Double"
+// reference PDF: two allottees throughout (To block, two-column details table with a Share row,
+// possession/declaration naming both, two photograph boxes, a second buyer block in the
+// agreement, and the (2) NAME line in the closing). The agreement clauses are identical to the
+// single-allottee letter. Second-allottee values come from the owner2.* snapshot variables
+// (extraDetails.secondAllottee on the allotment record).
+export function ambeyAllotmentJointTemplate() {
+  const single = ambeyAllotmentTemplate();
+
+  // Deriving from the single template keeps the (identical) agreement clauses in lock-step, but a
+  // plain .replace silently no-ops if the single template drifts — throw instead, so a drift is a
+  // loud build/test failure rather than a silently-wrong legal letter.
+  function mustReplace(haystack: string, needle: string, replacement: string) {
+    if (!haystack.includes(needle)) {
+      throw new Error(`ambeyAllotmentJointTemplate: single-template anchor missing: ${needle.slice(0, 60)}…`);
+    }
+    return haystack.replace(needle, replacement);
+  }
+
+  // Page 1: recipient block names both allottees (the reference's page 1 lists names + addresses
+  // only, joined by "and"); the details table gains a second value column and a Share row.
+  let joint = mustReplace(single,
+    `<p class="recipient-block">To<br><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.addressMultilineHtml}}</u><br><u>Aadhaar No. {{owner.aadhaarNo}}</u><br><u>Pan No. {{owner.panNo}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>`,
+    `<p class="recipient-block">To<br><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.addressMultilineHtml}}</u><br>and<br><u>{{owner2.nameWithRelation}}</u><br><u>resident of {{owner2.addressMultilineHtml}}</u></p>`,
+  );
+  joint = mustReplace(joint,
+    `<table>
+<tr><th>Name of Allottee(s)</th><td><strong>{{owner.nameWithRelationUpper}}</strong></td></tr>
+<tr><th>Address of Allotee</th><td><strong>{{owner.addressUpper}}</strong></td></tr>
+<tr><th>Unit No.</th><td><strong>{{plot.code}}</strong></td></tr>
+<tr><th>Name of Project</th><td><strong>{{project.nameUpper}}</strong></td></tr>
+<tr><th>Total Sale Price</th><td><strong>{{plot.priceInrFormatted}}/-*</strong></td></tr>
+</table>`,
+    `<table>
+<tr><th>Name of Allottee(s)</th><td><strong>{{owner.nameWithRelationUpper}}</strong></td><td><strong>{{owner2.nameWithRelationUpper}}</strong></td></tr>
+<tr><th>Address of Allottee(s)</th><td><strong>{{owner.addressUpper}}</strong></td><td><strong>{{owner2.addressUpper}}</strong></td></tr>
+<tr><th>Unit No.</th><td><strong>{{plot.code}}</strong></td><td><strong>{{plot.code}}</strong></td></tr>
+<tr><th>Share</th><td><strong>{{owner.share}}</strong></td><td><strong>{{owner2.share}}</strong></td></tr>
+<tr><th>Name of Project</th><td><strong>{{project.nameUpper}}</strong></td><td><strong>{{project.nameUpper}}</strong></td></tr>
+<tr><th>Total Sale Price</th><td><strong>{{plot.priceInrFormatted}}/-*</strong></td><td><strong>{{plot.priceInrFormatted}}/-*</strong></td></tr>
+</table>`,
+  );
+
+  // Page 2: possession is handed over to both allottees.
+  joint = mustReplace(joint,
+    `to <u><strong>{{owner.nameWithRelation}} resident of {{owner.address}}</strong></u> as per the following details:-`,
+    `to <u><strong>{{owner.nameWithRelation}} resident of {{owner.address}}</strong></u> and <u><strong>{{owner2.nameWithRelation}} resident of {{owner2.address}}</strong></u> as per the following details:-`,
+  );
+
+  // Page 3: both allottees declare; the reference carries two photograph boxes.
+  joint = mustReplace(joint,
+    `<p class="declaration-intro">I, <u><strong>{{owner.nameWithRelation}} resident of {{owner.address}}</strong></u>, allottee of Plot No.`,
+    `<p class="declaration-intro">I, <u><strong>{{owner.nameWithRelation}} resident of {{owner.address}}</strong></u> and <u><strong>{{owner2.nameWithRelation}} resident of {{owner2.address}}</strong></u>, allottee of Plot No.`,
+  );
+  joint = mustReplace(joint,
+    `<div class="photo-box bottom-left framed-photo">Please affix<br>your<br>photograph<br>here</div>`,
+    `<div class="photo-box bottom-left framed-photo">Please affix<br>your<br>photograph<br>here</div>
+<div class="photo-box right framed-photo">Please affix<br>your<br>photograph<br>here</div>`,
+  );
+
+  // Agreement: a second buyer block joined by "and", and a second photograph box.
+  joint = mustReplace(joint,
+    `<div class="photo-box right-mid framed-photo">Please affix<br>photograph of<br>allottee /<br>purchaser</div>
+<p class="buyer-block"><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.addressMultilineHtml}}</u><br><u>Aadhaar No. {{owner.aadhaarNo}}</u><br><u>Pan No. {{owner.panNo}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>`,
+    `<div class="photo-box right-mid framed-photo">Please affix<br>photograph of<br>allottee /<br>purchaser</div>
+<p class="buyer-block"><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.addressMultilineHtml}}</u><br><u>Aadhaar No. {{owner.aadhaarNo}}</u><br><u>Pan No. {{owner.panNo}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>
+<p class="center">and</p>
+<div class="photo-box right-mid framed-photo">Please affix<br>photograph of<br>allottee /<br>purchaser</div>
+<p class="buyer-block"><u>{{owner2.nameWithRelation}}</u><br><u>Resident of {{owner2.addressMultilineHtml}}</u><br><u>Aadhaar No. {{owner2.aadhaarNo}}</u><br><u>Pan No. {{owner2.panNo}}</u><br><u>Mobile No. {{owner2.mobileNo}}</u></p>`,
+  );
+
+  // Closing: the second joint allottee signs on the (2) NAME line.
+  joint = mustReplace(joint,
+    `<tr><td>(2) NAME: ________________________</td><td>SIGNATURE</td></tr>`,
+    `<tr><td>(2) NAME: {{owner2.nameWithRelation}}</td><td>SIGNATURE</td></tr>`,
+  );
+
+  return joint.replace('<div data-template="ambey-allotment">', '<div data-template="ambey-allotment" data-template-variant="joint">');
+}
+
 export function transferLetterTemplate() {
   return `<div data-letter-template="transfer-letter">
 <section data-letter-page="1" data-top="760">
@@ -203,7 +283,7 @@ export function transferLetterTemplate() {
 <p class="transfer-to-block">To,<br><span class="transfer-to-firm"><strong>M/S. {{firm.nameUpper}},</strong></span><br><span class="transfer-to-firm"><strong>{{project.name}}, {{project.fullAddress}}</strong></span></p>
 <p class="transfer-subject"><span>Subject&nbsp;&nbsp;&nbsp;:</span><span>Transfer of Residential Plot No. <strong>{{plot.code}}</strong> situated in <strong>{{project.name}}</strong> situated at <strong>{{project.fullAddress}}</strong>.</span></p>
 <p>Respected Sir,</p>
-<p>I, <strong>------------ s/o Sh. -----------</strong> has been allotted residential Plot No. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqyd}}</strong> Square Yards at <strong>{{project.name}}</strong> of <strong>M/s. {{firm.name}}, {{firm.address}}</strong> vide allotment letter No. <strong>-----------------</strong> dated <strong>----------</strong>. I/we seek your permission to transfer the above stated plot in favor of:</p>
+<p>I, <strong>{{seller.nameWithRelation}}</strong> has been allotted residential Plot No. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqyd}}</strong> Square Yards at <strong>{{project.name}}</strong> of <strong>M/s. {{firm.name}}, {{firm.address}}</strong> vide allotment letter No. <strong>{{original.allotmentNumber}}</strong> dated <strong>{{original.allotmentDate}}</strong>. I/we seek your permission to transfer the above stated plot in favor of:</p>
 <p class="center transfer-party"><u><strong>{{owner.nameWithRelation}}</strong></u><br>{{owner.addressMultilineHtml}}<br>PAN No. {{owner.panNo}}<br>Aadhaar No. {{owner.aadhaarNo}}</p>
 <p>The conveyance deed in respect of the plot has been / not yet been executed. The said plot is free from all encumbrances like mortgages, gift or transfer in any manner to any person(s)/body.</p>
 <p>I/we hereby declare that nothing has been concealed in the above information and the residential plot is vacant. If in future, it is found that the transfer has been affected on the basis of false/wrong information provided in the application the transfer shall be deemed to be null and void and all consequent losses i.e. legal or financial shall be born by us. In case company suffers any loss on account of this transfer or as a consequence of this transfer myself/ourselves, legal heirs and successors of myself/ourselves shall be liable to make good all the losses or expenses sustained/suffered by the company or its employees. In case any legal heirs or successor or other person makes any claim regarding this residential plot, the litigation of the same shall be defended by me/us and the loss/expenses sustained/suffered by the company will also be made good by myself/ourselves.</p>
@@ -217,15 +297,15 @@ export function transferLetterTemplate() {
 </table>
 <p>Signature of the 1st Allotee _________________________________________________</p>
 <p>Thanking You,<br>Yours Faithfully</p>
-<p><strong>Submitted by<br>(------------------------)</strong></p>
+<p><strong>Submitted by<br>({{seller.nameWithRelation}})</strong></p>
 </section>
 
 <section data-letter-page="3" data-top="760">
 <p class="center">(Stamp Duty Rs. {{stamp.amount}}/- having E-Stamp No. {{stamp.estampNo}} dated {{stamp.date}})</p>
 <p class="transfer-heading">AFFIDAVITE</p>
-<p>I, <strong>------------- s/o Sh. ----------------</strong> do solemnly declare and affirm as under: -</p>
+<p>I, <strong>{{seller.nameWithRelation}}</strong> do solemnly declare and affirm as under: -</p>
 <div class="num-list">
-<p class="num-item"><span>1.</span><span>That I am the first allotee of residential plot no. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqyd}}</strong> Square Yards situated at <strong>{{project.name}}</strong> vide allotment letter no. <strong>--------------</strong> dated <strong>----------</strong>.</span></p>
+<p class="num-item"><span>1.</span><span>That I am the first allotee of residential plot no. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqyd}}</strong> Square Yards situated at <strong>{{project.name}}</strong> vide allotment letter no. <strong>{{original.allotmentNumber}}</strong> dated <strong>{{original.allotmentDate}}</strong>.</span></p>
 <p class="num-item"><span>2.</span><span>That I have sold the above plot to <strong>{{owner.nameWithRelation}}</strong>.</span></p>
 <p class="num-item"><span>3.</span><span>That neither I or our legal heirs or successors shall not be concerned with this plot after this transfer.</span></p>
 <p class="num-item"><span>4.</span><span>That I shall be liable to make good any loss or damages sustained by company due to transfer made on false information provided by us.</span></p>
@@ -234,7 +314,7 @@ export function transferLetterTemplate() {
 </div>
 <p class="deponent">Deponent</p>
 <p class="transfer-heading">VERIFICATION</p>
-<p>I, <strong>---------------- s/o Sh. ------------</strong> verify that the contents of the above affidavit are true and correct to the best of my knowledge and nothing has been concealed therein.</p>
+<p>I, <strong>{{seller.nameWithRelation}}</strong> verify that the contents of the above affidavit are true and correct to the best of my knowledge and nothing has been concealed therein.</p>
 <p class="deponent">Deponent</p>
 </section>
 
@@ -243,10 +323,10 @@ export function transferLetterTemplate() {
 <p class="transfer-heading">AFFIDAVITE</p>
 <p>I, <strong>{{owner.nameWithRelation}}</strong> does hereby solemnly declare and affirm as under:</p>
 <div class="num-list">
-<p class="num-item"><span>1.</span><span>That I have purchased plot no. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqyd}}</strong> Sq. Yds. situated at <strong>{{project.nameUpper}}</strong> from <strong>----------- s/o Sh. --------------</strong>.</span></p>
+<p class="num-item"><span>1.</span><span>That I have purchased plot no. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqyd}}</strong> Sq. Yds. situated at <strong>{{project.nameUpper}}</strong> from <strong>{{seller.nameWithRelation}}</strong>.</span></p>
 <p class="num-item"><span>2.</span><span>That I accept the allotment of residential plot no. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqyd}}</strong> Sq. Yds. situated at <strong>{{project.nameUpper}}</strong> of the firm.</span></p>
 <p class="num-item"><span>3.</span><span>That I further undertake to make payment of all the outstanding dues i.e. taxes/cess if any in respect of the above plot.</span></p>
-<p class="num-item"><span>4.</span><span>That I accept all the terms and condition relating to the allotment of residential plot, of the company as provided in the allotment letter no. <strong>-------</strong> dated <strong>---------</strong>.</span></p>
+<p class="num-item"><span>4.</span><span>That I accept all the terms and condition relating to the allotment of residential plot, of the company as provided in the allotment letter no. <strong>{{original.allotmentNumber}}</strong> dated <strong>{{original.allotmentDate}}</strong>.</span></p>
 <p class="num-item"><span>5.</span><span>That I undertake to abide all the terms and conditions of RERA / PUDA / <span class="red-text">Municipal Corporation, {{project.city}}</span>.</span></p>
 </div>
 <p class="deponent">Deponent</p>
@@ -270,7 +350,7 @@ export function transferLetterTemplate() {
 <tr><td>NORTH SIDE</td><td>:</td><td>{{plot.northSize}} {{plot.northBoundary}}</td></tr>
 <tr><td>SOUTH SIDE</td><td>:</td><td>{{plot.southSize}} {{plot.southBoundary}}</td></tr>
 </table>
-<p>The above transfer has been made subject to the condition that you will be \`Mutatis Mutandis' bound to abide by the terms and conditions of original allotment letter no. <strong>-------------</strong> dated <strong>----------</strong>.</p>
+<p>The above transfer has been made subject to the condition that you will be \`Mutatis Mutandis' bound to abide by the terms and conditions of original allotment letter no. <strong>{{original.allotmentNumber}}</strong> dated <strong>{{original.allotmentDate}}</strong>.</p>
 <p class="signoff-firm">FOR {{firm.nameUpper}}</p>
 <p class="signoff-partner">(PARTNER)</p>
 </section>

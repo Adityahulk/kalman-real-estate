@@ -241,6 +241,17 @@ export function ProjectAllotmentFlow({
   const [name, setName] = useState(initialData?.name ?? "");
   const [address, setAddress] = useState(initialData?.address ?? "");
   const [phone, setPhone] = useState(initialData?.phone ?? "");
+  // Joint (partnership) allotment: optional second allottee. When a name is entered the letter
+  // draft switches to the two-allottee template and these values fill the owner2.* fields.
+  const [jointAllottee, setJointAllottee] = useState({
+    name: "",
+    fatherName: "",
+    address: "",
+    aadhaarNo: "",
+    panNo: "",
+    mobileNo: "",
+    share: "",
+  });
   const [allotteeDocuments, setAllotteeDocuments] = useState<AllotteeDocumentEntry[]>(
     initialData?.allotteeDocuments?.length ? initialData.allotteeDocuments : [{ kind: "Aadhaar", number: "", files: [], uploadedFiles: [] }],
   );
@@ -506,6 +517,17 @@ export function ProjectAllotmentFlow({
               phone: phone || undefined,
               documents: mergedAllotteeDocuments,
             },
+            secondAllottee: jointAllottee.name
+              ? {
+                  name: jointAllottee.name,
+                  fatherName: jointAllottee.fatherName || undefined,
+                  address: jointAllottee.address || undefined,
+                  aadhaarNo: jointAllottee.aadhaarNo || undefined,
+                  panNo: jointAllottee.panNo || undefined,
+                  mobileNo: jointAllottee.mobileNo || undefined,
+                  share: jointAllottee.share || undefined,
+                }
+              : undefined,
             firm: {
               name: firm.name,
               phone: firm.contactPhone || undefined,
@@ -557,6 +579,8 @@ export function ProjectAllotmentFlow({
             documentNumber: allotmentNumber || undefined,
             customLetterFields: letterFields,
             customLetterFiles: mergedManualLetterFiles,
+            // A filled joint-allottee section switches the draft to the two-allottee template.
+            ...(jointAllottee.name ? { templateVariant: "joint" } : {}),
           },
         }),
       });
@@ -663,6 +687,21 @@ export function ProjectAllotmentFlow({
           ))}
         </div>
         <button type="button" className="btn-outline mt-3 w-fit" onClick={() => setAllotteeDocuments((items) => [...items, { kind: "Aadhaar", number: "", files: [] }])}><Plus size={16} />Add document</button>
+        <div className="mt-5 rounded-lg border border-slate-200 p-4">
+          <div className="mb-3">
+            <div className="text-sm font-semibold text-navy-950">Joint allottee <span className="font-normal text-slate-400">(optional — partnership / two-allottee allotment)</span></div>
+            <div className="mt-1 text-xs text-slate-500">Fill this only for a joint allotment. The letter will use the two-allottee format with both names, addresses, and the share split.</div>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label><span className="label">Name</span><input className="input" value={jointAllottee.name} onChange={(event) => setJointAllottee((current) => ({ ...current, name: event.target.value }))} /></label>
+            <label><span className="label">Father&#39;s / spouse&#39;s name</span><input className="input" value={jointAllottee.fatherName} onChange={(event) => setJointAllottee((current) => ({ ...current, fatherName: event.target.value }))} /></label>
+            <label className="md:col-span-2"><span className="label">Address</span><textarea className="input min-h-20" value={jointAllottee.address} onChange={(event) => setJointAllottee((current) => ({ ...current, address: event.target.value }))} /></label>
+            <label><span className="label">Aadhaar No.</span><input className="input" value={jointAllottee.aadhaarNo} onChange={(event) => setJointAllottee((current) => ({ ...current, aadhaarNo: event.target.value }))} /></label>
+            <label><span className="label">PAN No.</span><input className="input" value={jointAllottee.panNo} onChange={(event) => setJointAllottee((current) => ({ ...current, panNo: event.target.value }))} /></label>
+            <label><span className="label">Mobile No.</span><input className="input" value={jointAllottee.mobileNo} onChange={(event) => setJointAllottee((current) => ({ ...current, mobileNo: event.target.value }))} /></label>
+            <label><span className="label">Share <span className="font-normal text-slate-400">(e.g. 50%)</span></span><input className="input" value={jointAllottee.share} onChange={(event) => setJointAllottee((current) => ({ ...current, share: event.target.value }))} /></label>
+          </div>
+        </div>
       </FormSection>
 
       <FormSection number="3" title="Firm details">
@@ -949,7 +988,7 @@ export function LetterDraftStartForm({
   defaultType?: "allotment_letter" | "transfer_letter" | "registry_status_letter";
 }) {
   const router = useRouter();
-  const [type, setType] = useState(defaultType);
+  const [choice, setChoice] = useState<string>(defaultType);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -957,10 +996,19 @@ export function LetterDraftStartForm({
     event.preventDefault();
     setLoading(true);
     setMessage("");
+    // "allotment_letter_joint" is a UI-level variant of the allotment letter: same document type,
+    // but the draft is built from the two-allottee (partnership) template.
+    const isJoint = choice === "allotment_letter_joint";
+    const type = isJoint ? "allotment_letter" : choice;
     const response = await fetch("/api/v1/documents/drafts", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ type, recordType: "Plot", recordId: plotId }),
+      body: JSON.stringify({
+        type,
+        recordType: "Plot",
+        recordId: plotId,
+        ...(isJoint ? { data: { templateVariant: "joint" } } : {}),
+      }),
     });
     const body = await response.json();
     setLoading(false);
@@ -975,8 +1023,9 @@ export function LetterDraftStartForm({
     <form onSubmit={submit} className="grid gap-4">
       <label>
         <span className="label">Letter type</span>
-        <select className="input" value={type} onChange={(event) => setType(event.target.value as typeof type)}>
+        <select className="input" value={choice} onChange={(event) => setChoice(event.target.value)}>
           <option value="allotment_letter">Allotment letter</option>
+          <option value="allotment_letter_joint">Allotment letter — Joint / Partnership (two allottees)</option>
           <option value="transfer_letter">Transfer letter</option>
           <option value="registry_status_letter">Registry status letter</option>
         </select>

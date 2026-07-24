@@ -3,7 +3,7 @@ import { z } from "zod";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
-import { ambeyAllotmentTemplate, transferLetterTemplate, registryStatusLetterTemplate } from "./letter-templates";
+import { ambeyAllotmentTemplate, ambeyAllotmentJointTemplate, transferLetterTemplate, registryStatusLetterTemplate } from "./letter-templates";
 import { letterSystemFields } from "@/lib/letter-system-fields";
 
 export const saveProjectLetterTemplateSchema = z.object({
@@ -19,7 +19,48 @@ export function defaultLetterBody(type: string): string {
   return ambeyAllotmentTemplate();
 }
 
+// Reserved name of the seeded joint/partnership allotment variant. It is stored INACTIVE so the
+// one-active-template-per-type invariant (and therefore the default template pick) is untouched —
+// drafts opt into it explicitly via data.templateVariant === "joint".
+export const JOINT_ALLOTMENT_TEMPLATE_NAME = "Allotment Letter Joint default";
+
+// Resolve the letter body for a joint-variant allotment draft: the project's (possibly
+// user-customised) joint template if one exists, else the code default.
+export async function jointAllotmentTemplateBody(tenantId: string, projectId: string): Promise<string> {
+  const stored = await prisma.documentTemplate.findFirst({
+    where: { tenantId, projectId, type: "allotment_letter", name: JOINT_ALLOTMENT_TEMPLATE_NAME },
+    orderBy: { createdAt: "desc" },
+    select: { body: true },
+  });
+  return stored?.body && stored.body.length > 100 ? stored.body : ambeyAllotmentJointTemplate();
+}
+
 export async function ensureProjectLetterTemplates(tenantId: string, projectId: string) {
+  // Seed (and self-heal) the inactive joint allotment variant alongside the per-type defaults.
+  const joint = await prisma.documentTemplate.findFirst({
+    where: { tenantId, projectId, type: "allotment_letter", name: JOINT_ALLOTMENT_TEMPLATE_NAME },
+    select: { id: true, body: true },
+  });
+  const jointBody = ambeyAllotmentJointTemplate();
+  if (!joint) {
+    await prisma.documentTemplate.create({
+      data: {
+        tenantId,
+        projectId,
+        name: JOINT_ALLOTMENT_TEMPLATE_NAME,
+        type: "allotment_letter",
+        body: jointBody,
+        variables: { fields: [] } as Prisma.InputJsonValue,
+        active: false,
+      },
+    });
+  } else if (joint.body !== jointBody) {
+    await prisma.documentTemplate.update({
+      where: { id: joint.id },
+      data: { body: jointBody, variables: { fields: [] } as Prisma.InputJsonValue },
+    });
+  }
+
   const types = ["allotment_letter", "transfer_letter", "registry_status_letter"] as const;
   for (const type of types) {
     const systemDefaultName = `${humanizeTemplateType(type)} default`;

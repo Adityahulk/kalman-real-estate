@@ -245,5 +245,146 @@ await exerciseLetterType("registry_status_letter");
   console.log("✓ edge: invalid letter type rejected");
 }
 
+// ---------------------------------------------------------------------------
+// Joint (partnership) allotment letter — the two-allottee variant ported from the
+// "Allotment Ambey Homes Double" reference. Seeds a second allottee onto the plot's allotment
+// record, creates a joint-variant draft, and verifies both allottees + the Share split appear in
+// the draft structure and in the rendered PDF.
+{
+  console.log("\n■ allotment_letter (joint / partnership variant)");
+  const allotmentRecord = await prisma.ownershipRecord.findFirstOrThrow({
+    where: { plotId: plot.id, kind: "ALLOTMENT" },
+    orderBy: [{ createdAt: "desc" }],
+  });
+  const originalExtra = allotmentRecord.extraDetails ?? {};
+  const jointName = `Anish Kumar Garg JT${stamp}`;
+  await prisma.ownershipRecord.update({
+    where: { id: allotmentRecord.id },
+    data: {
+      extraDetails: {
+        ...originalExtra,
+        secondAllottee: {
+          name: jointName,
+          fatherName: "Surinder Kumar",
+          address: "House No. 1750, Lakhi Colony, Ward No. 16, Barnala, Punjab 148101",
+          aadhaarNo: "1111 2222 3333",
+          share: "50%",
+        },
+      },
+    },
+  });
+
+  try {
+    const created = await request("/api/v1/documents/drafts", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        type: "allotment_letter",
+        recordType: "Plot",
+        recordId: plot.id,
+        data: { templateVariant: "joint" },
+      }),
+    });
+    assert(created.response.status === 201, `joint: draft creation failed (${created.json.error ?? created.response.status})`);
+    const doc = created.json.data.document;
+    const html = doc.editableHtml ?? "";
+    assert(html.includes('data-template-variant="joint"'), "joint: draft did not use the joint template");
+    assert(html.includes(jointName), "joint: second allottee name missing from draft");
+    assert(html.includes("s/o Surinder Kumar"), "joint: second allottee relation missing from draft");
+    assert(html.includes("<th>Share</th>"), "joint: Share row missing from details table");
+    assert((html.match(/50%/g) ?? []).length >= 2, "joint: 50/50 share split missing");
+    assert(html.includes("(2) NAME:") && html.includes(`(2) NAME: ${jointName}`), "joint: second allottee missing from closing signature line");
+    assert((html.match(/Please affix/g) ?? []).length >= 4, "joint: expected two photograph boxes on declaration + agreement pages");
+    assert(!/\{\{[^}]+\}\}/.test(html), "joint: unresolved {{placeholder}} left in draft");
+    console.log("  ✓ joint draft structure matches the Double reference");
+
+    const render = await request(`/api/v1/documents/${doc.id}/render`, { method: "POST", headers: { cookie } });
+    assert(render.response.status === 200, `joint: render failed (${render.json.error ?? render.response.status})`);
+    const pdf = await pdfText(await downloadPdf(render.json.data.document.fileAssetId));
+    for (const needle of [jointName, "Share", "50%", plot.code]) {
+      assert(pdf.has(needle), `joint: "${needle}" missing from rendered PDF`);
+    }
+    console.log(`  ✓ joint PDF contains both allottees and the share split (${pdf.numPages} pages)`);
+
+    await request(`/api/v1/documents/${doc.id}`, { method: "DELETE", headers: { cookie } });
+  } finally {
+    await prisma.ownershipRecord.update({
+      where: { id: allotmentRecord.id },
+      data: { extraDetails: originalExtra },
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Transfer letter seller/original-allotment wiring — the dashes in the reference .doc are now
+// auto-filled: the transferor comes from the previous ownership record and the original allotment
+// letter number/date from the plot's latest allotment document.
+{
+  console.log("\n■ transfer_letter (seller + original allotment wiring)");
+  const sellerOwner = await prisma.owner.findFirstOrThrow({ where: { id: (await prisma.ownershipRecord.findFirstOrThrow({ where: { plotId: plot.id, kind: "ALLOTMENT" }, orderBy: [{ createdAt: "desc" }] })).ownerId ?? undefined } });
+
+  // The "original allotment letter" reference: a live allotment draft with a number.
+  const allotmentDoc = await request("/api/v1/documents/drafts", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify({ type: "allotment_letter", recordType: "Plot", recordId: plot.id }),
+  });
+  assert(allotmentDoc.response.status === 201, "transfer wiring: allotment draft creation failed");
+  const originalNumber = allotmentDoc.json.data.document.number;
+
+  // Simulate a completed sale: a TRANSFER ownership record to a new buyer.
+  const buyer = await prisma.owner.create({
+    data: {
+      tenantId: sellerOwner.tenantId,
+      type: "INDIVIDUAL",
+      name: `Transfer Buyer TB${stamp}`,
+      kyc: { fatherName: "Test Father" },
+    },
+  });
+  const transferRecord = await prisma.ownershipRecord.create({
+    data: {
+      tenantId: sellerOwner.tenantId,
+      plotId: plot.id,
+      ownerId: buyer.id,
+      kind: "TRANSFER",
+      effectiveAt: new Date(),
+      createdById: (await prisma.user.findFirstOrThrow({ where: { email: "owner@saldhaland.example" } })).id,
+    },
+  });
+  // The real transferPlot service moves currentOwner to the buyer — mirror that (owner.* in the
+  // letter is the transferee) and restore afterwards.
+  const plotBefore = await prisma.plot.findUniqueOrThrow({ where: { id: plot.id }, select: { currentOwnerId: true } });
+  await prisma.plot.update({ where: { id: plot.id }, data: { currentOwnerId: buyer.id } });
+
+  try {
+    const created = await request("/api/v1/documents/drafts", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ type: "transfer_letter", recordType: "Plot", recordId: plot.id }),
+    });
+    assert(created.response.status === 201, `transfer wiring: draft creation failed (${created.json.error ?? created.response.status})`);
+    const html = created.json.data.document.editableHtml ?? "";
+    assert(html.includes(sellerOwner.name), "transfer wiring: seller (transferor) name missing from draft");
+    assert(html.includes(originalNumber), "transfer wiring: original allotment letter number missing from draft");
+    assert(html.includes(`Transfer Buyer TB${stamp}`), "transfer wiring: buyer name missing from draft");
+    console.log("  ✓ seller, buyer, and original allotment number auto-filled");
+
+    const render = await request(`/api/v1/documents/${created.json.data.document.id}/render`, { method: "POST", headers: { cookie } });
+    assert(render.response.status === 200, `transfer wiring: render failed (${render.json.error ?? render.response.status})`);
+    const pdf = await pdfText(await downloadPdf(render.json.data.document.fileAssetId));
+    for (const needle of [sellerOwner.name, originalNumber, `Transfer Buyer TB${stamp}`]) {
+      assert(pdf.has(needle), `transfer wiring: "${needle}" missing from rendered PDF`);
+    }
+    console.log(`  ✓ transfer PDF carries seller + original allotment reference (${pdf.numPages} pages)`);
+
+    await request(`/api/v1/documents/${created.json.data.document.id}`, { method: "DELETE", headers: { cookie } });
+  } finally {
+    await request(`/api/v1/documents/${allotmentDoc.json.data.document.id}`, { method: "DELETE", headers: { cookie } });
+    await prisma.plot.update({ where: { id: plot.id }, data: { currentOwnerId: plotBefore.currentOwnerId } }).catch(() => undefined);
+    await prisma.ownershipRecord.delete({ where: { id: transferRecord.id } }).catch(() => undefined);
+    await prisma.owner.delete({ where: { id: buyer.id } }).catch(() => undefined);
+  }
+}
+
 console.log("\nAll letter pipeline checks passed.");
 await prisma.$disconnect();
