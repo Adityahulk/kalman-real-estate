@@ -200,3 +200,33 @@ jobs:
             desktop/release/*.AppImage
             desktop/release/*.deb
           if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
+  # On version tags, attach every built artifact to a GitHub Release so the APK and installers
+  # have public, shareable download links (Actions artifacts require a GitHub login; Release
+  # assets do not).
+  publish-release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [android, desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Flatten artifact tree
+        run: |
+          mkdir -p out
+          find dist -type f \( -name "*.apk" -o -name "*.aab" -o -name "*.dmg" -o -name "*.zip" -o -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" \) -exec cp {} out/ \;
+          ls -la out
+
+      - name: Create release with assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
+          fail_on_unmatched_files: false

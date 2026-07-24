@@ -350,7 +350,7 @@ const siteAsset = manualSiteAsset.json.data;
 const siteProgress = await request(`/api/v1/development/site-assets/${siteAsset.id}/progress`, {
   method: "POST",
   headers: { "content-type": "application/json", cookie },
-  body: JSON.stringify({ progressPct: 55, summary: "Smoke progress update", visibleToOwner: false }),
+  body: JSON.stringify({ progressPct: 55, areaDone: 55, summary: "Smoke progress update", visibleToOwner: false }),
 });
 assert(siteProgress.response.status === 200, "site progress update failed");
 

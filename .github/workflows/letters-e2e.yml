@@ -1,0 +1,85 @@
+name: Letters E2E
+
+# Full-stack verification of the letters pipeline (template → draft → edit → Chromium PDF) plus
+# the platform smoke suite, against a real Postgres and a production Next build. This is the
+# regression gate for "what you see in the letter editor is exactly what the downloaded PDF says".
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  letters-e2e:
+    name: letters + smoke suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: kalman
+          POSTGRES_PASSWORD: kalman
+          POSTGRES_DB: kalman_estate
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U kalman"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://kalman:kalman@localhost:5432/kalman_estate?schema=public
+      DIRECT_URL: postgresql://kalman:kalman@localhost:5432/kalman_estate?schema=public
+      JWT_SECRET: ci-letters-e2e-secret
+      FILE_STORAGE_DRIVER: s3_with_local_fallback
+      LOCAL_STORAGE_ROOT: ${{ github.workspace }}/storage
+      PUBLIC_APP_URL: http://localhost:3000
+      AI_PROVIDER: manual
+      # Puppeteer downloads its own pinned Chromium in a dedicated step; skip it during npm ci.
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+      SMOKE_BASE_URL: http://localhost:3000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium for the PDF renderer
+        run: npx puppeteer browsers install chrome
+
+      - name: Migrate & seed database
+        run: |
+          npx prisma migrate deploy
+          npm run db:seed
+
+      - name: Build production server
+        run: npm run build
+
+      - name: Start server
+        run: |
+          nohup npm start > server.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:3000/api/v1/health && break
+            sleep 2
+          done
+          curl -sf http://localhost:3000/api/v1/health
+
+      - name: Run letters E2E suite
+        run: npm run test:letters
+
+      - name: Run smoke suite
+        run: npm run test:smoke
+
+      - name: Server log on failure
+        if: failure()
+        run: tail -100 server.log || true

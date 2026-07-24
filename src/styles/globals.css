@@ -130,6 +130,64 @@
   white-space: pre-wrap;
   line-height: 1.22;
 }
+/* WYSIWYG parity: the on-screen editor runs under Tailwind's preflight reset while the PDF
+   renderer runs against Chromium UA defaults, so every element a template or a Word/Docs paste
+   can produce MUST have its size/weight/spacing pinned here — this block is loaded by BOTH
+   surfaces (letter-pdf-puppeteer.ts slices it out of globals.css), which is what guarantees the
+   draft on screen and the downloaded PDF look identical.
+   Heading sizes are pinned to the UA values the PDF has always used, so no previously generated
+   letter changes; the editor now simply shows the truth. */
+.letter-paper-editor h1 { font-size: 2em; }
+.letter-paper-editor h2 { font-size: 1.5em; }
+.letter-paper-editor h3 { font-size: 1.17em; }
+.letter-paper-editor h4,
+.letter-paper-editor h5,
+.letter-paper-editor h6 {
+  margin: 0 0 16px;
+  color: #111827;
+  font-weight: 700;
+  white-space: pre-wrap;
+  line-height: 1.25;
+}
+.letter-paper-editor h4 { font-size: 1em; }
+.letter-paper-editor h5 { font-size: 0.83em; }
+.letter-paper-editor h6 { font-size: 0.67em; }
+/* Pasted lists: preflight strips bullets in the editor while the UA adds them in the PDF —
+   pin real list rendering on both sides. */
+.letter-paper-editor ul,
+.letter-paper-editor ol {
+  margin: 0 0 16px;
+  padding-left: 30px;
+}
+.letter-paper-editor ul { list-style: disc outside; }
+.letter-paper-editor ol { list-style: decimal outside; }
+.letter-paper-editor li {
+  margin-bottom: 6px;
+  white-space: pre-wrap;
+  text-align: justify;
+  text-justify: inter-word;
+}
+.letter-paper-editor blockquote {
+  margin: 0 0 16px 30px;
+}
+/* Letters are print documents: links keep the surrounding text colour (matches the editor,
+   where preflight already renders them plain). */
+.letter-paper-editor a {
+  color: inherit;
+  text-decoration: inherit;
+}
+/* Generic images (pasted or template-inlined): match the editor's preflight behaviour and never
+   let a natural-size image overflow the sheet in the PDF. .photo-box/.attachment-block images
+   keep their own more specific rules below. */
+.letter-paper-editor img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+.letter-paper-editor b,
+.letter-paper-editor strong {
+  font-weight: bolder;
+}
 .letter-paper-editor p {
   margin: 0 0 16px;
   white-space: pre-wrap;
