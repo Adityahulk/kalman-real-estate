@@ -9,6 +9,12 @@ RUN npm ci
 FROM node:22-bookworm-slim AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+# On the 1GB-RAM production droplet, Node 22 auto-caps V8's heap at ~1GB. `next build`'s
+# type-checking pass exceeds that and dies with "Ineffective mark-compacts near heap limit"
+# even though the host now has 4GB of swap — because V8 OOMs at its *own* heap ceiling
+# regardless of available OS memory. Raise the ceiling explicitly so the build can grow into
+# swap and complete. Keeps type/lint checking enabled (no correctness trade-off).
+ENV NODE_OPTIONS=--max-old-space-size=2048
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
