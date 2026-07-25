@@ -99,6 +99,8 @@ export const letterSystemFields = [
   { category: "Buyer", label: "Witness 2 contact", value: "witness.2.phone" },
   { category: "Document", label: "Document number", value: "document.number" },
   { category: "Document", label: "Document date", value: "document.date" },
+  { category: "Document", label: "Document date (DD.MM.YYYY)", value: "document.dateDots" },
+  { category: "Document", label: "Document date (DD/MM/YYYY)", value: "document.dateSlashes" },
   { category: "Document", label: "Today's date", value: "today" },
   { category: "Document", label: "Document place", value: "document.place" },
   { category: "Document", label: "Stamp amount", value: "stamp.amount" },

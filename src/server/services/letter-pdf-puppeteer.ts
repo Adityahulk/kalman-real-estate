@@ -124,6 +124,11 @@ function launchOptions(): LaunchOptions {
 // Hard ceiling on a single render. Without this, a Chromium crash (e.g. OOM on a small server)
 // leaves renderOnce hanging forever — and because renders are serialized, the whole queue deadlocks.
 const RENDER_DEADLINE_MS = 60_000;
+const EDITOR_PAGE_WIDTH_PX = 860;
+const A4_WIDTH_MM = 210;
+const A4_HEIGHT_MM = 297;
+const CSS_PX_TO_MM = 25.4 / 96;
+const A4_RENDER_SCALE = A4_WIDTH_MM / (EDITOR_PAGE_WIDTH_PX * CSS_PX_TO_MM);
 
 function withDeadline<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout>;
@@ -201,20 +206,20 @@ async function renderWithBrowser(browser: Browser, bodyHtml: string): Promise<Bu
       `${reflowPagesBrowserSource}(document.querySelector(".letter-paper-editor"), { pageHeight: 1216 })`,
     );
 
-    // Each <section> is one editor "sheet" that grows with its content (min-height: 1216px).
-    // Render each section as its own page sized to that section's height so a single dense
-    // section never splits across two PDF pages — matching the editor exactly.
+    // Each <section> is one editor sheet. Measure the final reflowed section set, then render each
+    // on fixed physical A4 paper; Chromium adds another A4 sheet if a user-created block still
+    // exceeds one canvas instead of silently creating a non-standard oversized PDF page.
     const heights = await page.evaluate(() => {
       const sections = Array.from(document.querySelectorAll<HTMLElement>("section[data-ambey-page], section[data-letter-page]"));
       return sections.map((el) => Math.ceil(el.getBoundingClientRect().height));
     });
 
-    // Fallback for letters that aren't section-based: render the whole body as one tall page.
+    // Fallback for letters that aren't section-based: let Chromium paginate the body on A4.
     if (!heights.length) {
-      const bodyHeight = await page.evaluate(() => Math.ceil(document.body.scrollHeight));
       const pdf = await page.pdf({
-        width: "860px",
-        height: `${bodyHeight + 2}px`,
+        width: `${A4_WIDTH_MM}mm`,
+        height: `${A4_HEIGHT_MM}mm`,
+        scale: A4_RENDER_SCALE,
         printBackground: true,
         preferCSSPageSize: false,
         margin: { top: "0", right: "0", bottom: "0", left: "0" },
@@ -222,9 +227,8 @@ async function renderWithBrowser(browser: Browser, bodyHtml: string): Promise<Bu
       return Buffer.from(pdf);
     }
 
-    // Render each section as its own page sized to that section's measured height, so a single
-    // dense section never splits across two PDF pages — matching the editor exactly. These calls
-    // are sequential, so peak Chromium memory is ~one section, not the whole document. (Rendering
+    // Render each section independently on A4. These calls are sequential, so peak Chromium
+    // memory is ~one section, not the whole document. (Rendering
     // the full stacked document in one giant page.pdf() call actually uses MORE peak memory and is
     // what OOM-crashed on the small server.)
     const pages: Buffer[] = [];
@@ -234,8 +238,9 @@ async function renderWithBrowser(browser: Browser, bodyHtml: string): Promise<Bu
         sections.forEach((el, index) => { el.style.display = index === visibleIndex ? "" : "none"; });
       }, i);
       const pdf = await page.pdf({
-        width: "860px",
-        height: `${heights[i] + 2}px`,
+        width: `${A4_WIDTH_MM}mm`,
+        height: `${A4_HEIGHT_MM}mm`,
+        scale: A4_RENDER_SCALE,
         printBackground: true,
         preferCSSPageSize: false,
         margin: { top: "0", right: "0", bottom: "0", left: "0" },

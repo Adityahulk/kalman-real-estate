@@ -99,6 +99,16 @@ export const reflowPagesBrowserSource = `(function (rootOrSelector, opts) {
       }
       if (splitIndex <= 0 || splitIndex >= children.length) continue;
       var overflow = children.slice(splitIndex);
+      // Joint-allotment substitutions can make the flex page exceed the threshold by a rounding
+      // pixel even though the reserved bottom whitespace visibly fits the short sign-off. Keep
+      // that single sign-off on its intended first page instead of creating a nearly blank sheet.
+      if (overflow.length === 1 && overflow[0].classList && overflow[0].classList.contains("first-page-signoff")) {
+        overflow[0].style.position = "absolute";
+        overflow[0].style.right = "72px";
+        overflow[0].style.bottom = "60px";
+        overflow[0].style.margin = "0";
+        continue;
+      }
       var nextPage = pg0[i + 1];
       if (!nextPage) {
         nextPage = page.cloneNode(false);
@@ -144,6 +154,14 @@ export const reflowPagesBrowserSource = `(function (rootOrSelector, opts) {
     var current = first;
     for (var s = 0; s < stream.length; s++) {
       var block = stream[s];
+      // The signed joint-allotment reference dedicates its final sheet to execution/signatures.
+      // Preserve that legal-document boundary instead of packing the closing block beneath the
+      // last agreement clause merely because a shorter heading freed a few lines.
+      var isClosingBlock = block.classList && block.classList.contains("closing-block")
+        || block.querySelector && block.querySelector(".closing-intro");
+      if (isClosingBlock && contentKids(current).length) {
+        current = createAfter(current);
+      }
       current.appendChild(block);
       var kids = contentKids(current);
       if (current.scrollHeight > PAGE_HEIGHT && kids.length > 1) {

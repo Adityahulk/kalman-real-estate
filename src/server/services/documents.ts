@@ -9,7 +9,7 @@ import { generatedDocumentStorageKey, putGeneratedObject } from "../storage";
 import { createGeneratedFileAsset } from "./files";
 import { buildGeneratedDocumentPdf, buildGeneratedDocumentPdfFromHtml } from "./document-pdf";
 import { createNotification, notifyRoleWithPermission } from "./notifications";
-import { defaultLetterBody, ensureProjectLetterTemplates } from "./document-templates";
+import { defaultLetterBody, letterTemplateTypeSchema, resolveActiveProjectLetterTemplate } from "./document-templates";
 
 // Statuses in which a letter still counts as "accepted" for plot-ownership purposes. Approving a
 // letter reconciles the plot to its new owner; the letter then moves on to signature (SENT_FOR_SIGNATURE
@@ -49,7 +49,7 @@ export const generateDocumentSchema = z.object({
 
 export const createDocumentDraftSchema = z.object({
   templateId: z.string().optional(),
-  type: z.enum(["allotment_letter", "allotment_letter_joint", "transfer_letter", "registry_status_letter"]),
+  type: letterTemplateTypeSchema,
   recordType: z.literal("Plot"),
   recordId: z.string().min(1),
   data: z.record(z.unknown()).default({}),
@@ -122,28 +122,29 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
     : null;
   const documentNumber = providedNumber ?? fallbackNumber;
 
-  const selectedTemplate = input.templateId
-    ? await prisma.documentTemplate.findFirst({ where: { id: input.templateId, tenantId: context.tenantId, active: true } })
-    : null;
-  const templateByProject = selectedTemplate
-    ?? await prisma.documentTemplate.findFirst({ where: { tenantId: context.tenantId, type: input.type, active: true }, orderBy: { createdAt: "desc" } });
-  const earlyTemplateBody = templateByProject?.body && templateByProject.body.length > 100
-    && !templateByProject.body.includes("data-pdf-layout-template")
-    && !templateByProject.body.includes("data-exact-pdf-draft")
-    ? templateByProject.body : defaultLetterBody(input.type);
+  const plot = await prisma.plot.findFirstOrThrow({
+    where: { id: input.recordId, tenantId: context.tenantId, archivedAt: null },
+    select: { projectId: true },
+  });
+  const template = await resolveActiveProjectLetterTemplate(
+    context.tenantId,
+    plot.projectId,
+    input.type,
+    input.templateId,
+  );
+  const earlyTemplateBody = isUsableLetterTemplateBody(template?.body)
+    ? template.body
+    : defaultLetterBody(input.type);
   const templateNeedsFileMarkup = /\{\{\s*files\./i.test(earlyTemplateBody);
 
   const snapshot = await buildPlotDocumentSnapshot(context, input.recordId, { documentType: input.type, includeFileMarkup: templateNeedsFileMarkup });
   applyDraftOverrides(snapshot, input.data);
+  const documentDate = new Date();
   snapshot.variables["document.number"] = documentNumber;
-  snapshot.variables["document.date"] = new Date().toLocaleDateString("en-IN");
-  await ensureProjectLetterTemplates(context.tenantId, snapshot.projectId);
-
-  const template = selectedTemplate
-    ?? await prisma.documentTemplate.findFirst({ where: { tenantId: context.tenantId, projectId: snapshot.projectId, type: input.type, active: true }, orderBy: { createdAt: "desc" } })
-    ?? templateByProject;
-  const hasRealBody = template?.body && template.body.length > 100 && !template.body.includes("data-pdf-layout-template") && !template.body.includes("data-exact-pdf-draft");
-  const templateBody = hasRealBody ? template.body : defaultLetterBody(input.type);
+  snapshot.variables["document.date"] = documentDate.toLocaleDateString("en-IN");
+  snapshot.variables["document.dateDots"] = formatDateDots(documentDate);
+  snapshot.variables["document.dateSlashes"] = formatDateSlashes(documentDate);
+  const templateBody = isUsableLetterTemplateBody(template?.body) ? template.body : defaultLetterBody(input.type);
   const { html, missingVariables, usedFileVariables } = renderTemplate(templateBody, snapshot.variables, snapshot.fileVariables);
   const reconciledHtml = reconcileStructuredBlocks(html, snapshot.variables);
   const draftHtml = usedFileVariables ? reconciledHtml : appendSupportingDocumentPages(reconciledHtml, snapshot.supportingDocumentPages);
@@ -171,6 +172,15 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
   await linkDocumentToLatestOwnershipRecord(context, document);
   await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "GeneratedDocument", entityId: document.id, after: document as unknown as Prisma.InputJsonValue });
   return { document, missingVariables };
+}
+
+function isUsableLetterTemplateBody(body: string | null | undefined): body is string {
+  return Boolean(
+    body
+      && body.length > 100
+      && !body.includes("data-pdf-layout-template")
+      && !body.includes("data-exact-pdf-draft"),
+  );
 }
 
 function applyDraftOverrides(
@@ -1265,6 +1275,10 @@ function formatIndianAmount(value: number) {
 
 function formatDateDots(date: Date) {
   return date.toLocaleDateString("en-GB").replaceAll("/", ".");
+}
+
+function formatDateSlashes(date: Date) {
+  return date.toLocaleDateString("en-GB");
 }
 
 function ordinal(day: number) {

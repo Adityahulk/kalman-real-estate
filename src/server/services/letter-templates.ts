@@ -2,7 +2,7 @@ export function ambeyAllotmentTemplate() {
   return `<div data-template="ambey-allotment">
 <section data-ambey-page="1" data-top="700">
 <h1><u>Allotment Letter</u></h1>
-<p class="right meta-block"><strong>Allotment No.: {{document.number}}</strong><br><strong>({{rera.number}})</strong><br>Date: {{document.date}}</p>
+<p class="right meta-block"><strong>Allotment No.: {{document.number}}</strong><br><strong>({{rera.number}})</strong><br>Date: {{document.dateDots}}</p>
 <p class="recipient-block">To<br><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.addressMultilineHtml}}</u><br><u>Aadhaar No. {{owner.aadhaarNo}}</u><br><u>Pan No. {{owner.panNo}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>
 <p class="subject-line"><strong>Subject :-</strong> <strong>Allotment Letter of Residential Plot No. {{plot.code}} ({{plot.areaSqydApprox}}) of {{project.name}}, {{project.fullAddress}}</strong></p>
 <p>We thank you for your application addressed to "{{firm.name}}" (Firm) and for the payments required for the purpose of allotment.</p>
@@ -279,17 +279,12 @@ export function ambeyAllotmentJointTemplate() {
 export function transferLetterTemplate() {
   return `<div data-letter-template="transfer-letter">
 <section data-letter-page="1" data-top="760">
-<p>Date: {{document.date}}</p>
+<p>Date: {{document.dateDots}}</p>
 <p class="transfer-to-block">To,<br><span class="transfer-to-firm"><strong>M/S. {{firm.nameUpper}},</strong></span><br><span class="transfer-to-firm"><strong>{{project.name}}, {{project.fullAddress}}</strong></span></p>
 <p class="transfer-subject"><span>Subject&nbsp;&nbsp;&nbsp;:</span><span>Transfer of Residential Plot No. <strong>{{plot.code}}</strong> situated in <strong>{{project.name}}</strong> situated at <strong>{{project.fullAddress}}</strong>.</span></p>
 <p>Respected Sir,</p>
 <p>I, <strong>{{seller.nameWithRelation}}</strong> has been allotted residential Plot No. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqyd}}</strong> Square Yards at <strong>{{project.name}}</strong> of <strong>M/s. {{firm.name}}, {{firm.address}}</strong> vide allotment letter No. <strong>{{original.allotmentNumber}}</strong> dated <strong>{{original.allotmentDate}}</strong>. I/we seek your permission to transfer the above stated plot in favor of:</p>
-<table class="transfer-recipient-table">
-<tr><th>Name</th><td><u><strong>{{owner.nameWithRelation}}</strong></u></td></tr>
-<tr><th>Address</th><td>{{owner.addressMultilineHtml}}</td></tr>
-<tr><th>PAN No.</th><td>{{owner.panNo}}</td></tr>
-<tr><th>Aadhaar No.</th><td>{{owner.aadhaarNo}}</td></tr>
-</table>
+<p class="transfer-recipient-block"><u><strong>{{owner.nameWithRelation}}</strong></u><br>{{owner.addressMultilineHtml}}<br>PAN No. {{owner.panNo}}<br>Aadhaar No. {{owner.aadhaarNo}}</p>
 <p>The conveyance deed in respect of the plot has been / not yet been executed. The said plot is free from all encumbrances like mortgages, gift or transfer in any manner to any person(s)/body.</p>
 <p>I/we hereby declare that nothing has been concealed in the above information and the residential plot is vacant. If in future, it is found that the transfer has been affected on the basis of false/wrong information provided in the application the transfer shall be deemed to be null and void and all consequent losses i.e. legal or financial shall be born by us. In case company suffers any loss on account of this transfer or as a consequence of this transfer myself/ourselves, legal heirs and successors of myself/ourselves shall be liable to make good all the losses or expenses sustained/suffered by the company or its employees. In case any legal heirs or successor or other person makes any claim regarding this residential plot, the litigation of the same shall be defended by me/us and the loss/expenses sustained/suffered by the company will also be made good by myself/ourselves.</p>
 </section>
@@ -307,7 +302,7 @@ export function transferLetterTemplate() {
 
 <section data-letter-page="3" data-top="760">
 <p class="center">(Stamp Duty Rs. {{stamp.amount}}/- having E-Stamp No. {{stamp.estampNo}} dated {{stamp.date}})</p>
-<p class="transfer-heading">AFFIDAVITE</p>
+<p class="transfer-heading transfer-affidavit-title">AFFIDAVITE</p>
 <p>I, <strong>{{seller.nameWithRelation}}</strong> do solemnly declare and affirm as under: -</p>
 <div class="num-list">
 <p class="num-item"><span>1.</span><span>That I am the first allotee of residential plot no. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqyd}}</strong> Square Yards situated at <strong>{{project.name}}</strong> vide allotment letter no. <strong>{{original.allotmentNumber}}</strong> dated <strong>{{original.allotmentDate}}</strong>.</span></p>
@@ -325,7 +320,7 @@ export function transferLetterTemplate() {
 
 <section data-letter-page="4" data-top="760">
 <p class="center">(Stamp Duty Rs. {{stamp.amount}}/- having E-Stamp No. {{stamp.2.estampNo}} dated {{stamp.2.date}})</p>
-<p class="transfer-heading">AFFIDAVITE</p>
+<p class="transfer-heading transfer-affidavit-title">AFFIDAVITE</p>
 <p>I, <strong>{{owner.nameWithRelation}}</strong> does hereby solemnly declare and affirm as under:</p>
 <div class="num-list">
 <p class="num-item"><span>1.</span><span>That I have purchased plot no. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqyd}}</strong> Sq. Yds. situated at <strong>{{project.nameUpper}}</strong> from <strong>{{seller.nameWithRelation}}</strong>.</span></p>
@@ -342,17 +337,12 @@ export function transferLetterTemplate() {
 
 <section data-letter-page="5" data-top="760">
 <p class="transfer-title">TRANSFER LETTER</p>
-<p class="transfer-refline"><span><strong>No. <span class="red-text">{{document.number}}</span></strong></span><span class="red-text"><strong>DATED: {{document.date}}</strong></span></p>
+<p class="transfer-refline"><span><strong>No. <span class="red-text">{{document.number}}</span></strong></span><span class="red-text"><strong>DATED: {{document.dateSlashes}}</strong></span></p>
 <p>To,</p>
-<table class="transfer-recipient-table">
-<tr><th>Name</th><td><u><strong>{{owner.nameWithRelation}}</strong></u></td></tr>
-<tr><th>Address</th><td>{{owner.addressMultilineHtml}}</td></tr>
-<tr><th>PAN No.</th><td>{{owner.panNo}}</td></tr>
-<tr><th>Aadhaar No.</th><td>{{owner.aadhaarNo}}</td></tr>
-</table>
+<p class="transfer-recipient-block transfer-recipient-block-left"><u><strong>{{owner.nameWithRelation}}</strong></u><br>{{owner.addressMultilineHtml}}<br>PAN No. {{owner.panNo}}<br>Aadhaar No. {{owner.aadhaarNo}}</p>
 <p class="transfer-subject"><span><strong>SUBJECT:</strong></span><span><strong>TRANSRFER OF RESIDENTIAL PLOT NO. {{plot.code}} MEASURING {{plot.areaSqyd}} SQ. YDS. SITUATED AT {{project.nameUpper}}.</strong></span></p>
 <p>Respected Sir/Madam,</p>
-<p>Reference to your application dated <strong>{{document.date}}</strong> on the subject cited above.</p>
+<p>Reference to your application dated <strong>{{document.dateSlashes}}</strong> on the subject cited above.</p>
 <p>We are pleased to transfer in your favour plot no. <strong>{{plot.code}}</strong> at {{project.nameUpper}} measuring {{plot.areaSqyd}} Sq. Yds. The details of which are mentioned below:</p>
 <table class="transfer-directions">
 <tr><td>EAST SIDE</td><td>:</td><td>{{plot.eastSize}} {{plot.eastBoundary}}</td></tr>

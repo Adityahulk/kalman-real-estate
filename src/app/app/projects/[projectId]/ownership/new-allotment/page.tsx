@@ -5,7 +5,7 @@ import { prisma } from "@/server/db";
 import { sortByPlotCode } from "@/lib/plot-code-sort";
 import { ActionHint, ActionPageShell } from "../../../action-page-shell";
 import { ProjectAllotmentFlow } from "../../../workflow-action-forms";
-import { extractTemplateFieldsFromBody, templateFields } from "@/server/services/document-templates";
+import { ensureProjectLetterTemplates, extractTemplateFieldsFromBody, templateFields } from "@/server/services/document-templates";
 import { listLetterFieldSettings } from "@/server/services/letter-field-settings";
 
 export const dynamic = "force-dynamic";
@@ -21,6 +21,7 @@ export default async function NewAllotmentPage({
   if (!session) return null;
   const project = await prisma.project.findFirst({ where: { id: params.projectId, tenantId: session.tenantId } });
   if (!project) notFound();
+  await ensureProjectLetterTemplates(session.tenantId, project.id);
   const [plots, firm, letterTemplate, letterCategories, existingAllotment] = await Promise.all([
     prisma.plot.findMany({
       where: {

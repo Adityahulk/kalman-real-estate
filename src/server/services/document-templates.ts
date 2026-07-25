@@ -6,21 +6,65 @@ import { prisma } from "../db";
 import { ambeyAllotmentTemplate, ambeyAllotmentJointTemplate, transferLetterTemplate, registryStatusLetterTemplate } from "./letter-templates";
 import { letterSystemFields } from "@/lib/letter-system-fields";
 
+export const letterTemplateTypeSchema = z.enum([
+  "allotment_letter",
+  "allotment_letter_joint",
+  "transfer_letter",
+  "registry_status_letter",
+]);
+
+export type LetterTemplateType = z.infer<typeof letterTemplateTypeSchema>;
+
 export const saveProjectLetterTemplateSchema = z.object({
   name: z.string().min(2).max(120),
-  type: z.enum(["allotment_letter", "allotment_letter_joint", "transfer_letter", "registry_status_letter"]).default("allotment_letter"),
+  type: letterTemplateTypeSchema.default("allotment_letter"),
   body: z.string().min(20).optional(),
   variables: z.unknown().optional(),
 });
 
-export function defaultLetterBody(type: string): string {
+export function defaultLetterBody(type: LetterTemplateType): string {
   if (type === "allotment_letter_joint") return ambeyAllotmentJointTemplate();
   if (type === "transfer_letter") return transferLetterTemplate();
   if (type === "registry_status_letter") return registryStatusLetterTemplate();
   return ambeyAllotmentTemplate();
 }
 
+export async function resolveActiveProjectLetterTemplate(
+  tenantId: string,
+  projectId: string,
+  type: LetterTemplateType,
+  templateId?: string,
+) {
+  await ensureProjectLetterTemplates(tenantId, projectId);
+
+  if (templateId) {
+    const selected = await prisma.documentTemplate.findFirst({
+      where: { id: templateId, tenantId, projectId, type, active: true },
+    });
+    if (!selected) {
+      const error = new Error("The selected letter template is not the active template for this project and letter category.");
+      error.name = "BadRequestError";
+      throw error;
+    }
+    return selected;
+  }
+
+  const active = await prisma.documentTemplate.findFirst({
+    where: { tenantId, projectId, type, active: true },
+    orderBy: { createdAt: "desc" },
+  });
+  if (active) return active;
+
+  // `ensureProjectLetterTemplates` normally guarantees this branch cannot be reached. Keeping a
+  // code default here makes draft generation resilient to a concurrent template deletion.
+  return null;
+}
+
 export async function ensureProjectLetterTemplates(tenantId: string, projectId: string) {
+  // Never create or refresh template rows against a project owned by another tenant. Several UI
+  // entry points call this self-healer before loading their page-specific data, so the ownership
+  // guard belongs here rather than being duplicated at every caller.
+  await prisma.project.findFirstOrThrow({ where: { id: projectId, tenantId }, select: { id: true } });
   // The joint/partnership allotment letter is its own peer type (not a hidden variant of
   // "allotment_letter"), so it gets its own active default template + admin-editable slot in
   // Settings → Set your letters, exactly like the other three.

@@ -63,6 +63,7 @@ async function request(path, init = {}) {
     ".letter-paper-editor blockquote",
     "border-collapse: collapse",
     "max-width: 100%",
+    "font-size: 17.3px",
   ]) {
     assert(slice.includes(needle), `print CSS slice lost parity rule: ${needle}`);
   }
@@ -88,10 +89,12 @@ async function pdfText(buffer) {
   const doc = await getDocument({ data: new Uint8Array(buffer), useSystemFonts: true, disableFontFace: true }).promise;
   let spaced = "";
   let joined = "";
+  const pageTexts = [];
   for (let pageNo = 1; pageNo <= doc.numPages; pageNo += 1) {
     const page = await doc.getPage(pageNo);
     const content = await page.getTextContent();
     const items = content.items.map((item) => item.str);
+    pageTexts.push(items.join(" "));
     // Long tokens wrap across lines, splitting one word over two text items — keep both a
     // space-joined and a directly-concatenated view so `includes` works either way.
     spaced += items.join(" ") + "\n";
@@ -100,8 +103,19 @@ async function pdfText(buffer) {
   return {
     numPages: doc.numPages,
     text: spaced,
+    pageTexts,
     has: (needle) => spaced.includes(needle) || joined.includes(needle),
   };
+}
+
+async function assertA4Pages(buffer, label) {
+  const { PDFDocument } = await import("pdf-lib");
+  const pdf = await PDFDocument.load(buffer);
+  for (const [index, page] of pdf.getPages().entries()) {
+    const { width, height } = page.getSize();
+    assert(Math.abs(width - 595.32) < 1, `${label}: page ${index + 1} width is ${width}, expected A4`);
+    assert(Math.abs(height - 841.92) < 3, `${label}: page ${index + 1} height is ${height}, expected A4`);
+  }
 }
 
 async function downloadPdf(fileAssetId) {
@@ -168,9 +182,14 @@ async function exerciseLetterType(type) {
   const firstRender = await request(`/api/v1/documents/${doc.id}/render`, { method: "POST", headers: { cookie } });
   assert(firstRender.response.status === 200, `${type}: initial render failed (${firstRender.json.error ?? firstRender.response.status})`);
   const firstFileId = firstRender.json.data.document.fileAssetId;
-  const firstPdf = await pdfText(await downloadPdf(firstFileId));
+  const firstPdfBuffer = await downloadPdf(firstFileId);
+  await assertA4Pages(firstPdfBuffer, `${type} initial PDF`);
+  const firstPdf = await pdfText(firstPdfBuffer);
   assert(firstPdf.numPages >= 1, `${type}: rendered PDF has no pages`);
   assert(firstPdf.has(plot.code), `${type}: plot code missing from rendered PDF text`);
+  if (type === "allotment_letter") {
+    assert(firstPdf.pageTexts[0]?.includes("Warm Regards"), "allotment_letter: first-page sign-off spilled onto another page");
+  }
   console.log(`  ✓ template render ok (${firstPdf.numPages} pages)`);
 
   // 3. Edit: inject the formatting fragment into the LAST page section, exactly where the
@@ -296,6 +315,7 @@ await exerciseLetterType("registry_status_letter");
     const render = await request(`/api/v1/documents/${doc.id}/render`, { method: "POST", headers: { cookie } });
     assert(render.response.status === 200, `joint: render failed (${render.json.error ?? render.response.status})`);
     const pdf = await pdfText(await downloadPdf(render.json.data.document.fileAssetId));
+    assert(pdf.pageTexts[0]?.includes("Warm Regards"), "joint: first-page sign-off spilled onto another page");
     for (const needle of [jointName, "Share", "50%", plot.code]) {
       assert(pdf.has(needle), `joint: "${needle}" missing from rendered PDF`);
     }
@@ -364,12 +384,11 @@ await exerciseLetterType("registry_status_letter");
     assert(html.includes(`Transfer Buyer TB${stamp}`), "transfer wiring: buyer name missing from draft");
     console.log("  ✓ seller, buyer, and original allotment number auto-filled");
 
-    // Bug fix: the recipient block (Name/Address/PAN/Aadhaar) must be a real <table>, not the old
-    // stacked <p><br> lines.
-    assert(html.includes('<table class="transfer-recipient-table">'), "transfer wiring: recipient block is not a table");
-    assert(!html.includes('class="center transfer-party"'), "transfer wiring: old non-table recipient markup still present");
-    assert(html.includes("<th>PAN No.</th>") && html.includes("<th>Aadhaar No.</th>"), "transfer wiring: recipient table missing labelled rows");
-    console.log("  ✓ recipient block renders as a labelled table");
+    // The signed transfer reference uses unbordered recipient address blocks on pages 1 and 5.
+    assert((html.match(/class="transfer-recipient-block/g) ?? []).length === 2, "transfer wiring: reference recipient blocks missing");
+    assert(!html.includes('class="transfer-recipient-table"'), "transfer wiring: obsolete bordered recipient table still present");
+    assert(html.includes("PAN No.") && html.includes("Aadhaar No."), "transfer wiring: recipient block missing labelled fields");
+    console.log("  ✓ recipient blocks match the unbordered signed reference");
 
     const render = await request(`/api/v1/documents/${created.json.data.document.id}/render`, { method: "POST", headers: { cookie } });
     assert(render.response.status === 200, `transfer wiring: render failed (${render.json.error ?? render.response.status})`);

@@ -3,6 +3,7 @@ import { BackButton } from "@/components/back-button";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
 import { listLetterFieldSettings } from "@/server/services/letter-field-settings";
+import { ensureProjectLetterTemplates } from "@/server/services/document-templates";
 import { HtmlTemplateEditor } from "../../html-template-editor";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +13,7 @@ export default async function ProjectLettersPage({ params }: { params: { project
   if (!session) return null;
   const project = await prisma.project.findFirst({ where: { id: params.projectId, tenantId: session.tenantId } });
   if (!project) notFound();
+  await ensureProjectLetterTemplates(session.tenantId, project.id);
   const [templates, categories] = await Promise.all([
     prisma.documentTemplate.findMany({
       where: { tenantId: session.tenantId, projectId: project.id },

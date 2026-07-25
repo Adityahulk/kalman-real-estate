@@ -4,7 +4,7 @@ import { getSessionUser } from "@/server/session";
 import { prisma } from "@/server/db";
 import { ActionHint, ActionPageShell } from "../../../../action-page-shell";
 import { PlotTransferForm } from "../../../../../ownership/ownership-actions";
-import { extractTemplateFieldsFromBody, templateFields } from "@/server/services/document-templates";
+import { ensureProjectLetterTemplates, extractTemplateFieldsFromBody, templateFields } from "@/server/services/document-templates";
 import { listLetterFieldSettings } from "@/server/services/letter-field-settings";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function TransferPlotPage({ params }: { params: { projectId: string; plotId: string } }) {
   const session = await getSessionUser();
   if (!session) return null;
+  await ensureProjectLetterTemplates(session.tenantId, params.projectId);
   const [plot, firm, letterTemplate, letterCategories, originalAllotment] = await Promise.all([
     prisma.plot.findFirst({
       where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId, archivedAt: null },

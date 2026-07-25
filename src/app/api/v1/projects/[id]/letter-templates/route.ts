@@ -1,11 +1,12 @@
 import { NextRequest } from "next/server";
 import { apiError, created, getRequestContext, ok, parseJson } from "@/server/api";
 import { prisma } from "@/server/db";
-import { saveProjectLetterTemplate, saveProjectLetterTemplateSchema } from "@/server/services/document-templates";
+import { ensureProjectLetterTemplates, saveProjectLetterTemplate, saveProjectLetterTemplateSchema } from "@/server/services/document-templates";
 
 export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const context = await getRequestContext(request, "documents.generate");
+    await ensureProjectLetterTemplates(context.tenantId, params.id);
     const templates = await prisma.documentTemplate.findMany({
       where: { tenantId: context.tenantId, projectId: params.id },
       orderBy: { createdAt: "desc" },
