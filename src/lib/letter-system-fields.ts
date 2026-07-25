@@ -59,6 +59,7 @@ export const letterSystemFields = [
   { category: "Buyer", label: "Buyer mobile number", value: "owner.mobileNo" },
   { category: "Buyer", label: "Buyer address", value: "owner.address" },
   { category: "Buyer", label: "Buyer address multiline", value: "owner.addressMultilineHtml" },
+  { category: "Buyer", label: "Buyer address in two lines", value: "owner.addressTwoLineHtml" },
   { category: "Buyer", label: "Buyer address uppercase", value: "owner.addressUpper" },
   { category: "Buyer", label: "Aadhaar number", value: "owner.aadhaarNo" },
   { category: "Buyer", label: "PAN number", value: "owner.panNo" },

@@ -353,7 +353,22 @@ await exerciseLetterType("registry_status_letter");
       tenantId: sellerOwner.tenantId,
       type: "INDIVIDUAL",
       name: `Transfer Buyer TB${stamp}`,
-      kyc: { fatherName: "Test Father" },
+      address: "House 12, New Grain Market Road, Barnala, Punjab",
+      kyc: { fatherName: "Test Father", aadhaarNo: "1234 5678 9012" },
+    },
+  });
+  const transferKycFile = await prisma.fileAsset.create({
+    data: {
+      tenantId: sellerOwner.tenantId,
+      storageKey: `test/${stamp}/transfer-aadhaar.png`,
+      storageProvider: "LOCAL",
+      fileName: `transfer-aadhaar-${stamp}.png`,
+      mimeType: "image/png",
+      sizeBytes: 1024,
+      visibility: "TEAM",
+      ownerType: "Owner",
+      ownerId: buyer.id,
+      categoryKey: "transfer-kyc",
     },
   });
   const transferRecord = await prisma.ownershipRecord.create({
@@ -363,13 +378,10 @@ await exerciseLetterType("registry_status_letter");
       ownerId: buyer.id,
       kind: "TRANSFER",
       effectiveAt: new Date(),
+      extraDetails: { allottee: { documents: [{ kind: "Aadhaar", files: [{ id: transferKycFile.id, fileName: transferKycFile.fileName }] }] } },
       createdById: (await prisma.user.findFirstOrThrow({ where: { email: "owner@saldhaland.example" } })).id,
     },
   });
-  // The real transferPlot service moves currentOwner to the buyer — mirror that (owner.* in the
-  // letter is the transferee) and restore afterwards.
-  const plotBefore = await prisma.plot.findUniqueOrThrow({ where: { id: plot.id }, select: { currentOwnerId: true } });
-  await prisma.plot.update({ where: { id: plot.id }, data: { currentOwnerId: buyer.id } });
 
   try {
     const created = await request("/api/v1/documents/drafts", {
@@ -384,11 +396,15 @@ await exerciseLetterType("registry_status_letter");
     assert(html.includes(`Transfer Buyer TB${stamp}`), "transfer wiring: buyer name missing from draft");
     console.log("  ✓ seller, buyer, and original allotment number auto-filled");
 
-    // The signed transfer reference uses unbordered recipient address blocks on pages 1 and 5.
-    assert((html.match(/class="transfer-recipient-block/g) ?? []).length === 2, "transfer wiring: reference recipient blocks missing");
-    assert(!html.includes('class="transfer-recipient-table"'), "transfer wiring: obsolete bordered recipient table still present");
-    assert(html.includes("PAN No.") && html.includes("Aadhaar No."), "transfer wiring: recipient block missing labelled fields");
-    console.log("  ✓ recipient blocks match the unbordered signed reference");
+    // The signed transfer reference uses borderless recipient-detail tables on pages 1 and 5.
+    assert((html.match(/class="transfer-recipient-table/g) ?? []).length === 2, "transfer wiring: reference recipient tables missing");
+    assert(html.includes("transfer-recipient-table-centered") && html.includes("transfer-recipient-table-left"), "transfer wiring: recipient table alignment missing");
+    assert(html.includes("PAN No.") && html.includes("Aadhaar No."), "transfer wiring: recipient table missing labelled fields");
+    assert(html.includes("House 12, New Grain Market Road<br>Barnala, Punjab"), "transfer wiring: recipient/table address was not split into two lines");
+    console.log("  ✓ recipient tables match the signed reference layout");
+
+    assert(html.includes("Supporting documents") && html.includes(transferKycFile.id), "transfer wiring: transfer-specific KYC attachment missing");
+    console.log("  ✓ transfer-specific supporting document is appended");
 
     const render = await request(`/api/v1/documents/${created.json.data.document.id}/render`, { method: "POST", headers: { cookie } });
     assert(render.response.status === 200, `transfer wiring: render failed (${render.json.error ?? render.response.status})`);
@@ -401,8 +417,8 @@ await exerciseLetterType("registry_status_letter");
     await request(`/api/v1/documents/${created.json.data.document.id}`, { method: "DELETE", headers: { cookie } });
   } finally {
     await request(`/api/v1/documents/${allotmentDoc.json.data.document.id}`, { method: "DELETE", headers: { cookie } });
-    await prisma.plot.update({ where: { id: plot.id }, data: { currentOwnerId: plotBefore.currentOwnerId } }).catch(() => undefined);
     await prisma.ownershipRecord.delete({ where: { id: transferRecord.id } }).catch(() => undefined);
+    await prisma.fileAsset.delete({ where: { id: transferKycFile.id } }).catch(() => undefined);
     await prisma.owner.delete({ where: { id: buyer.id } }).catch(() => undefined);
   }
 }

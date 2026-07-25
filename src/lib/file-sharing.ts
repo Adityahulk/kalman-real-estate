@@ -34,12 +34,6 @@ export async function createDirectShareLinks(files: ShareableFile[]): Promise<st
   }));
 }
 
-export function whatsappTextShare(text: string) {
-  const encoded = encodeURIComponent(text);
-  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-  window.location.href = isMobile ? `whatsapp://send?text=${encoded}` : `https://api.whatsapp.com/send?text=${encoded}`;
-}
-
 async function downloadFiles(files: ShareableFile[]): Promise<File[]> {
   return Promise.all(files.map(async (file) => {
     const response = await fetch(`/api/v1/files/${file.id}/download?proxy=1`);

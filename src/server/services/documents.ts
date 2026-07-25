@@ -642,15 +642,19 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
   });
   const ownership = ownershipRecordForDocument(plot.ownershipRecords, options.documentType);
   const registry = plot.registryRecords[0];
-  const ownerKyc = jsonRecord(plot.currentOwner?.kyc);
+  // A newly recorded transfer opens its draft before the plot's approved current owner changes.
+  // Letter data must therefore come from the selected ownership record, not always plot.currentOwner.
+  const documentOwner = ownership?.owner ?? plot.currentOwner;
+  const ownerKyc = jsonRecord(documentOwner?.kyc);
   const fatherName = stringFromKyc(ownerKyc, ["fatherName", "father", "relationName"]);
   const ownerRelationPrefix = stringFromKyc(ownerKyc, ["relationPrefix", "relation"]) || "s/o";
   const aadhaarNo = stringFromKyc(ownerKyc, ["aadhaarNo", "aadharNo", "aadhaar", "aadhar"]);
   const panNo = stringFromKyc(ownerKyc, ["panNo", "pan"]);
-  const ownerNameWithRelation = [plot.currentOwner?.name ?? "", fatherName ? `${ownerRelationPrefix} ${fatherName}` : ""].filter(Boolean).join(" ");
-  const ownerAddressRaw = plot.currentOwner?.address ?? "";
+  const ownerNameWithRelation = [documentOwner?.name ?? "", fatherName ? `${ownerRelationPrefix} ${fatherName}` : ""].filter(Boolean).join(" ");
+  const ownerAddressRaw = documentOwner?.address ?? "";
   const ownerAddress = normalizeAddressInline(ownerAddressRaw);
   const ownerAddressMultilineHtml = addressMultilineHtml(ownerAddressRaw);
+  const ownerAddressTwoLineHtml = addressTwoLineHtml(ownerAddressRaw);
   const areaSqft = plot.areaSqft ? Number(plot.areaSqft) : null;
   const areaSqyd = plot.areaSqYards ? Number(plot.areaSqYards) : areaSqft ? areaSqft / 9 : null;
   const priceInr = ownership?.amountInr ? Number(ownership.amountInr) : plot.priceInr ? Number(plot.priceInr) : null;
@@ -803,17 +807,19 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
       fileVariables[`manual.${key}`] = await buildInlineFileMarkup(context.tenantId, files);
     }
   }
-  // Bug fix: KYC/payment/etc. photos uploaded on the ALLOTMENT are contextually specific to that
-  // allotment and must never auto-attach to a transfer or registry-status letter. Without a
-  // documentType, `ownershipRecordForDocument` above already falls back toward the ALLOTMENT
-  // record (the most complete one) for whatever the caller ends up rendering, so a transfer
-  // letter drafted before its own TRANSFER ownership record exists would otherwise silently pull
-  // in the seller's KYC photographs. Scope the automatic page-append to allotment letter types
-  // only; an explicit {{files.*}} placeholder in a custom template still works for any type via
-  // includeFileMarkup below, so this only removes the *implicit* attach-everything fallback.
+  // Supporting files belong to the ownership record that generated the letter. In particular,
+  // a transfer letter may append the transferee's Aadhaar/PAN/DL, but must never inherit KYC
+  // files from the earlier allotment when a transfer record has not been created yet.
   const isAllotmentDocumentType = !options.documentType || options.documentType === "allotment_letter" || options.documentType === "allotment_letter_joint";
-  const supportingDocumentPages = isAllotmentDocumentType
-    ? await buildSupportingDocumentPagesLight(context.tenantId, plot.id, plot.currentOwnerId, extraDetails)
+  const isTransferDocumentWithRecord = options.documentType === "transfer_letter" && ownership?.kind === OwnershipKind.TRANSFER;
+  const supportingDocumentPages = isAllotmentDocumentType || isTransferDocumentWithRecord
+    ? await buildSupportingDocumentPagesLight(
+        context.tenantId,
+        plot.id,
+        documentOwner?.id ?? null,
+        extraDetails,
+        { includeFallbackFiles: isAllotmentDocumentType },
+      )
     : [];
   const variables: Record<string, string> = {
     "tenant.name": tenant.name,
@@ -865,16 +871,17 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "plot.northAdjoining": stringFromKyc(boundaries, ["north"]),
     "plot.southSize": stringFromKyc(boundaries, ["southDimension"]),
     "plot.southAdjoining": stringFromKyc(boundaries, ["south"]),
-    "owner.name": plot.currentOwner?.name ?? "",
-    "owner.nameUpper": plot.currentOwner?.name?.toUpperCase() ?? "",
+    "owner.name": documentOwner?.name ?? "",
+    "owner.nameUpper": documentOwner?.name?.toUpperCase() ?? "",
     "owner.nameWithRelation": ownerNameWithRelation,
     "owner.nameWithRelationUpper": ownerNameWithRelation.toUpperCase(),
     "owner.fatherName": fatherName,
-    "owner.phone": plot.currentOwner?.phone ?? "",
-    "owner.mobileNo": plot.currentOwner?.phone ?? "",
-    "owner.email": plot.currentOwner?.email ?? "",
+    "owner.phone": documentOwner?.phone ?? "",
+    "owner.mobileNo": documentOwner?.phone ?? "",
+    "owner.email": documentOwner?.email ?? "",
     "owner.address": ownerAddress,
     "owner.addressMultilineHtml": ownerAddressMultilineHtml,
+    "owner.addressTwoLineHtml": ownerAddressTwoLineHtml,
     "owner.addressUpper": ownerAddress.toUpperCase(),
     "owner.aadhaarNo": aadhaarNo,
     "owner.panNo": panNo,
@@ -967,7 +974,7 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     fileVariables,
     plotId: plot.id,
     projectId: plot.projectId,
-    ownerId: plot.currentOwnerId,
+    ownerId: documentOwner?.id ?? null,
     ownershipRecordId: ownership?.id ?? null,
     registryRecordId: registry?.id ?? null,
     supportingDocumentPages,
@@ -1024,8 +1031,14 @@ function ownershipRecordForDocument<T extends { kind: OwnershipKind }>(records: 
     ?? records[0];
 }
 
-async function buildSupportingDocumentPagesLight(tenantId: string, plotId: string, ownerId: string | null, extraDetails: Record<string, unknown>) {
-  const fileIds = await collectSupportingFileIds(tenantId, plotId, ownerId, extraDetails);
+async function buildSupportingDocumentPagesLight(
+  tenantId: string,
+  plotId: string,
+  ownerId: string | null,
+  extraDetails: Record<string, unknown>,
+  options: { includeFallbackFiles?: boolean } = {},
+) {
+  const fileIds = await collectSupportingFileIds(tenantId, plotId, ownerId, extraDetails, options);
   if (!fileIds.length) return [];
   const files = await prisma.fileAsset.findMany({
     where: { tenantId, id: { in: fileIds }, deletedAt: null },
@@ -1049,7 +1062,13 @@ async function buildSupportingDocumentPagesLight(tenantId: string, plotId: strin
   return pages;
 }
 
-async function collectSupportingFileIds(tenantId: string, plotId: string, ownerId: string | null, extraDetails: Record<string, unknown>) {
+async function collectSupportingFileIds(
+  tenantId: string,
+  plotId: string,
+  ownerId: string | null,
+  extraDetails: Record<string, unknown>,
+  options: { includeFallbackFiles?: boolean } = {},
+) {
   const ids = new Set<string>();
   const allottee = jsonRecord(extraDetails.allottee);
   const documents = Array.isArray(allottee.documents) ? allottee.documents.map(jsonRecord) : [];
@@ -1073,6 +1092,7 @@ async function collectSupportingFileIds(tenantId: string, plotId: string, ownerI
     const files = Array.isArray(field.files) ? field.files.map(jsonRecord) : [];
     for (const file of files) if (typeof file.id === "string") ids.add(file.id);
   }
+  if (!options.includeFallbackFiles) return [...ids];
   const fallbackFiles = await prisma.fileAsset.findMany({
     where: {
       tenantId,
@@ -1098,7 +1118,7 @@ function appendSupportingDocumentPages(html: string, pages: string[]) {
 }
 
 // Keys whose value is HTML built server-side (already safe) and must be inserted unescaped.
-const RAW_HTML_KEYS = new Set(["payment.tableRows", "owner.addressMultilineHtml"]);
+const RAW_HTML_KEYS = new Set(["payment.tableRows", "owner.addressMultilineHtml", "owner.addressTwoLineHtml"]);
 
 function renderTemplate(template: string, variables: Record<string, string>, fileVariables: Record<string, string> = {}) {
   const missingVariables: string[] = [];
@@ -1286,6 +1306,29 @@ function addressMultilineHtml(value: string) {
   const lines = addressLines(value);
   if (!lines.length) return "";
   return lines.map((line) => escapeHtml(line)).join("<br>");
+}
+
+/**
+ * Transfer references reserve two address lines in their recipient blocks and holder table.
+ * Prefer the user's explicit line breaks; otherwise split comma-separated address parts at a
+ * natural midpoint. This keeps long single-line form input from stretching the letter layout.
+ */
+function addressTwoLineHtml(value: string) {
+  const explicitLines = addressLines(value);
+  if (!explicitLines.length) return "";
+
+  const parts = explicitLines.flatMap((line) => line.split(",").map((part) => part.trim()).filter(Boolean));
+  if (parts.length >= 2) {
+    const splitAt = Math.max(1, Math.ceil(parts.length / 2));
+    return [parts.slice(0, splitAt).join(", "), parts.slice(splitAt).join(", ")].map(escapeHtml).join("<br>");
+  }
+
+  const words = explicitLines[0].split(/\s+/).filter(Boolean);
+  if (words.length >= 4) {
+    const splitAt = Math.ceil(words.length / 2);
+    return [words.slice(0, splitAt).join(" "), words.slice(splitAt).join(" ")].map(escapeHtml).join("<br>");
+  }
+  return `${escapeHtml(explicitLines[0])}<br>`;
 }
 
 function resolveDocumentPlace({

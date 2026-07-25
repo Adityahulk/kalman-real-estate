@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Check, Link2, Mail, MessageCircle, Share2, X } from "lucide-react";
-import { createDirectShareLinks, whatsappTextShare } from "@/lib/file-sharing";
+import { createDirectShareLinks, shareFiles } from "@/lib/file-sharing";
 
 type ShareFile = { id: string; fileName: string };
 
@@ -10,6 +10,7 @@ export function MultiFileShare({ files }: { files: ShareFile[] }) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<"whatsapp" | "email" | "copy" | null>(null);
+  const [message, setMessage] = useState("");
 
   function toggle(id: string) {
     setSelected((current) => {
@@ -28,10 +29,11 @@ export function MultiFileShare({ files }: { files: ShareFile[] }) {
     const chosen = files.filter((file) => selected.has(file.id));
     if (!chosen.length) return;
     setBusy(target);
+    setMessage("");
     try {
       if (target === "whatsapp") {
-        const urls = await createDirectShareLinks(chosen);
-        whatsappTextShare(`${chosen.length} file${chosen.length === 1 ? "" : "s"} shared with you:\n${urls.join("\n")}`);
+        const shared = await shareFiles(chosen, "Shared files");
+        if (!shared) setMessage("This browser cannot attach files to a share target. Use the mobile app or a browser that supports file sharing.");
       } else if (target === "email") {
         const urls = await createDirectShareLinks(chosen);
         const message = `${chosen.length} file${chosen.length === 1 ? "" : "s"} shared with you:\n${urls.join("\n")}`;
@@ -42,7 +44,7 @@ export function MultiFileShare({ files }: { files: ShareFile[] }) {
         window.alert("Direct download link copied.");
       }
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Could not create share link.");
+      setMessage(error instanceof Error ? error.message : "Could not prepare files for sharing.");
     } finally {
       setBusy(null);
     }
@@ -66,7 +68,7 @@ export function MultiFileShare({ files }: { files: ShareFile[] }) {
       {open ? (
         <div className="space-y-2 p-3">
           <div className="flex items-center justify-between">
-            <div className="text-xs text-slate-500">WhatsApp opens directly with secure download links for the selected files.</div>
+            <div className="text-xs text-slate-500">WhatsApp shares the selected files as attachments. Choose WhatsApp in the device share sheet.</div>
             <button type="button" className="text-xs font-medium text-navy-700 hover:text-navy-900" onClick={selectAll}>
               {selected.size === files.length ? "Clear all" : "Select all"}
             </button>
@@ -94,6 +96,7 @@ export function MultiFileShare({ files }: { files: ShareFile[] }) {
               {busy === "copy" ? "Preparing" : "Copy link"}
             </button>
           </div>
+          {message ? <p className="text-xs text-amber-700">{message}</p> : null}
         </div>
       ) : null}
     </div>

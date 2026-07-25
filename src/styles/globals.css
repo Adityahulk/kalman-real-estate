@@ -636,15 +636,21 @@
   white-space: normal;
   text-align: left;
 }
-/* The signed transfer reference uses an unbordered recipient address block. Keep page 1 centred
-   and the issued transfer letter's page 5 block left-aligned, matching those source pages. */
-.letter-paper-editor .transfer-recipient-block {
+/* The signed transfer reference uses an unbordered recipient details table. Keep page 1 centred
+   and the issued transfer letter's page 5 table left-aligned, matching those source pages. */
+.letter-paper-editor .transfer-recipient-table {
   width: 72%;
   margin: 16px auto 22px;
+  border-collapse: collapse;
   line-height: 1.35;
   text-align: center;
 }
-.letter-paper-editor .transfer-recipient-block-left {
+.letter-paper-editor .transfer-recipient-table td {
+  border: 0;
+  padding: 0;
+  white-space: normal;
+}
+.letter-paper-editor .transfer-recipient-table-left {
   margin-left: 0;
   text-align: left;
 }

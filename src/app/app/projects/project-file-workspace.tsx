@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { FileUploader } from "@/components/file-uploader";
 import { FileActions } from "@/components/file-actions";
 import { FilePreview } from "@/components/file-preview";
-import { createDirectShareLinks, shareFiles, whatsappTextShare } from "@/lib/file-sharing";
+import { createDirectShareLinks, shareFiles } from "@/lib/file-sharing";
 
 type FileItem = {
   id: string;
@@ -25,6 +25,7 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
   const [shareMode, setShareMode] = useState(false);
   const [shareIds, setShareIds] = useState<Set<string>>(new Set());
   const [shareBusy, setShareBusy] = useState<"native" | "email" | "whatsapp" | null>(null);
+  const [shareMessage, setShareMessage] = useState("");
   const selected = files.find((file) => file.id === selectedId) ?? files[0];
   const selectedShareFiles = files.filter((file) => shareIds.has(file.id));
 
@@ -51,13 +52,12 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
   async function nativeShare() {
     if (!selectedShareFiles.length || shareBusy) return;
     setShareBusy("native");
+    setShareMessage("");
     try {
       if (await shareFiles(selectedShareFiles, "Project files")) return;
-      const text = await shareText();
-      await navigator.clipboard?.writeText(text).catch(() => undefined);
-      window.alert("Your browser cannot attach files. Direct download links were copied.");
+      setShareMessage("This browser cannot attach files to a share target. Use the mobile app or a browser that supports file sharing.");
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Could not prepare files for sharing.");
+      setShareMessage(error instanceof Error ? error.message : "Could not prepare files for sharing.");
     } finally {
       setShareBusy(null);
     }
@@ -79,10 +79,12 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
   async function shareViaWhatsApp() {
     if (shareBusy) return;
     setShareBusy("whatsapp");
+    setShareMessage("");
     try {
-      whatsappTextShare(await shareText());
+      if (await shareFiles(selectedShareFiles, "Project files")) return;
+      setShareMessage("This browser cannot attach files to WhatsApp. Use the mobile app or a browser that supports file sharing.");
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : "Could not create share links.");
+      setShareMessage(error instanceof Error ? error.message : "Could not prepare files for WhatsApp.");
     } finally {
       setShareBusy(null);
     }
@@ -106,12 +108,13 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
           </div>
           {shareMode ? (
             <div className="space-y-2 border-b border-slate-100 bg-slate-50 p-3">
-              <div className="text-xs text-slate-600">WhatsApp opens directly with secure download links. Use Share for the device share sheet.</div>
+              <div className="text-xs text-slate-600">WhatsApp shares selected files as attachments. Choose WhatsApp in the device share sheet.</div>
               <div className="grid gap-2 sm:grid-cols-3">
                 <button className="btn-primary h-9 justify-center px-3 text-xs sm:h-8" type="button" disabled={!shareIds.size || Boolean(shareBusy)} onClick={() => void nativeShare()}><Share2 size={13} /> {shareBusy === "native" ? "Preparing" : "Share"}</button>
                 <button className="btn-outline h-9 justify-center px-3 text-xs sm:h-8" type="button" disabled={!shareIds.size || Boolean(shareBusy)} onClick={() => void shareViaEmail()}><Mail size={13} /> {shareBusy === "email" ? "Preparing" : "Email"}</button>
                 <button className="btn-outline h-9 justify-center px-3 text-xs sm:h-8" type="button" disabled={!shareIds.size || Boolean(shareBusy)} onClick={() => void shareViaWhatsApp()}><MessageCircle size={13} /> {shareBusy === "whatsapp" ? "Preparing" : "WhatsApp"}</button>
               </div>
+              {shareMessage ? <p className="text-xs text-amber-700">{shareMessage}</p> : null}
             </div>
           ) : null}
           <div className="divide-y divide-slate-100">

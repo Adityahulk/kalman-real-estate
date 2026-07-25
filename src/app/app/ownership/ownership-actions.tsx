@@ -524,6 +524,7 @@ export function PlotTransferForm({
   const [identityDocuments, setIdentityDocuments] = useState<TransferIdentityDocument[]>([
     { kind: "Aadhaar", number: "", files: [] },
     { kind: "PAN", number: "", files: [] },
+    { kind: "DL", number: "", files: [] },
   ]);
   const [sellerRelationPrefix, setSellerRelationPrefix] = useState(
     ownerKycValue(currentOwner, ["relationPrefix", "relation"]) || "s/o Sh.",
@@ -577,6 +578,7 @@ export function PlotTransferForm({
     setIdentityDocuments([
       { kind: "Aadhaar", number: "", files: [] },
       { kind: "PAN", number: "", files: [] },
+      { kind: "DL", number: "", files: [] },
     ]);
   }
 

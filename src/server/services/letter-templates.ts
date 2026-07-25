@@ -284,7 +284,7 @@ export function transferLetterTemplate() {
 <p class="transfer-subject"><span>Subject&nbsp;&nbsp;&nbsp;:</span><span>Transfer of Residential Plot No. <strong>{{plot.code}}</strong> situated in <strong>{{project.name}}</strong> situated at <strong>{{project.fullAddress}}</strong>.</span></p>
 <p>Respected Sir,</p>
 <p>I, <strong>{{seller.nameWithRelation}}</strong> has been allotted residential Plot No. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqyd}}</strong> Square Yards at <strong>{{project.name}}</strong> of <strong>M/s. {{firm.name}}, {{firm.address}}</strong> vide allotment letter No. <strong>{{original.allotmentNumber}}</strong> dated <strong>{{original.allotmentDate}}</strong>. I/we seek your permission to transfer the above stated plot in favor of:</p>
-<p class="transfer-recipient-block"><u><strong>{{owner.nameWithRelation}}</strong></u><br>{{owner.addressMultilineHtml}}<br>PAN No. {{owner.panNo}}<br>Aadhaar No. {{owner.aadhaarNo}}</p>
+<table class="transfer-recipient-table transfer-recipient-table-centered"><tr><td><u><strong>{{owner.nameWithRelation}}</strong></u><br>{{owner.addressTwoLineHtml}}<br>PAN No. {{owner.panNo}}<br>Aadhaar No. {{owner.aadhaarNo}}</td></tr></table>
 <p>The conveyance deed in respect of the plot has been / not yet been executed. The said plot is free from all encumbrances like mortgages, gift or transfer in any manner to any person(s)/body.</p>
 <p>I/we hereby declare that nothing has been concealed in the above information and the residential plot is vacant. If in future, it is found that the transfer has been affected on the basis of false/wrong information provided in the application the transfer shall be deemed to be null and void and all consequent losses i.e. legal or financial shall be born by us. In case company suffers any loss on account of this transfer or as a consequence of this transfer myself/ourselves, legal heirs and successors of myself/ourselves shall be liable to make good all the losses or expenses sustained/suffered by the company or its employees. In case any legal heirs or successor or other person makes any claim regarding this residential plot, the litigation of the same shall be defended by me/us and the loss/expenses sustained/suffered by the company will also be made good by myself/ourselves.</p>
 </section>
@@ -293,7 +293,7 @@ export function transferLetterTemplate() {
 <p>The name, address and specimen signatures of the 1st transfer holder(s) as attested by me/us are as below:-</p>
 <table class="holder-table">
 <tr><th>Sr. No.</th><th>Name</th><th>Address</th><th>Signature</th></tr>
-<tr><td>1.</td><td>{{owner.nameWithRelation}}</td><td>{{owner.address}}</td><td>&nbsp;</td></tr>
+<tr><td>1.</td><td>{{owner.nameWithRelation}}</td><td>{{owner.addressTwoLineHtml}}</td><td>&nbsp;</td></tr>
 </table>
 <p>Signature of the 1st Allotee _________________________________________________</p>
 <p>Thanking You,<br>Yours Faithfully</p>
@@ -339,7 +339,7 @@ export function transferLetterTemplate() {
 <p class="transfer-title">TRANSFER LETTER</p>
 <p class="transfer-refline"><span><strong>No. <span class="red-text">{{document.number}}</span></strong></span><span class="red-text"><strong>DATED: {{document.dateSlashes}}</strong></span></p>
 <p>To,</p>
-<p class="transfer-recipient-block transfer-recipient-block-left"><u><strong>{{owner.nameWithRelation}}</strong></u><br>{{owner.addressMultilineHtml}}<br>PAN No. {{owner.panNo}}<br>Aadhaar No. {{owner.aadhaarNo}}</p>
+<table class="transfer-recipient-table transfer-recipient-table-left"><tr><td><u><strong>{{owner.nameWithRelation}}</strong></u><br>{{owner.addressTwoLineHtml}}<br>PAN No. {{owner.panNo}}<br>Aadhaar No. {{owner.aadhaarNo}}</td></tr></table>
 <p class="transfer-subject"><span><strong>SUBJECT:</strong></span><span><strong>TRANSRFER OF RESIDENTIAL PLOT NO. {{plot.code}} MEASURING {{plot.areaSqyd}} SQ. YDS. SITUATED AT {{project.nameUpper}}.</strong></span></p>
 <p>Respected Sir/Madam,</p>
 <p>Reference to your application dated <strong>{{document.dateSlashes}}</strong> on the subject cited above.</p>
