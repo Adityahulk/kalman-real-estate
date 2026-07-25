@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileUp, Loader2, Plus, Save, Send, Wand2, X } from "lucide-react";
 import { FileUploader } from "@/components/file-uploader";
@@ -24,6 +24,18 @@ type TransferIdentityDocument = {
   number: string;
   files: File[];
 };
+
+function isTransferStamp(value: unknown): value is TransferStamp {
+  return Boolean(value && typeof value === "object" &&
+    typeof (value as TransferStamp).number === "string" &&
+    typeof (value as TransferStamp).dated === "string");
+}
+
+function isTransferIdentityDocument(value: unknown): value is Omit<TransferIdentityDocument, "files"> {
+  return Boolean(value && typeof value === "object" &&
+    ["Aadhaar", "PAN", "DL", "Other"].includes((value as TransferIdentityDocument).kind) &&
+    typeof (value as TransferIdentityDocument).number === "string");
+}
 type OriginalAllotmentReference = { number: string; date: string };
 type RealEstateDocumentType =
   | "ALLOTMENT_LETTER"
@@ -546,6 +558,71 @@ export function PlotTransferForm({
   const [letterFieldFiles, setLetterFieldFiles] = useState<Record<string, File[]>>({});
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  // Opening the letter studio navigates away from this page. Keep the completed transfer form
+  // locally so returning with the browser back button never makes an operator re-enter it.
+  // Files themselves cannot be restored by a browser, but they have already been uploaded to
+  // the transfer record before the redirect; all entered form values are retained.
+  const restoreKey = `widestate:transfer-form:${plotId}`;
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(window.sessionStorage.getItem(restoreKey) ?? "{}") as Record<string, unknown>;
+      if (!saved || typeof saved !== "object") return;
+      if (saved.mode === "new" || saved.mode === "existing") setMode(saved.mode);
+      if (typeof saved.buyerOwnerId === "string") setBuyerOwnerId(saved.buyerOwnerId);
+      if (saved.ownerType === "INDIVIDUAL" || saved.ownerType === "COMPANY" || saved.ownerType === "SHARED") setOwnerType(saved.ownerType);
+      if (typeof saved.name === "string") setName(saved.name);
+      if (typeof saved.relationPrefix === "string") setRelationPrefix(saved.relationPrefix);
+      if (typeof saved.relationName === "string") setRelationName(saved.relationName);
+      if (typeof saved.email === "string") setEmail(saved.email);
+      if (typeof saved.phone === "string") setPhone(saved.phone);
+      if (typeof saved.address === "string") setAddress(saved.address);
+      if (typeof saved.sellerRelationPrefix === "string") setSellerRelationPrefix(saved.sellerRelationPrefix);
+      if (typeof saved.sellerRelationName === "string") setSellerRelationName(saved.sellerRelationName);
+      if (typeof saved.originalAllotmentNumber === "string") setOriginalAllotmentNumber(saved.originalAllotmentNumber);
+      if (typeof saved.originalAllotmentDate === "string") setOriginalAllotmentDate(saved.originalAllotmentDate);
+      if (typeof saved.effectiveAt === "string") setEffectiveAt(saved.effectiveAt);
+      if (typeof saved.amountInr === "string") setAmountInr(saved.amountInr);
+      if (typeof saved.sharePct === "string") setSharePct(saved.sharePct);
+      if (typeof saved.notes === "string") setNotes(saved.notes);
+      if (Array.isArray(saved.stamps)) setStamps(saved.stamps.filter(isTransferStamp));
+      if (Array.isArray(saved.identityDocuments)) {
+        const restored = saved.identityDocuments.filter(isTransferIdentityDocument);
+        if (restored.length) setIdentityDocuments(restored.map((document) => ({ ...document, files: [] })));
+      }
+      if (saved.letterFields && typeof saved.letterFields === "object" && !Array.isArray(saved.letterFields)) {
+        setLetterFields(saved.letterFields as Record<string, string>);
+      }
+    } catch {
+      // A malformed browser cache must never stop the transfer form from opening.
+    }
+  }, [restoreKey]);
+
+  function saveReturnState() {
+    if (typeof window === "undefined") return;
+    window.sessionStorage.setItem(restoreKey, JSON.stringify({
+      mode,
+      buyerOwnerId,
+      ownerType,
+      name,
+      relationPrefix,
+      relationName,
+      email,
+      phone,
+      address,
+      sellerRelationPrefix,
+      sellerRelationName,
+      originalAllotmentNumber,
+      originalAllotmentDate,
+      effectiveAt,
+      amountInr,
+      sharePct,
+      notes,
+      stamps,
+      identityDocuments: identityDocuments.map(({ kind, number }) => ({ kind, number })),
+      letterFields,
+    }));
+  }
 
   function selectExistingBuyer(ownerId: string) {
     setBuyerOwnerId(ownerId);
@@ -690,6 +767,19 @@ export function PlotTransferForm({
           notes: notes || undefined,
           extraDetails: {
             transfer: {
+              // A transfer letter is a historical document. Persist the transferor snapshot at
+              // the moment this transfer is recorded instead of relying on whichever owner is
+              // currently selected when the document is later opened or regenerated.
+              seller: {
+                name: currentOwner?.name ?? "",
+                relationPrefix: sellerRelationPrefix || undefined,
+                fatherName: sellerRelationName || undefined,
+                email: currentOwner?.email || undefined,
+                phone: currentOwner?.phone || undefined,
+                address: currentOwner?.address || undefined,
+                aadhaarNo: ownerKycValue(currentOwner, ["aadhaarNo", "aadharNo", "aadhaar", "aadhar"]) || undefined,
+                panNo: ownerKycValue(currentOwner, ["panNo", "pan"]) || undefined,
+              },
               sellerRelationPrefix: sellerRelationPrefix || undefined,
               sellerFatherName: sellerRelationName || undefined,
               originalAllotmentNumber: originalAllotmentNumber || undefined,
@@ -737,6 +827,7 @@ export function PlotTransferForm({
         return;
       }
       if (projectId) {
+        saveReturnState();
         const returnTo = `/app/projects/${projectId}/plots/${plotId}/transfer`;
         router.push(`/app/projects/${projectId}/plots/${plotId}/letters/${draftBody.data.document.id}?returnTo=${encodeURIComponent(returnTo)}`);
         return;

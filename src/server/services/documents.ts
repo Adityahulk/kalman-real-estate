@@ -736,18 +736,32 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
   // Transfer letters: the seller (transferor) is the most recent prior ownership held by a
   // different owner, and the original allotment letter is the latest issued allotment document
   // for this plot — both are auto-filled so the transfer set matches the signed reference.
-  const sellerRecord = plot.ownershipRecords.find(
-    (record) => record.ownerId && ownership?.ownerId && record.ownerId !== ownership.ownerId,
-  );
+  // A transfer must retain the actual transferor. Prefer the snapshot written at the moment the
+  // transfer was recorded. Older records did not have that snapshot, so fall back to the most
+  // recent ownership record immediately before the active transfer record (not plot.currentOwner).
+  const transferSeller = jsonRecord(transferDetails.seller);
+  const activeOwnershipIndex = plot.ownershipRecords.findIndex((record) => record.id === ownership?.id);
+  const sellerRecord = activeOwnershipIndex >= 0
+    ? plot.ownershipRecords.slice(activeOwnershipIndex + 1).find((record) =>
+        record.ownerId && !record.cancelledAt && record.kind !== OwnershipKind.COMPANY_INVENTORY,
+      )
+    : plot.ownershipRecords.find((record) =>
+        record.ownerId && !record.cancelledAt && record.ownerId !== ownership?.ownerId,
+      );
   const sellerKyc = jsonRecord(sellerRecord?.owner?.kyc);
   const sellerFatherName =
+    stringFromKyc(transferSeller, ["fatherName", "father", "relationName"])
+    ||
     stringFromKyc(transferDetails, ["sellerFatherName", "sellerRelationName"])
     || stringFromKyc(sellerKyc, ["fatherName", "father", "relationName"]);
   const sellerRelationPrefix =
+    stringFromKyc(transferSeller, ["relationPrefix", "relation"])
+    ||
     stringFromKyc(transferDetails, ["sellerRelationPrefix"])
     || stringFromKyc(sellerKyc, ["relationPrefix", "relation"])
     || "s/o Sh.";
-  const sellerNameWithRelation = [sellerRecord?.owner?.name ?? "", sellerFatherName ? `${sellerRelationPrefix} ${sellerFatherName}` : ""]
+  const sellerName = stringFromKyc(transferSeller, ["name"]) || sellerRecord?.owner?.name || "";
+  const sellerNameWithRelation = [sellerName, sellerFatherName ? `${sellerRelationPrefix} ${sellerFatherName}` : ""]
     .filter(Boolean)
     .join(" ");
   const originalAllotmentDoc = await prisma.generatedDocument.findFirst({
@@ -901,15 +915,15 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "owner2.mobileNo": stringFromKyc(secondAllottee, ["mobileNo", "phone", "mobile"]),
     "owner2.share": secondShare,
     // Transfer letters: transferor + the original allotment letter reference.
-    "seller.name": sellerRecord?.owner?.name ?? "",
+    "seller.name": sellerName,
     "seller.nameWithRelation": sellerNameWithRelation,
     "seller.fatherName": sellerFatherName,
     "seller.relationPrefix": sellerRelationPrefix,
-    "seller.address": normalizeAddressInline(sellerRecord?.owner?.address ?? ""),
-    "seller.phone": sellerRecord?.owner?.phone ?? "",
-    "seller.email": sellerRecord?.owner?.email ?? "",
-    "seller.aadhaarNo": stringFromKyc(sellerKyc, ["aadhaarNo", "aadharNo", "aadhaar", "aadhar"]),
-    "seller.panNo": stringFromKyc(sellerKyc, ["panNo", "pan"]),
+    "seller.address": normalizeAddressInline(stringFromKyc(transferSeller, ["address"]) || sellerRecord?.owner?.address || ""),
+    "seller.phone": stringFromKyc(transferSeller, ["phone", "mobile"]) || sellerRecord?.owner?.phone || "",
+    "seller.email": stringFromKyc(transferSeller, ["email"]) || sellerRecord?.owner?.email || "",
+    "seller.aadhaarNo": stringFromKyc(transferSeller, ["aadhaarNo", "aadharNo", "aadhaar", "aadhar"]) || stringFromKyc(sellerKyc, ["aadhaarNo", "aadharNo", "aadhaar", "aadhar"]),
+    "seller.panNo": stringFromKyc(transferSeller, ["panNo", "pan"]) || stringFromKyc(sellerKyc, ["panNo", "pan"]),
     "original.allotmentNumber": originalAllotmentNumber,
     "original.allotmentDate": originalAllotmentDate,
     "ownership.amountInr": ownership?.amountInr?.toString() ?? "",

@@ -371,6 +371,9 @@ await exerciseLetterType("registry_status_letter");
       categoryKey: "transfer-kyc",
     },
   });
+  const snapshotSellerName = `Snapshot Seller ${stamp}`;
+  const snapshotAllotmentNumber = `ORIGINAL-${stamp}`;
+  const snapshotAllotmentDate = "25.07.2026";
   const transferRecord = await prisma.ownershipRecord.create({
     data: {
       tenantId: sellerOwner.tenantId,
@@ -378,7 +381,14 @@ await exerciseLetterType("registry_status_letter");
       ownerId: buyer.id,
       kind: "TRANSFER",
       effectiveAt: new Date(),
-      extraDetails: { allottee: { documents: [{ kind: "Aadhaar", files: [{ id: transferKycFile.id, fileName: transferKycFile.fileName }] }] } },
+      extraDetails: {
+        transfer: {
+          seller: { name: snapshotSellerName, relationPrefix: "s/o Sh.", fatherName: "Snapshot Father" },
+          originalAllotmentNumber: snapshotAllotmentNumber,
+          originalAllotmentDate: snapshotAllotmentDate,
+        },
+        allottee: { documents: [{ kind: "Aadhaar", files: [{ id: transferKycFile.id, fileName: transferKycFile.fileName }] }] },
+      },
       createdById: (await prisma.user.findFirstOrThrow({ where: { email: "owner@saldhaland.example" } })).id,
     },
   });
@@ -391,8 +401,8 @@ await exerciseLetterType("registry_status_letter");
     });
     assert(created.response.status === 201, `transfer wiring: draft creation failed (${created.json.error ?? created.response.status})`);
     const html = created.json.data.document.editableHtml ?? "";
-    assert(html.includes(sellerOwner.name), "transfer wiring: seller (transferor) name missing from draft");
-    assert(html.includes(originalNumber), "transfer wiring: original allotment letter number missing from draft");
+    assert(html.includes(snapshotSellerName) && html.includes("s/o Sh. Snapshot Father"), "transfer wiring: stored seller snapshot missing from draft");
+    assert(html.includes(snapshotAllotmentNumber) && html.includes(snapshotAllotmentDate), "transfer wiring: stored original allotment reference missing from draft");
     assert(html.includes(`Transfer Buyer TB${stamp}`), "transfer wiring: buyer name missing from draft");
     console.log("  ✓ seller, buyer, and original allotment number auto-filled");
 
@@ -409,7 +419,7 @@ await exerciseLetterType("registry_status_letter");
     const render = await request(`/api/v1/documents/${created.json.data.document.id}/render`, { method: "POST", headers: { cookie } });
     assert(render.response.status === 200, `transfer wiring: render failed (${render.json.error ?? render.response.status})`);
     const pdf = await pdfText(await downloadPdf(render.json.data.document.fileAssetId));
-    for (const needle of [sellerOwner.name, originalNumber, `Transfer Buyer TB${stamp}`]) {
+    for (const needle of [snapshotSellerName, "Snapshot Father", snapshotAllotmentNumber, snapshotAllotmentDate, `Transfer Buyer TB${stamp}`]) {
       assert(pdf.has(needle), `transfer wiring: "${needle}" missing from rendered PDF`);
     }
     console.log(`  ✓ transfer PDF carries seller + original allotment reference (${pdf.numPages} pages)`);

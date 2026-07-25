@@ -25,7 +25,7 @@ export default async function TransferPlotPage(props: { params: Promise<{ projec
       where: {
         tenantId: session.tenantId,
         recordId: params.plotId,
-        type: "allotment_letter",
+        type: { in: ["allotment_letter", "allotment_letter_joint"] },
         archivedAt: null,
         number: { not: null },
         status: { notIn: ["REJECTED", "CHANGES_REQUESTED"] },
