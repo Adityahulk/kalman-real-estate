@@ -1,11 +1,15 @@
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { dirname, resolve, sep } from "node:path";
+import { dirname, isAbsolute, resolve, sep } from "node:path";
 import { FileStorageProvider } from "@prisma/client";
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const endpoint = process.env.S3_ENDPOINT;
-const localStorageRoot = resolve(process.env.LOCAL_STORAGE_ROOT ?? resolve(process.cwd(), "storage"));
+const configuredLocalStorageRoot = process.env.LOCAL_STORAGE_ROOT ?? "storage";
+const runtimeRoot = process.env.APP_ROOT ?? process.env.INIT_CWD ?? process.env.PWD ?? process.cwd();
+const localStorageRoot = isAbsolute(configuredLocalStorageRoot)
+  ? resolve(configuredLocalStorageRoot)
+  : resolve(runtimeRoot, configuredLocalStorageRoot);
 const s3TimeoutMs = Number(process.env.S3_TIMEOUT_MS ?? 2_500);
 
 export const objectStorage = new S3Client({

@@ -5,7 +5,8 @@ import { getSessionUser } from "@/server/session";
 
 export const dynamic = "force-dynamic";
 
-export default async function OwnerPlotPage({ params }: { params: { id: string } }) {
+export default async function OwnerPlotPage(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   const session = await getSessionUser();
   if (!session) return null;
   if (session.role !== "PLOT_OWNER") notFound();
@@ -27,14 +28,20 @@ export default async function OwnerPlotPage({ params }: { params: { id: string }
     include: {
       currentOwner: true,
       checklistItems: { orderBy: { category: "asc" } },
-      registryRecords: { orderBy: { createdAt: "desc" } },
+      registryRecords: { where: { archivedAt: null }, orderBy: { createdAt: "desc" } },
     },
   });
   if (!plot) notFound();
 
   const [documents, uploadedDocuments] = await Promise.all([
     prisma.generatedDocument.findMany({
-      where: { tenantId: session.tenantId, recordType: "Plot", recordId: plot.id, status: { in: ["APPROVED", "ISSUED"] } },
+      where: {
+        tenantId: session.tenantId,
+        recordType: "Plot",
+        recordId: plot.id,
+        archivedAt: null,
+        status: { in: ["APPROVED", "ISSUED", "SENT_FOR_SIGNATURE", "SIGNED"] },
+      },
       orderBy: { createdAt: "desc" },
     }),
     prisma.fileAsset.findMany({

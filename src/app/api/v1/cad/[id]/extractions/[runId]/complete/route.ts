@@ -4,8 +4,9 @@ import { completeBrowserExtraction } from "@/server/services/cad-browser-extract
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string; runId: string } },
+  props: { params: Promise<{ id: string; runId: string }> }
 ) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "cad.review");
     return ok(await completeBrowserExtraction(context, params.id, params.runId));

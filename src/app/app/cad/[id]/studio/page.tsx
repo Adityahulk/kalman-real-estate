@@ -1,15 +1,15 @@
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/server/db";
 import { hasPermission } from "@/server/rbac";
-import { getSessionUser } from "@/server/session";
+import { requireAnyPagePermission } from "@/server/page-auth";
 import { CadStudio } from "./cad-studio";
 import { DeleteCadButton } from "@/components/delete-cad-button";
 
 export const dynamic = "force-dynamic";
 
-export default async function CadStudioPage({ params }: { params: { id: string } }) {
-  const session = await getSessionUser();
-  if (!session || !hasPermission(session.role, "cad.review", session.permissions)) notFound();
+export default async function CadStudioPage(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
+  const session = await requireAnyPagePermission(["cad.view", "cad.review"]);
   const cadFile = await prisma.cadFile.findFirst({
     where: { id: params.id, tenantId: session.tenantId },
     include: {
@@ -47,14 +47,14 @@ export default async function CadStudioPage({ params }: { params: { id: string }
           updatedAt: overlay.updatedAt.toISOString(),
         }))}
       hasScene={cadFile.scenes.length > 0}
-      headerActions={
+      headerActions={hasPermission(session.role, "cad.delete", session.permissions) ? (
         <DeleteCadButton
           cadFileId={cadFile.id}
           fileName={cadFile.originalName}
           published={cadFile.status === "PUBLISHED"}
           redirectTo={cadFile.projectId ? `/app/projects/${cadFile.projectId}/cad?view=project` : "/app"}
         />
-      }
+      ) : null}
     />
   );
 }

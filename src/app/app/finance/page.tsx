@@ -1,14 +1,13 @@
 import { BadgeIndianRupee, ChartNoAxesCombined, ReceiptIndianRupee } from "lucide-react";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { fullInr } from "@/lib/format";
 import { BoqForm, InvoicePaymentPanel, VendorContractorForm } from "./finance-actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function FinancePage() {
-  const session = await getSessionUser();
-  if (!session) return null;
+  const session = await requirePagePermission("finance.view");
 
   const [projects, boq, invoices, insights] = await Promise.all([
     prisma.project.findMany({ where: { tenantId: session.tenantId }, orderBy: { name: "asc" } }),

@@ -1,17 +1,19 @@
 import Link from "next/link";
 import { FileCheck2, FileText, Search } from "lucide-react";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
+import { hasPermission } from "@/server/rbac";
 import { DeleteDocumentButton, DocumentApprovalButtons } from "./document-actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function DocumentsPage() {
-  const session = await getSessionUser();
-  if (!session) return null;
+  const session = await requirePagePermission("documents.view");
+  const canApprove = hasPermission(session.role, "documents.approve", session.permissions);
+  const canArchive = hasPermission(session.role, "records.restore", session.permissions);
 
   const documents = await prisma.generatedDocument.findMany({
-    where: { tenantId: session.tenantId },
+    where: { tenantId: session.tenantId, archivedAt: null },
     orderBy: { createdAt: "desc" },
     take: 50,
   });
@@ -86,8 +88,8 @@ export default async function DocumentsPage() {
                         {document.fileAssetId ? (
                           <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`}>Download</a>
                         ) : null}
-                        <DeleteDocumentButton documentId={document.id} documentName={document.number ?? document.type} />
-                        <DocumentApprovalButtons documentId={document.id} />
+                        {canArchive ? <DeleteDocumentButton documentId={document.id} documentName={document.number ?? document.type} /> : null}
+                        {canApprove ? <DocumentApprovalButtons documentId={document.id} status={document.status} fileAssetId={document.fileAssetId} /> : null}
                       </div>
                     </td>
                   </tr>

@@ -2,18 +2,18 @@ import Link from "next/link";
 import { FileWarning, Landmark, Search } from "lucide-react";
 import { PlotStatus } from "@prisma/client";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { fullInr } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
-export default async function OwnershipPage({
-  searchParams,
-}: {
-  searchParams: { q?: string; projectId?: string; status?: string; owner?: string; docs?: string; registry?: string };
-}) {
-  const session = await getSessionUser();
-  if (!session) return null;
+export default async function OwnershipPage(
+  props: {
+    searchParams: Promise<{ q?: string; projectId?: string; status?: string; owner?: string; docs?: string; registry?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
+  const session = await requirePagePermission("ownership.view");
 
   const [projects, plots] = await Promise.all([
     prisma.project.findMany({ where: { tenantId: session.tenantId }, orderBy: { name: "asc" } }),

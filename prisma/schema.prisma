@@ -130,6 +130,7 @@ enum DocumentStatus {
   UNDER_REVIEW
   APPROVED
   REJECTED
+  CHANGES_REQUESTED
   ISSUED
   SUBMITTED
   SENT_FOR_SIGNATURE
@@ -553,41 +554,49 @@ model Plot {
 }
 
 model OwnershipRecord {
-  id           String        @id @default(cuid())
-  tenantId     String
-  plotId       String
-  ownerId      String?
-  kind         OwnershipKind
-  amountInr    Decimal?      @db.Decimal(14, 2)
-  sharePct     Decimal?      @db.Decimal(5, 2)
-  documentId   String?
-  notes        String?
-  paymentMode  String?
-  extraDetails Json?
-  effectiveAt  DateTime      @default(now())
-  createdById  String?
-  createdAt    DateTime      @default(now())
+  id                 String        @id @default(cuid())
+  tenantId           String
+  plotId             String
+  ownerId            String?
+  kind               OwnershipKind
+  amountInr          Decimal?      @db.Decimal(14, 2)
+  sharePct           Decimal?      @db.Decimal(5, 2)
+  documentId         String?
+  notes              String?
+  paymentMode        String?
+  extraDetails       Json?
+  effectiveAt        DateTime      @default(now())
+  createdById        String?
+  cancelledAt        DateTime?
+  cancelledById      String?
+  cancellationReason String?
+  createdAt          DateTime      @default(now())
 
   plot      Plot   @relation(fields: [plotId], references: [id])
   owner     Owner? @relation(fields: [ownerId], references: [id])
   createdBy User?  @relation("OwnershipRecordCreator", fields: [createdById], references: [id])
 
   @@index([tenantId, plotId, effectiveAt])
+  @@index([tenantId, plotId, cancelledAt])
 }
 
 model RegistryRecord {
-  id           String    @id @default(cuid())
-  tenantId     String
-  plotId       String
-  status       String
-  registryNo   String?
-  registryDate DateTime?
-  notes        String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-  plot         Plot      @relation(fields: [plotId], references: [id])
+  id            String    @id @default(cuid())
+  tenantId      String
+  plotId        String
+  status        String
+  registryNo    String?
+  registryDate  DateTime?
+  notes         String?
+  archivedAt    DateTime?
+  archivedById  String?
+  archiveReason String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  plot          Plot      @relation(fields: [plotId], references: [id])
 
   @@index([tenantId, plotId])
+  @@index([tenantId, plotId, archivedAt])
 }
 
 model CadFile {
@@ -833,6 +842,8 @@ model FileAsset {
   ownerId            String?
   categoryKey        String?
   uploadedById       String?
+  version            Int                     @default(1)
+  previousFileId     String?
   deletedAt          DateTime?
   deletedById        String?
   deleteReason       String?
@@ -890,11 +901,15 @@ model GeneratedDocument {
   signedFileAssetId String?
   reviewNotes       String?
   finalizedAt       DateTime?
+  archivedAt        DateTime?
+  archivedById      String?
+  archiveReason     String?
   createdAt         DateTime                    @default(now())
   updatedAt         DateTime                    @updatedAt
   revisions         GeneratedDocumentRevision[]
 
   @@index([tenantId, recordType, recordId])
+  @@index([tenantId, archivedAt])
 }
 
 model GeneratedDocumentRevision {
@@ -935,6 +950,7 @@ model SiteAsset {
   verifiedById      String?
   verifiedAt        DateTime?
   verificationNotes String?
+  lastReminderAt    DateTime?
   progressPct       Int       @default(0)
   deadline          DateTime?
   geometry          Json?
@@ -989,6 +1005,8 @@ model ProgressUpdate {
   summary        String
   recordedAt     DateTime?
   photoFileIds   Json?
+  videoFileIds   Json?
+  materialUsed   String?
   visibleToOwner Boolean   @default(false)
   createdById    String?
   createdAt      DateTime  @default(now())
@@ -1026,6 +1044,9 @@ model MarketingTask {
   createdById    String?
   videographerId String?
   editorId       String?
+  archivedAt     DateTime?
+  archivedById   String?
+  archiveReason  String?
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
   project        Project?            @relation(fields: [projectId], references: [id])
@@ -1033,6 +1054,7 @@ model MarketingTask {
   comments       ReviewComment[]
 
   @@index([tenantId, projectId, status])
+  @@index([tenantId, archivedAt])
 }
 
 model MediaAsset {
@@ -1189,22 +1211,26 @@ model CostInsight {
 }
 
 model AuditEvent {
-  id          String      @id @default(cuid())
-  tenantId    String?
-  actorUserId String?
-  action      AuditAction
-  entityType  String
-  entityId    String
-  before      Json?
-  after       Json?
-  ipAddress   String?
-  userAgent   String?
-  createdAt   DateTime    @default(now())
+  id            String      @id @default(cuid())
+  tenantId      String?
+  actorUserId   String?
+  action        AuditAction
+  entityType    String
+  entityId      String
+  before        Json?
+  after         Json?
+  ipAddress     String?
+  userAgent     String?
+  archivedAt    DateTime?
+  archivedById  String?
+  archiveReason String?
+  createdAt     DateTime    @default(now())
 
   tenant Tenant? @relation(fields: [tenantId], references: [id])
   actor  User?   @relation("AuditActor", fields: [actorUserId], references: [id])
 
   @@index([tenantId, entityType, entityId, createdAt])
+  @@index([tenantId, archivedAt])
 }
 
 model Notification {

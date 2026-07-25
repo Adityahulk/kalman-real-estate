@@ -1,17 +1,15 @@
-import { notFound } from "next/navigation";
 import { BackButton } from "@/components/back-button";
 import { DevelopmentTaskForm } from "@/app/app/development/development-actions";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { hasPermission } from "@/server/rbac";
 import { listEngineeringAssignees } from "@/server/services/development";
 
 export const dynamic = "force-dynamic";
 
-export default async function DevelopmentNewTaskPage({ params }: { params: { projectId: string } }) {
-  const session = await getSessionUser();
-  if (!session) return null;
-  if (!hasPermission(session.role, "development.manage", session.permissions)) notFound();
+export default async function DevelopmentNewTaskPage(props: { params: Promise<{ projectId: string }> }) {
+  const params = await props.params;
+  const session = await requirePagePermission("development.manage");
 
   const [project, configuredCategories, assets, users] = await Promise.all([
     prisma.project.findFirstOrThrow({ where: { id: params.projectId, tenantId: session.tenantId } }),

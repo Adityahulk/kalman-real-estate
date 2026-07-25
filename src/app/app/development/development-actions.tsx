@@ -57,6 +57,8 @@ type TaskUpdate = {
   recordedAt: string | null;
   remarks: string;
   attachments: Array<{ id: string; fileName: string }>;
+  videos: Array<{ id: string; fileName: string }>;
+  materialUsed: string | null;
 };
 
 type TaskDetail = TaskItem & {
@@ -73,6 +75,7 @@ type TaskFormInput = {
   deadline: string;
   assignedToId?: string;
   status?: string;
+  priority?: string;
 };
 
 const TERMINAL_STATUSES = new Set(["COMPLETED", "CLOSED"]);
@@ -382,6 +385,7 @@ export function DevelopmentTaskForm({
   const [deadline, setDeadline] = useState(initialTask?.deadline ?? "");
   const [category, setCategory] = useState(initialTask?.category ?? categories[0] ?? "");
   const [assignedToId, setAssignedToId] = useState(initialTask?.assignedToId ?? "");
+  const [priority, setPriority] = useState(initialTask?.priority ?? "MEDIUM");
   const [drawings, setDrawings] = useState<File[]>([]);
   const [boqs, setBoqs] = useState<File[]>([]);
   const [estimates, setEstimates] = useState<File[]>([]);
@@ -402,7 +406,7 @@ export function DevelopmentTaskForm({
         category,
         assignedToId: assignedToId || null,
         status: initialTask?.status ?? (assignedToId ? "IN_PROGRESS" : "PLANNED"),
-        priority: "MEDIUM",
+        priority,
       };
       const response = await fetch(initialTask?.id ? `/api/v1/development/site-assets/${initialTask.id}` : "/api/v1/development/site-assets", {
         method: initialTask?.id ? "PATCH" : "POST",
@@ -453,6 +457,14 @@ export function DevelopmentTaskForm({
           <label><span className="label">Deadline</span><input className="input" type="date" value={deadline} onChange={(event) => setDeadline(event.target.value)} /></label>
           <label><span className="label">Category</span><select className="input" value={category} onChange={(event) => setCategory(event.target.value)} required>{categories.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         </div>
+        <label>
+          <span className="label">Priority</span>
+          <select className="input" value={priority} onChange={(event) => setPriority(event.target.value)}>
+            <option value="LOW">Low</option>
+            <option value="MEDIUM">Medium</option>
+            <option value="HIGH">High</option>
+          </select>
+        </label>
         {canAssign ? (
           <label>
             <span className="label">Assign to <span className="font-normal text-slate-400">(optional)</span></span>
@@ -494,10 +506,12 @@ function FileInput({ label, files, onChange }: { label: string; files: File[]; o
 export function DevelopmentTaskUpdateForm({
   task,
   canManage = false,
+  canUpdate = false,
   canVerify = false,
 }: {
   task: TaskDetail;
   canManage?: boolean;
+  canUpdate?: boolean;
   canVerify?: boolean;
 }) {
   const router = useRouter();
@@ -505,12 +519,14 @@ export function DevelopmentTaskUpdateForm({
   const [recordedAt, setRecordedAt] = useState(new Date().toISOString().slice(0, 10));
   const [remarks, setRemarks] = useState("");
   const [attachments, setAttachments] = useState<File[]>([]);
+  const [videoAttachments, setVideoAttachments] = useState<File[]>([]);
+  const [materialUsed, setMaterialUsed] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
   const awaitingVerification = task.status === "SENT_FOR_VERIFICATION";
   const terminal = TERMINAL_STATUSES.has(task.status);
-  const canSubmitForVerification = canManage
+  const canSubmitForVerification = canUpdate
     && task.progressPct >= 95
     && ["IN_PROGRESS", "RETURNED"].includes(task.status);
 
@@ -572,6 +588,10 @@ export function DevelopmentTaskUpdateForm({
     setLoading(true);
     setMessage("");
     try {
+      const [photos, videos] = await Promise.all([
+        attachments.length ? uploadFilesForOwner(task.id, "SiteAsset", "development-site-photo", attachments) : Promise.resolve([]),
+        videoAttachments.length ? uploadFilesForOwner(task.id, "SiteAsset", "development-site-video", videoAttachments) : Promise.resolve([]),
+      ]);
       const response = await fetch(`/api/v1/development/site-assets/${task.id}/progress`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -579,25 +599,17 @@ export function DevelopmentTaskUpdateForm({
           areaDone: Number(areaDone),
           recordedAt: new Date(`${recordedAt}T00:00:00`).toISOString(),
           summary: remarks,
+          photoFileIds: photos.map((file) => file.id),
+          videoFileIds: videos.map((file) => file.id),
+          materialUsed: materialUsed || undefined,
           visibleToOwner: false,
         }),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Could not update task.");
-      const progressId = body.data?.update?.id ?? body.data?.id;
-      if (progressId && attachments.length) {
-        const files = await uploadFilesForOwner(progressId, "ProgressUpdate", "development-site-photo", attachments);
-        if (files.length) {
-          const photoResponse = await fetch(`/api/v1/development/progress/${progressId}/photos`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ fileAssetIds: files.map((file) => file.id), visibleToOwner: false, summary: remarks || "Site photos uploaded." }),
-          });
-          const photoBody = await photoResponse.json();
-          if (!photoResponse.ok) throw new Error(photoBody.error ?? "Progress saved, but site photos could not be linked.");
-        }
-      }
       setAttachments([]);
+      setVideoAttachments([]);
+      setMaterialUsed("");
       setRemarks("");
       router.refresh();
     } catch (error) {
@@ -658,14 +670,18 @@ export function DevelopmentTaskUpdateForm({
           <div className="mt-5 rounded-lg bg-slate-50 px-4 py-3 text-sm text-slate-600">
             This task is {task.status.toLowerCase()}. Its progress and files remain available as a permanent record.
           </div>
-        ) : canManage ? (
+        ) : canUpdate ? (
           <form className="mt-5 grid gap-3" onSubmit={submit}>
             <div className="grid gap-3 md:grid-cols-2">
               <label><span className="label">Area done</span><input className="input" type="number" min="0" step="any" value={areaDone} onChange={(event) => setAreaDone(event.target.value)} /></label>
               <label><span className="label">Date</span><input className="input" type="date" value={recordedAt} onChange={(event) => setRecordedAt(event.target.value)} /></label>
             </div>
             <label><span className="label">Remarks</span><textarea className="input min-h-24" value={remarks} onChange={(event) => setRemarks(event.target.value)} /></label>
-            <label><span className="label">Site photos</span><input className="input pt-2" type="file" multiple accept="image/*" onChange={(event) => setAttachments(Array.from(event.target.files ?? []))} /></label>
+            <label><span className="label">Material used</span><textarea className="input min-h-20" value={materialUsed} onChange={(event) => setMaterialUsed(event.target.value)} placeholder="Materials and quantities used today" /></label>
+            <div className="grid gap-3 md:grid-cols-2">
+              <label><span className="label">Site photos</span><input className="input pt-2" type="file" multiple accept="image/*" onChange={(event) => setAttachments(Array.from(event.target.files ?? []))} /></label>
+              <label><span className="label">Site videos</span><input className="input pt-2" type="file" multiple accept="video/*" onChange={(event) => setVideoAttachments(Array.from(event.target.files ?? []))} /></label>
+            </div>
             <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">
               This update will set progress to {nextProgress}% based on {areaDone || "0"} / {task.totalArea || "0"} {task.units ?? ""}.
             </div>
@@ -690,7 +706,8 @@ export function DevelopmentTaskUpdateForm({
                 <th className="px-3 py-2">Progress</th>
                 <th className="px-3 py-2">Date</th>
                 <th className="px-3 py-2">Remarks</th>
-                <th className="px-3 py-2">Site photos</th>
+                <th className="px-3 py-2">Material</th>
+                <th className="px-3 py-2">Attachments</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -700,6 +717,7 @@ export function DevelopmentTaskUpdateForm({
                   <td className="px-3 py-2">{update.progressPct}%</td>
                   <td className="px-3 py-2">{update.recordedAt ? formatDate(update.recordedAt) : "-"}</td>
                   <td className="px-3 py-2">{update.remarks}</td>
+                  <td className="px-3 py-2">{update.materialUsed ?? "-"}</td>
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap gap-2">
                       {update.attachments.map((file) => (
@@ -707,7 +725,12 @@ export function DevelopmentTaskUpdateForm({
                           {file.fileName}
                         </a>
                       ))}
-                      {!update.attachments.length ? <span className="text-slate-400">-</span> : null}
+                      {update.videos.map((file) => (
+                        <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${file.id}/download?disposition=inline&proxy=1`} key={file.id} target="_blank" rel="noreferrer">
+                          {file.fileName}
+                        </a>
+                      ))}
+                      {!update.attachments.length && !update.videos.length ? <span className="text-slate-400">-</span> : null}
                     </div>
                   </td>
                 </tr>

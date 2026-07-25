@@ -1,17 +1,16 @@
 import Link from "next/link";
 import { ExternalLink, Plus } from "lucide-react";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
+import { requireAnyPagePermission } from "@/server/page-auth";
 import { MarketingIdeaActions } from "./marketing-actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function MarketingPage() {
-  const session = await getSessionUser();
-  if (!session) return null;
+  const session = await requireAnyPagePermission(["marketing.manage", "marketing.execute"]);
 
   const tasks = await prisma.marketingTask.findMany({
-    where: { tenantId: session.tenantId },
+    where: { tenantId: session.tenantId, archivedAt: null },
     include: { media: true, comments: true, project: true },
     orderBy: { updatedAt: "desc" },
   });

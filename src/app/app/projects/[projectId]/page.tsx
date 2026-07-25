@@ -1,14 +1,18 @@
 import Link from "next/link";
 import { Building2, FileStack, Map, Settings, FileText } from "lucide-react";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { prisma } from "@/server/db";
 import { ProjectDetailsEditor } from "../project-details-editor";
 import { BackButton } from "@/components/back-button";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProjectWorkspacePage({ params, searchParams }: { params: { projectId: string }; searchParams: { view?: string } }) {
-  const session = await getSessionUser(); if (!session) return null;
+export default async function ProjectWorkspacePage(
+  props: { params: Promise<{ projectId: string }>; searchParams: Promise<{ view?: string }> }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
+  const session = await requirePagePermission("projects.view");
   const [project, customFields] = await Promise.all([
     prisma.project.findFirstOrThrow({ where: { id: params.projectId, tenantId: session.tenantId } }),
     prisma.projectFileField.findMany({ where: { tenantId: session.tenantId, section: "PROJECT_DETAILS", parentId: null }, orderBy: { createdAt: "asc" } }),

@@ -72,12 +72,12 @@ export function DocumentApprovalButtons({
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState(initialStatus);
 
-  const isRejected = status === "REJECTED";
-  const canApprove = Boolean(fileAssetId);
-  const canIssue = Boolean(fileAssetId) && !isRejected;
+  const awaitingApproval = status === "SUBMITTED";
+  const canApprove = Boolean(fileAssetId) && awaitingApproval;
+  const canIssue = Boolean(fileAssetId) && (status === "APPROVED" || status === "SENT_FOR_SIGNATURE");
 
-  async function decide(status: "APPROVED" | "ISSUED" | "REJECTED") {
-    const endpoint = status === "REJECTED" ? "reject" : "approve";
+  async function decide(status: "APPROVED" | "ISSUED" | "REJECTED" | "CHANGES_REQUESTED") {
+    const endpoint = status === "REJECTED" ? "reject" : status === "CHANGES_REQUESTED" ? "return" : "approve";
     const response = await fetch(`/api/v1/documents/${documentId}/${endpoint}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -95,9 +95,10 @@ export function DocumentApprovalButtons({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <button className="btn-outline h-8 px-3 text-xs" disabled={!canApprove} onClick={() => decide("APPROVED")}>Approve</button>
-      {!isRejected ? <button className="btn-outline h-8 px-3 text-xs" disabled={!canIssue} onClick={() => decide("ISSUED")}>Issue</button> : null}
-      {!isRejected ? <button className="btn-outline h-8 px-3 text-xs" onClick={() => decide("REJECTED")}>Reject</button> : null}
+      {awaitingApproval ? <button className="btn-outline h-8 px-3 text-xs" disabled={!canApprove} onClick={() => decide("APPROVED")}>Approve</button> : null}
+      {canIssue ? <button className="btn-outline h-8 px-3 text-xs" onClick={() => decide("ISSUED")}>Issue</button> : null}
+      {awaitingApproval ? <button className="btn-outline h-8 px-3 text-xs" onClick={() => decide("CHANGES_REQUESTED")}>Return for correction</button> : null}
+      {awaitingApproval ? <button className="btn-outline h-8 px-3 text-xs text-rose-700" onClick={() => decide("REJECTED")}>Reject</button> : null}
       {message ? <span className="text-xs text-slate-500">{message}</span> : null}
     </div>
   );
@@ -115,7 +116,7 @@ export function DeleteDocumentButton({
   const [message, setMessage] = useState("");
 
   async function remove() {
-    if (!globalThis.window.confirm(`Delete ${documentName ?? "this letter"} completely from generated letters?`)) return;
+    if (!globalThis.window.confirm(`Archive ${documentName ?? "this letter"}? It will leave active views but remain recoverable in the audit trail.`)) return;
     setLoading(true);
     setMessage("");
     const response = await fetch(`/api/v1/documents/${documentId}`, {
@@ -134,7 +135,7 @@ export function DeleteDocumentButton({
     <span className="inline-flex items-center gap-2">
       <button type="button" className="btn-outline h-8 px-3 text-xs text-rose-700 hover:bg-rose-50" onClick={remove} disabled={loading}>
         <Trash2 size={14} />
-        {loading ? "Deleting" : "Delete"}
+        {loading ? "Archiving" : "Archive"}
       </button>
       {message ? <span className="text-xs text-rose-700">{message}</span> : null}
     </span>

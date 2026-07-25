@@ -3,7 +3,8 @@ import { apiError, getRequestContext, ok } from "@/server/api";
 import { cleanPlotAuditEvents } from "@/server/audit";
 import { getPlotAudit } from "@/server/services/ownership";
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "ownership.view");
     return ok(await getPlotAudit(context, params.id));
@@ -12,7 +13,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "ownership.manage");
     return ok(await cleanPlotAuditEvents(context, params.id));

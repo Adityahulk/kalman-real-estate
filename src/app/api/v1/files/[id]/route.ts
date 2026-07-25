@@ -2,7 +2,8 @@ import { NextRequest } from "next/server";
 import { apiError, getRequestContext, ok, parseJson } from "@/server/api";
 import { deleteFileAsset, deleteFileSchema, renameFileAsset, renameFileSchema } from "@/server/services/files";
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "files.upload");
     return ok(await renameFileAsset(context, params.id, await parseJson(request, renameFileSchema)));
@@ -11,7 +12,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "files.upload");
     const input = await parseJson(request, deleteFileSchema);

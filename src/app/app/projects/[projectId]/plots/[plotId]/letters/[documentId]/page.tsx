@@ -1,21 +1,24 @@
 import { notFound } from "next/navigation";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { prisma } from "@/server/db";
 import { hasPermission } from "@/server/rbac";
 import { LetterStudioEditor } from "../../../../../workflow-action-forms";
 
 export const dynamic = "force-dynamic";
 
-export default async function LetterStudioPage({ params, searchParams }: { params: { projectId: string; plotId: string; documentId: string }; searchParams: { returnTo?: string } }) {
-  const session = await getSessionUser();
-  if (!session) return null;
+export default async function LetterStudioPage(
+  props: { params: Promise<{ projectId: string; plotId: string; documentId: string }>; searchParams: Promise<{ returnTo?: string }> }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
+  const session = await requirePagePermission("documents.view");
   const [plot, document] = await Promise.all([
     prisma.plot.findFirst({
       where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId, archivedAt: null },
       include: { project: true, currentOwner: true },
     }),
     prisma.generatedDocument.findFirst({
-      where: { id: params.documentId, tenantId: session.tenantId, recordType: "Plot", recordId: params.plotId },
+      where: { id: params.documentId, tenantId: session.tenantId, recordType: "Plot", recordId: params.plotId, archivedAt: null },
     }),
   ]);
   if (!plot || !document) notFound();

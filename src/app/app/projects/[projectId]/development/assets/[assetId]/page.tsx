@@ -13,15 +13,20 @@ import { listEngineeringAssignees } from "@/server/services/development";
 
 export const dynamic = "force-dynamic";
 
-export default async function SiteAssetWorkspacePage({
-  params,
-}: {
-  params: { projectId: string; assetId: string };
-}) {
+export default async function SiteAssetWorkspacePage(
+  props: {
+    params: Promise<{ projectId: string; assetId: string }>;
+  }
+) {
+  const params = await props.params;
   const session = await getSessionUser();
   if (!session) return null;
 
   if (!hasPermission(session.role, "development.view", session.permissions)) notFound();
+  const canManage = hasPermission(session.role, "development.manage", session.permissions);
+  const canVerify = hasPermission(session.role, "engineering.verify", session.permissions);
+  const canAssign = hasPermission(session.role, "engineering.assign", session.permissions);
+  const canUpdateAssigned = hasPermission(session.role, "development.update_assigned", session.permissions);
 
   const [asset, configuredCategories, engineeringFiles, updates, users] = await Promise.all([
     prisma.siteAsset.findFirst({
@@ -61,14 +66,18 @@ export default async function SiteAssetWorkspacePage({
   ]);
 
   if (!asset) notFound();
+  if (!canManage && !canVerify && !canAssign && (!canUpdateAssigned || asset.assignedToId !== session.id)) notFound();
 
   const attachmentIds = Array.from(
     new Set(
-      updates.flatMap((update) =>
-        Array.isArray(update.photoFileIds)
+      updates.flatMap((update) => [
+        ...(Array.isArray(update.photoFileIds)
           ? update.photoFileIds.filter((value): value is string => typeof value === "string")
-          : [],
-      ),
+          : []),
+        ...(Array.isArray(update.videoFileIds)
+          ? update.videoFileIds.filter((value): value is string => typeof value === "string")
+          : []),
+      ]),
     ),
   );
 
@@ -117,6 +126,13 @@ export default async function SiteAssetWorkspacePage({
             .map((id) => attachmentMap.get(id))
             .filter((file): file is { id: string; fileName: string } => Boolean(file))
         : [],
+      videos: Array.isArray(update.videoFileIds)
+        ? update.videoFileIds
+            .filter((value): value is string => typeof value === "string")
+            .map((id) => attachmentMap.get(id))
+            .filter((file): file is { id: string; fileName: string } => Boolean(file))
+        : [],
+      materialUsed: update.materialUsed ?? null,
     })),
   };
 
@@ -134,8 +150,9 @@ export default async function SiteAssetWorkspacePage({
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <DevelopmentTaskUpdateForm
           task={task}
-          canManage={hasPermission(session.role, "development.manage", session.permissions)}
-          canVerify={hasPermission(session.role, "engineering.verify", session.permissions)}
+          canManage={canManage}
+          canUpdate={canManage || (canUpdateAssigned && asset.assignedToId === session.id)}
+          canVerify={canVerify}
         />
 
         <aside className="space-y-6">
@@ -170,11 +187,11 @@ export default async function SiteAssetWorkspacePage({
             </div>
           </section>
 
-          <DevelopmentTaskForm
+          {canManage ? <DevelopmentTaskForm
             projectId={asset.projectId}
             categories={categories}
             assignees={users}
-            canAssign={hasPermission(session.role, "engineering.assign", session.permissions)}
+            canAssign={canAssign}
             initialTask={{
               id: asset.id,
               name: asset.name,
@@ -184,8 +201,9 @@ export default async function SiteAssetWorkspacePage({
               deadline: asset.deadline ? asset.deadline.toISOString().slice(0, 10) : "",
               assignedToId: asset.assignedToId ?? "",
               status: asset.status,
+              priority: asset.priority ?? "MEDIUM",
             }}
-          />
+          /> : null}
         </aside>
       </div>
     </main>

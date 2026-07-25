@@ -3,7 +3,7 @@ import { z } from "zod";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
-import { deleteObjectResilient } from "../storage";
+import { hasPermission } from "../rbac";
 
 export const ownerSchema = z.object({
   type: z.enum(["INDIVIDUAL", "COMPANY", "SHARED"]),
@@ -67,16 +67,26 @@ export const allotPlotSchema = z.object({
 });
 
 export async function allotPlot(context: RequestContext, plotId: string, input: z.infer<typeof allotPlotSchema>) {
+  assertCanPrepareAllotment(context);
   const result = await prisma.$transaction(async (tx) => {
     const before = await tx.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
     if (before.currentOwnerId) {
       throwBadRequest("This plot already has an owner. Use transfer instead.");
     }
-    await tx.owner.findFirstOrThrow({ where: { id: input.ownerId, tenantId: context.tenantId } });
-    const plot = await tx.plot.update({
-      where: { id: plotId },
-      data: { currentOwnerId: input.ownerId, status: PlotStatus.ALLOTTED },
+    const pending = await tx.ownershipRecord.findFirst({
+      where: {
+        tenantId: context.tenantId,
+        plotId,
+        kind: OwnershipKind.ALLOTMENT,
+        cancelledAt: null,
+      },
+      orderBy: { createdAt: "desc" },
     });
+    if (pending) {
+      throwBadRequest("An allotment is already being prepared for this plot. Open its allotment details to continue.");
+    }
+    await tx.owner.findFirstOrThrow({ where: { id: input.ownerId, tenantId: context.tenantId } });
+    const plot = before;
     const record = await tx.ownershipRecord.create({
       data: {
         tenantId: context.tenantId,
@@ -100,20 +110,18 @@ export async function allotPlot(context: RequestContext, plotId: string, input: 
 }
 
 export async function updateLatestAllotment(context: RequestContext, plotId: string, input: z.infer<typeof allotPlotSchema>) {
+  assertCanPrepareAllotment(context);
   const result = await prisma.$transaction(async (tx) => {
     const before = await tx.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
     const recordBefore = await tx.ownershipRecord.findFirst({
-      where: { tenantId: context.tenantId, plotId, kind: OwnershipKind.ALLOTMENT },
+      where: { tenantId: context.tenantId, plotId, kind: OwnershipKind.ALLOTMENT, cancelledAt: null },
       orderBy: { createdAt: "desc" },
     });
     if (!recordBefore) {
       throwBadRequest("No allotment record exists for this plot yet.");
     }
     await tx.owner.findFirstOrThrow({ where: { id: input.ownerId, tenantId: context.tenantId } });
-    const plot = await tx.plot.update({
-      where: { id: plotId },
-      data: { currentOwnerId: input.ownerId, status: PlotStatus.ALLOTTED },
-    });
+    const plot = before;
     const record = await tx.ownershipRecord.update({
       where: { id: recordBefore.id },
       data: {
@@ -167,22 +175,24 @@ export async function transferPlot(context: RequestContext, plotId: string, inpu
     }
     const tenant = await tx.tenant.findUniqueOrThrow({ where: { id: context.tenantId }, select: { maxTransfersPerPlot: true } });
     const transferRecords = await tx.ownershipRecord.findMany({
-      where: { tenantId: context.tenantId, plotId, kind: OwnershipKind.TRANSFER, documentId: { not: null } },
+      where: { tenantId: context.tenantId, plotId, kind: OwnershipKind.TRANSFER, documentId: { not: null }, cancelledAt: null },
       select: { documentId: true },
     });
     const acceptedTransfers = transferRecords.length
       ? await tx.generatedDocument.count({
-          where: { tenantId: context.tenantId, id: { in: transferRecords.map((record) => record.documentId).filter(Boolean) as string[] }, status: { in: ["APPROVED", "ISSUED"] } },
+          where: {
+            tenantId: context.tenantId,
+            id: { in: transferRecords.map((record) => record.documentId).filter(Boolean) as string[] },
+            archivedAt: null,
+            status: { in: ["APPROVED", "ISSUED", "SENT_FOR_SIGNATURE", "SIGNED"] },
+          },
         })
       : 0;
     if (acceptedTransfers >= tenant.maxTransfersPerPlot) {
       throwBadRequest(`Transfer limit reached for this plot. Only registry is available now.`);
     }
     await tx.owner.findFirstOrThrow({ where: { id: input.buyerOwnerId, tenantId: context.tenantId } });
-    const plot = await tx.plot.update({
-      where: { id: plotId },
-      data: { currentOwnerId: input.buyerOwnerId, status: PlotStatus.TRANSFERRED },
-    });
+    const plot = before;
     const record = await tx.ownershipRecord.create({
       data: {
         tenantId: context.tenantId,
@@ -298,6 +308,7 @@ export async function cancelLatestOwnershipRecord(context: RequestContext, plotI
         tenantId: context.tenantId,
         plotId,
         kind: { in: [OwnershipKind.ALLOTMENT, OwnershipKind.TRANSFER] },
+        cancelledAt: null,
       },
       orderBy: [{ effectiveAt: "desc" }, { createdAt: "desc" }],
     });
@@ -319,6 +330,7 @@ export async function cancelLatestOwnershipRecord(context: RequestContext, plotI
         tenantId: context.tenantId,
         recordType: "Plot",
         recordId: plotId,
+        archivedAt: null,
         OR: documentFilters,
       },
       select: {
@@ -363,26 +375,34 @@ export async function cancelLatestOwnershipRecord(context: RequestContext, plotI
     });
     const fileIds = relatedFiles.map((file) => file.id);
 
-    const auditFilters: Prisma.AuditEventWhereInput[] = [];
-    if (documentIds.length) auditFilters.push({ entityType: "GeneratedDocument", entityId: { in: documentIds } });
-    if (fileIds.length) auditFilters.push({ entityType: "FileAsset", entityId: { in: fileIds } });
-    if (auditFilters.length) {
-      await tx.auditEvent.deleteMany({ where: { tenantId: context.tenantId, OR: auditFilters } });
-    }
+    const now = new Date();
     if (documentIds.length) {
-      await tx.approval.deleteMany({
-        where: { tenantId: context.tenantId, recordType: "GeneratedDocument", recordId: { in: documentIds } },
-      });
-      await tx.generatedDocumentRevision.deleteMany({
-        where: { tenantId: context.tenantId, documentId: { in: documentIds } },
-      });
-      await tx.generatedDocument.deleteMany({
-        where: { tenantId: context.tenantId, id: { in: documentIds } },
+      await tx.generatedDocument.updateMany({
+        where: { tenantId: context.tenantId, id: { in: documentIds }, archivedAt: null },
+        data: {
+          archivedAt: now,
+          archivedById: context.userId,
+          archiveReason: `Ownership ${latest.kind.toLowerCase()} cancelled`,
+        },
       });
     }
-    await tx.ownershipRecord.delete({ where: { id: latest.id } });
+    await tx.ownershipRecord.update({
+      where: { id: latest.id },
+      data: {
+        cancelledAt: now,
+        cancelledById: context.userId,
+        cancellationReason: `Cancelled by ${context.role}`,
+      },
+    });
     if (fileIds.length) {
-      await tx.fileAsset.deleteMany({ where: { tenantId: context.tenantId, id: { in: fileIds } } });
+      await tx.fileAsset.updateMany({
+        where: { tenantId: context.tenantId, id: { in: fileIds }, deletedAt: null },
+        data: {
+          deletedAt: now,
+          deletedById: context.userId,
+          deleteReason: `Ownership ${latest.kind.toLowerCase()} cancelled`,
+        },
+      });
     }
 
     const previous = ownershipRecords[1] ?? null;
@@ -401,11 +421,9 @@ export async function cancelLatestOwnershipRecord(context: RequestContext, plotI
       cancelled: latest,
       documentCount: documentIds.length,
       fileCount: fileIds.length,
-      storageKeys: uniqueStrings(relatedFiles.flatMap((file) => [file.storageKey, file.fallbackStorageKey])),
     };
   });
 
-  const storageWarnings = (await Promise.all(cleanup.storageKeys.map((key) => deleteObjectResilient(key)))).flat();
   await writeAuditEvent(context, {
     action: AuditAction.DELETE,
     entityType: "Plot",
@@ -417,17 +435,15 @@ export async function cancelLatestOwnershipRecord(context: RequestContext, plotI
     after: {
       plot: cleanup.plot,
       cancelledOwnershipRecordId: recordId,
-      deletedDocuments: cleanup.documentCount,
-      deletedFiles: cleanup.fileCount,
-      storageWarnings,
+      archivedDocuments: cleanup.documentCount,
+      archivedFiles: cleanup.fileCount,
     } as unknown as Prisma.InputJsonValue,
   });
   return {
     plot: cleanup.plot,
     cancelledRecordId: recordId,
-    deletedDocuments: cleanup.documentCount,
-    deletedFiles: cleanup.fileCount,
-    storageWarnings,
+    archivedDocuments: cleanup.documentCount,
+    archivedFiles: cleanup.fileCount,
   };
 }
 
@@ -466,9 +482,9 @@ export async function updateRegistry(context: RequestContext, plotId: string, in
 export async function getPlotAudit(context: RequestContext, plotId: string) {
   const [plot, ownership, registry, audit] = await Promise.all([
     prisma.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null }, include: { currentOwner: true } }),
-    prisma.ownershipRecord.findMany({ where: { tenantId: context.tenantId, plotId }, include: { owner: true }, orderBy: { effectiveAt: "asc" } }),
-    prisma.registryRecord.findMany({ where: { tenantId: context.tenantId, plotId }, orderBy: { createdAt: "asc" } }),
-    prisma.auditEvent.findMany({ where: { tenantId: context.tenantId, entityType: "Plot", entityId: plotId }, orderBy: { createdAt: "asc" } }),
+    prisma.ownershipRecord.findMany({ where: { tenantId: context.tenantId, plotId, cancelledAt: null }, include: { owner: true }, orderBy: { effectiveAt: "asc" } }),
+    prisma.registryRecord.findMany({ where: { tenantId: context.tenantId, plotId, archivedAt: null }, orderBy: { createdAt: "asc" } }),
+    prisma.auditEvent.findMany({ where: { tenantId: context.tenantId, entityType: "Plot", entityId: plotId, archivedAt: null }, orderBy: { createdAt: "asc" } }),
   ]);
   return { plot, ownership, registry, audit };
 }
@@ -485,6 +501,16 @@ function assertSuperAdmin(context: RequestContext, message: string) {
     error.name = "ForbiddenError";
     throw error;
   }
+}
+
+function assertCanPrepareAllotment(context: RequestContext) {
+  if (
+    hasPermission(context.role, "ownership.manage", context.permissions)
+    || hasPermission(context.role, "documents.generate", context.permissions)
+  ) return;
+  const error = new Error("You do not have permission to prepare an allotment.");
+  error.name = "ForbiddenError";
+  throw error;
 }
 
 function uniqueStrings(values: Array<string | null | undefined>) {

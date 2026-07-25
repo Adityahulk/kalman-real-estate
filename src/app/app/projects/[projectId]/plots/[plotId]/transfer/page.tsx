@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { prisma } from "@/server/db";
 import { ActionHint, ActionPageShell } from "../../../../action-page-shell";
 import { PlotTransferForm } from "../../../../../ownership/ownership-actions";
@@ -9,9 +9,9 @@ import { listLetterFieldSettings } from "@/server/services/letter-field-settings
 
 export const dynamic = "force-dynamic";
 
-export default async function TransferPlotPage({ params }: { params: { projectId: string; plotId: string } }) {
-  const session = await getSessionUser();
-  if (!session) return null;
+export default async function TransferPlotPage(props: { params: Promise<{ projectId: string; plotId: string }> }) {
+  const params = await props.params;
+  const session = await requirePagePermission("ownership.manage");
   await ensureProjectLetterTemplates(session.tenantId, params.projectId);
   const [plot, firm, letterTemplate, letterCategories, originalAllotment] = await Promise.all([
     prisma.plot.findFirst({
@@ -26,8 +26,9 @@ export default async function TransferPlotPage({ params }: { params: { projectId
         tenantId: session.tenantId,
         recordId: params.plotId,
         type: "allotment_letter",
+        archivedAt: null,
         number: { not: null },
-        status: { not: "REJECTED" },
+        status: { notIn: ["REJECTED", "CHANGES_REQUESTED"] },
       },
       orderBy: { createdAt: "desc" },
       select: { number: true, finalizedAt: true, createdAt: true },
@@ -88,8 +89,10 @@ function dateInput(value: Date | null | undefined) {
 }
 
 async function acceptedTransferCount(tenantId: string, plotId: string) {
-  const records = await prisma.ownershipRecord.findMany({ where: { tenantId, plotId, kind: "TRANSFER", documentId: { not: null } }, select: { documentId: true } });
+  const records = await prisma.ownershipRecord.findMany({ where: { tenantId, plotId, kind: "TRANSFER", cancelledAt: null, documentId: { not: null } }, select: { documentId: true } });
   const ids = records.map((record) => record.documentId).filter(Boolean) as string[];
   if (!ids.length) return 0;
-  return prisma.generatedDocument.count({ where: { tenantId, id: { in: ids }, status: { in: ["APPROVED", "ISSUED"] } } });
+  return prisma.generatedDocument.count({
+    where: { tenantId, id: { in: ids }, archivedAt: null, status: { in: ["APPROVED", "ISSUED", "SENT_FOR_SIGNATURE", "SIGNED"] } },
+  });
 }

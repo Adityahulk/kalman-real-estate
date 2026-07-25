@@ -2,9 +2,10 @@ import { NextRequest } from "next/server";
 import { apiError, getRequestContext, ok } from "@/server/api";
 import { deleteAuditEvent } from "@/server/audit";
 
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
-    const context = await getRequestContext(request, "ownership.manage");
+    const context = await getRequestContext(request, "records.restore");
     return ok(await deleteAuditEvent(context, params.id));
   } catch (error) {
     return apiError(error);

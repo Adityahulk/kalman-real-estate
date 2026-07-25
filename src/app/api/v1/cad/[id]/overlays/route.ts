@@ -6,7 +6,8 @@ import {
   saveCadOverlay,
 } from "@/server/services/cad-overlays";
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "cad.review");
     return ok(await listCadOverlays(context, params.id));
@@ -15,7 +16,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "cad.review");
     return created(await saveCadOverlay(context, params.id, await parseJson(request, cadOverlaySchema)));

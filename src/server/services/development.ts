@@ -23,15 +23,19 @@ export const progressSchema = z.object({
   recordedAt: z.string().datetime().optional(),
   summary: z.string().min(1),
   photoFileIds: z.array(z.string()).optional(),
+  videoFileIds: z.array(z.string()).optional(),
+  materialUsed: z.string().trim().max(2000).optional(),
   visibleToOwner: z.boolean().default(false),
 });
 
 export async function updateSiteAssetProgress(context: RequestContext, siteAssetId: string, input: z.infer<typeof progressSchema>) {
   const assetBefore = await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
+  assertCanUpdateAssignedTask(context, assetBefore);
   if ([TASK_STATUS.COMPLETED, TASK_STATUS.CLOSED].includes(assetBefore.status as typeof TASK_STATUS.COMPLETED | typeof TASK_STATUS.CLOSED)) {
     throwBadRequest("Completed or closed tasks cannot receive new progress updates.");
   }
   if (input.photoFileIds?.length) await assertFilesInTenant(context, input.photoFileIds);
+  if (input.videoFileIds?.length) await assertFilesInTenant(context, input.videoFileIds);
   const totalArea = assetBefore.totalArea ? Number(assetBefore.totalArea) : 0;
   const progressPct = totalArea > 0 ? Math.max(0, Math.min(100, Math.round((input.areaDone / totalArea) * 100))) : assetBefore.progressPct;
   const [asset, update] = await prisma.$transaction([
@@ -52,6 +56,8 @@ export async function updateSiteAssetProgress(context: RequestContext, siteAsset
         summary: input.summary,
         recordedAt: input.recordedAt ? new Date(input.recordedAt) : undefined,
         photoFileIds: input.photoFileIds as Prisma.InputJsonValue,
+        videoFileIds: input.videoFileIds as Prisma.InputJsonValue,
+        materialUsed: input.materialUsed || null,
         visibleToOwner: input.visibleToOwner,
         createdById: context.userId,
       },
@@ -152,6 +158,7 @@ export const developmentTaskSchema = z.object({
   deadline: z.string().datetime().optional(),
   category: z.string().min(2),
   assignedToId: z.string().optional().nullable(),
+  priority: z.enum(["LOW", "MEDIUM", "HIGH"]).default("MEDIUM"),
   status: z.enum([
     TASK_STATUS.PLANNED,
     TASK_STATUS.IN_PROGRESS,
@@ -164,6 +171,7 @@ export const developmentTaskSchema = z.object({
 
 export async function updateDevelopmentTask(context: RequestContext, siteAssetId: string, input: z.infer<typeof developmentTaskSchema>) {
   const before = await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
+  assertCanUpdateAssignedTask(context, before);
   if ((input.assignedToId ?? null) !== (before.assignedToId ?? null)) {
     assertPermission(context.role, "engineering.assign", context.permissions);
   }
@@ -178,6 +186,7 @@ export async function updateDevelopmentTask(context: RequestContext, siteAssetId
       deadline: input.deadline ? new Date(input.deadline) : null,
       assignedToId: input.assignedToId || null,
       contractorId: null,
+      priority: input.priority,
       status: input.status,
     },
   });
@@ -280,6 +289,7 @@ export async function createDevelopmentTask(context: RequestContext, input: z.in
 // Site Engineer sends a task to the Head Engineer for verification once work is done.
 export async function submitTaskForVerification(context: RequestContext, siteAssetId: string) {
   const before = await prisma.siteAsset.findFirstOrThrow({ where: { id: siteAssetId, tenantId: context.tenantId, archivedAt: null } });
+  assertCanUpdateAssignedTask(context, before);
   if ([TASK_STATUS.COMPLETED, TASK_STATUS.CLOSED].includes(before.status as typeof TASK_STATUS.COMPLETED | typeof TASK_STATUS.CLOSED)) {
     throwBadRequest("This task is already completed or closed.");
   }
@@ -397,7 +407,11 @@ export async function listEngineeringAssignees(tenantId: string) {
     },
   });
   return users
-    .filter((user) => hasPermission(user.role, "development.manage", normalizePermissions(user.customRole?.permissions)))
+    .filter((user) => {
+      const permissions = normalizePermissions(user.customRole?.permissions);
+      return hasPermission(user.role, "development.manage", permissions)
+        || hasPermission(user.role, "development.update_assigned", permissions);
+    })
     .map((user) => ({
       id: user.id,
       name: user.name,
@@ -424,6 +438,19 @@ async function assertActiveTenantUser(context: RequestContext, userId: string) {
   });
   if (!user) throwBadRequest("Select an active user from this firm.");
   return user;
+}
+
+function assertCanUpdateAssignedTask(
+  context: RequestContext,
+  task: { assignedToId: string | null },
+) {
+  if (hasPermission(context.role, "development.manage", context.permissions)) return;
+  assertPermission(context.role, "development.update_assigned", context.permissions);
+  if (!task.assignedToId || task.assignedToId !== context.userId) {
+    const error = new Error("You can only update engineering tasks assigned to you.");
+    error.name = "ForbiddenError";
+    throw error;
+  }
 }
 
 function throwBadRequest(message: string): never {

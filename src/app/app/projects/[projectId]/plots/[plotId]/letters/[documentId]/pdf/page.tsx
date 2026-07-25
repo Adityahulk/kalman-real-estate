@@ -1,20 +1,22 @@
 import { notFound } from "next/navigation";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { prisma } from "@/server/db";
 import { PdfComposer } from "../../../../../../pdf-composer";
 
 export const dynamic = "force-dynamic";
 
-export default async function LetterPdfComposerPage({ params }: { params: { projectId: string; plotId: string; documentId: string } }) {
-  const session = await getSessionUser();
-  if (!session) return null;
+export default async function LetterPdfComposerPage(
+  props: { params: Promise<{ projectId: string; plotId: string; documentId: string }> }
+) {
+  const params = await props.params;
+  const session = await requirePagePermission("documents.view");
   const [plot, document] = await Promise.all([
     prisma.plot.findFirst({
       where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId, archivedAt: null },
       include: { project: true },
     }),
     prisma.generatedDocument.findFirst({
-      where: { id: params.documentId, tenantId: session.tenantId, recordType: "Plot", recordId: params.plotId },
+      where: { id: params.documentId, tenantId: session.tenantId, recordType: "Plot", recordId: params.plotId, archivedAt: null },
       include: { revisions: { orderBy: { revisionNo: "desc" } } },
     }),
   ]);

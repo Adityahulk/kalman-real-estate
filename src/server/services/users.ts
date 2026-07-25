@@ -202,16 +202,13 @@ export async function deleteUser(context: RequestContext, id: string) {
     throw error;
   }
   const before = await prisma.user.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
-  await prisma.$transaction(async (tx) => {
-    await tx.fileAsset.updateMany({
-      where: { tenantId: context.tenantId, ownerType: "User", ownerId: id, deletedAt: null },
-      data: { deletedAt: new Date(), deletedById: context.userId, deleteReason: "User account deleted" },
-    });
-    await tx.notification.deleteMany({ where: { tenantId: context.tenantId, userId: id } });
+  const user = await prisma.$transaction(async (tx) => {
     await tx.deviceToken.deleteMany({ where: { tenantId: context.tenantId, userId: id } });
-    await tx.ownershipRecord.updateMany({ where: { createdById: id }, data: { createdById: null } });
-    await tx.auditEvent.updateMany({ where: { actorUserId: id }, data: { actorUserId: null } });
-    await tx.user.delete({ where: { id } });
+    return tx.user.update({
+      where: { id },
+      data: { status: UserStatus.DISABLED },
+      select: { id: true, name: true, email: true, role: true, status: true },
+    });
   });
   await writeAuditEvent(context, {
     action: AuditAction.DELETE,
@@ -219,7 +216,7 @@ export async function deleteUser(context: RequestContext, id: string) {
     entityId: id,
     before: { id: before.id, name: before.name, email: before.email, role: before.role } as Prisma.InputJsonValue,
   });
-  return { id };
+  return { id, archived: true, status: user.status };
 }
 
 export async function resetUserPassword(context: RequestContext, id: string, input: z.infer<typeof resetPasswordSchema>) {

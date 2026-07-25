@@ -1,9 +1,11 @@
 import { BackButton } from "@/components/back-button";
+import { requireAnyPagePermission } from "@/server/page-auth";
 import { MarketingTaskForm } from "../marketing-actions";
 
 export const dynamic = "force-dynamic";
 
-export default function MarketingNewIdeaPage() {
+export default async function MarketingNewIdeaPage() {
+  await requireAnyPagePermission(["marketing.manage", "marketing.execute"]);
   return (
     <main className="px-4 py-6 lg:px-8">
       <BackButton fallbackHref="/app/marketing" />

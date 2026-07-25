@@ -2,22 +2,22 @@ import Link from "next/link";
 import { Landmark, Plus, Search, Users } from "lucide-react";
 import { PlotStatus } from "@prisma/client";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { BackButton } from "@/components/back-button";
 import { sortByPlotCode } from "@/lib/plot-code-sort";
 import { OwnershipPlotRow } from "./ownership-plot-row";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProjectOwnershipPage({
-  params,
-  searchParams,
-}: {
-  params: { projectId: string };
-  searchParams: { q?: string; status?: string; statusGroup?: string; owner?: string; docs?: string; registry?: string; source?: string };
-}) {
-  const session = await getSessionUser();
-  if (!session) return null;
+export default async function ProjectOwnershipPage(
+  props: {
+    params: Promise<{ projectId: string }>;
+    searchParams: Promise<{ q?: string; status?: string; statusGroup?: string; owner?: string; docs?: string; registry?: string; source?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
+  const session = await requirePagePermission("ownership.view");
   const [project, firm] = await Promise.all([
     prisma.project.findFirstOrThrow({ where: { id: params.projectId, tenantId: session.tenantId } }),
     prisma.tenant.findUniqueOrThrow({ where: { id: session.tenantId }, select: { name: true } }),
@@ -80,7 +80,7 @@ export default async function ProjectOwnershipPage({
     return counts;
   }, {});
   const generatedLetters = await prisma.generatedDocument.findMany({
-    where: { tenantId: session.tenantId, recordType: "Plot", recordId: { in: plots.map((plot) => plot.id) }, type: { contains: "allotment", mode: "insensitive" } },
+    where: { tenantId: session.tenantId, recordType: "Plot", recordId: { in: plots.map((plot) => plot.id) }, type: { contains: "allotment", mode: "insensitive" }, archivedAt: null },
     orderBy: { createdAt: "desc" },
   });
   const signedLetters = await prisma.fileAsset.findMany({
@@ -127,7 +127,6 @@ export default async function ProjectOwnershipPage({
           </Link>
         </div>
       </div>
-
       <section className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <SummaryCard label="Total plots" value={String(allProjectPlots.length)} href={`/app/projects/${project.id}/ownership`} active={!searchParams.status && !searchParams.statusGroup && !searchParams.docs && !searchParams.source} />
         <SummaryCard label="From CAD" value={String(cadLinkedPlotIds.length)} href={`/app/projects/${project.id}/ownership?source=cad`} active={searchParams.source === "cad"} />
@@ -135,7 +134,6 @@ export default async function ProjectOwnershipPage({
         <SummaryCard label="Allotted + transferred" value={String((statusCounts.ALLOTTED ?? 0) + (statusCounts.TRANSFERRED ?? 0))} href={`/app/projects/${project.id}/ownership?statusGroup=allotted-transferred`} active={searchParams.statusGroup === "allotted-transferred"} />
         <SummaryCard label="Registered" value={String(statusCounts.REGISTERED ?? 0)} href={`/app/projects/${project.id}/ownership?status=REGISTERED`} active={searchParams.status === "REGISTERED"} />
       </section>
-
       <form className="mt-6 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-[1fr_180px_180px_auto]">
         <label>
           <span className="label">Search plot or owner</span>
@@ -157,7 +155,6 @@ export default async function ProjectOwnershipPage({
         </label>
         <button className="btn-outline self-end">Filter</button>
       </form>
-
       <section className="card mt-6 overflow-hidden">
         <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-4">
           <Landmark size={18} />

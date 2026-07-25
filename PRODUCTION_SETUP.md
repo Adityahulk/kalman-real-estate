@@ -120,7 +120,24 @@ GET /api/v1/cad/health
 
 ## Production Deployment Notes
 
+Use Node.js 22 or newer for local, CI, and non-container deployments. The
+production Docker images and GitHub Actions workflows use Node.js 22 so PDF
+generation, AWS storage libraries, and the web build run on the same supported
+runtime.
+
+`npm audit` currently reports one unfixed high-severity advisory inherited from
+MLightCAD's `lodash-es` dependency. MLightCAD is bundled only into the
+permission-gated browser CAD studio; it is not imported by the web server or
+workers. Keep CAD upload/studio permissions restricted to trusted project
+administrators and upgrade MLightCAD as soon as its maintainers publish a
+patched dependency.
+
 Use managed Postgres, managed Redis, and S3/R2/MinIO-compatible storage where available. Keep `FILE_STORAGE_DRIVER=s3_with_local_fallback` and mount `/app/storage` so the app can continue generating PDFs and accepting uploads when S3 is missing or temporarily unavailable. Set the environment variables from `.env.example`, run migrations in CI/CD, and run separate worker processes for document generation and AI reports.
+
+Set `APP_ROOT=/app` and `LOCAL_STORAGE_ROOT=/app/storage` for standalone or
+container deployments. Relative local-storage paths are resolved from
+`APP_ROOT` (or the original shell working directory) so Next.js standalone mode
+cannot accidentally redirect uploads into `.next/standalone/storage`.
 
 The production Compose file publishes the web application using:
 
@@ -157,7 +174,7 @@ If an existing server shows an error like `EACCES: permission denied, mkdir '/ap
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.production down
-docker compose -f docker-compose.prod.yml --env-file .env.production build --no-cache web document-worker ai-worker migrate
+docker compose -f docker-compose.prod.yml --env-file .env.production build --no-cache web document-worker ai-worker reminder-worker migrate
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d
 ```
 
@@ -165,7 +182,7 @@ To repair only the existing named storage volume without rebuilding, run:
 
 ```bash
 docker compose -f docker-compose.prod.yml --env-file .env.production run --rm storage-init
-docker compose -f docker-compose.prod.yml --env-file .env.production restart web document-worker
+docker compose -f docker-compose.prod.yml --env-file .env.production restart web document-worker reminder-worker
 ```
 
 ## Containerized Production Deployment
@@ -175,6 +192,7 @@ The deployable production shape is split by workload:
 - `web`: Next.js standalone server, including browser CAD runtime assets and in-process Gemini PDF map processing.
 - `document-worker`: PDF/document generation worker.
 - `ai-worker`: AI/report queue worker.
+- `reminder-worker`: Daily engineering deadlines and government-document expiry notifications.
 - `postgres` and `redis`: included for single-VM production or staging. On AWS/DigitalOcean managed services, point the same env vars at managed Postgres/Redis instead.
 
 Create a production env file:

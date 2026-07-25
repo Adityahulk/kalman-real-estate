@@ -26,7 +26,7 @@ const OWNERSHIP_ACCEPTED_STATUSES: DocumentStatus[] = [
 const EDITABLE_STATUSES: DocumentStatus[] = [
   DocumentStatus.DRAFT,
   DocumentStatus.GENERATED,
-  DocumentStatus.REJECTED,
+  DocumentStatus.CHANGES_REQUESTED,
 ];
 
 function assertDocumentEditable(status: DocumentStatus) {
@@ -204,13 +204,13 @@ function applyDraftOverrides(
 }
 
 export async function updateDocumentDraft(context: RequestContext, id: string, input: z.infer<typeof updateDocumentDraftSchema>) {
-  const before = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  const before = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId, archivedAt: null } });
   assertDocumentEditable(before.status);
   const document = await prisma.generatedDocument.update({
     where: { id },
     data: {
       editableHtml: input.editableHtml,
-      status: before.status === DocumentStatus.REJECTED ? DocumentStatus.DRAFT : before.status,
+      status: before.status === DocumentStatus.CHANGES_REQUESTED ? DocumentStatus.DRAFT : before.status,
     },
   });
   await writeAuditEvent(context, {
@@ -224,7 +224,7 @@ export async function updateDocumentDraft(context: RequestContext, id: string, i
 }
 
 export async function renderDocumentDraft(context: RequestContext, id: string) {
-  const document = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  const document = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId, archivedAt: null } });
   assertDocumentEditable(document.status);
   const tenant = await prisma.tenant.findUnique({ where: { id: context.tenantId } });
   const html = await resolveFileUrlsToDataUris(context.tenantId, document.editableHtml ?? "");
@@ -281,9 +281,13 @@ export const submitDocumentSchema = z.object({
 });
 
 export async function submitDocument(context: RequestContext, id: string, input: z.infer<typeof submitDocumentSchema>) {
-  const current = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
-  if (!EDITABLE_STATUSES.includes(current.status)) {
-    const error = new Error(`This letter is already ${current.status.replaceAll("_", " ").toLowerCase()}.`);
+  const current = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId, archivedAt: null } });
+  if (current.status !== DocumentStatus.GENERATED) {
+    const error = new Error(
+      current.status === DocumentStatus.CHANGES_REQUESTED || current.status === DocumentStatus.DRAFT
+        ? "Generate an updated PDF before submitting this letter."
+        : `This letter is already ${current.status.replaceAll("_", " ").toLowerCase()}.`,
+    );
     error.name = "BadRequestError";
     throw error;
   }
@@ -317,38 +321,51 @@ export async function submitDocument(context: RequestContext, id: string, input:
 }
 
 export const approveDocumentSchema = z.object({
-  status: z.enum(["APPROVED", "REJECTED", "ISSUED"]),
+  status: z.enum(["APPROVED", "REJECTED", "CHANGES_REQUESTED", "ISSUED"]),
   notes: z.string().optional(),
 });
 
 export async function approveDocument(context: RequestContext, id: string, input: z.infer<typeof approveDocumentSchema>) {
-  const current = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  const current = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId, archivedAt: null } });
+  if (input.status === "ISSUED") {
+    if (current.status !== DocumentStatus.APPROVED && current.status !== DocumentStatus.SENT_FOR_SIGNATURE) {
+      throwBadRequest("Only an approved letter can be issued.");
+    }
+  } else if (current.status !== DocumentStatus.SUBMITTED) {
+    throwBadRequest(
+      current.status === DocumentStatus.REJECTED
+        ? "This letter has already been rejected."
+        : current.status === DocumentStatus.CHANGES_REQUESTED
+          ? "This letter has already been returned for correction."
+        : "Only a submitted letter awaiting approval can be approved or rejected.",
+    );
+  }
   const accepting = input.status === "APPROVED" || input.status === "ISSUED";
   if (accepting && !current.fileAssetId) {
     const error = new Error("Generate the PDF before approving or issuing it.");
     error.name = "BadRequestError";
     throw error;
   }
-  // Approving an allotment moves it straight into the signature queue so the signatory is notified
-  // immediately ("after approval → automatically notify signatory"). ISSUED keeps its legacy meaning.
   const nextStatus =
     input.status === "APPROVED"
-      ? DocumentStatus.SENT_FOR_SIGNATURE
+      ? DocumentStatus.APPROVED
       : input.status === "ISSUED"
         ? DocumentStatus.ISSUED
-        : DocumentStatus.REJECTED;
+        : input.status === "CHANGES_REQUESTED"
+          ? DocumentStatus.CHANGES_REQUESTED
+          : DocumentStatus.REJECTED;
   const document = await prisma.generatedDocument.update({
     where: { id, tenantId: context.tenantId },
     data: {
       status: nextStatus,
       approvedById: accepting ? context.userId : current.approvedById,
       approvedAt: accepting ? new Date() : current.approvedAt,
-      reviewNotes: input.status === "REJECTED" ? input.notes ?? null : current.reviewNotes,
+      reviewNotes: input.status === "REJECTED" || input.status === "CHANGES_REQUESTED" ? input.notes ?? null : current.reviewNotes,
     },
   });
   await reconcilePlotOwnershipForDocument(context, document);
   await writeAuditEvent(context, {
-    action: input.status === "REJECTED" ? AuditAction.REJECT : AuditAction.APPROVE,
+    action: input.status === "REJECTED" || input.status === "CHANGES_REQUESTED" ? AuditAction.REJECT : AuditAction.APPROVE,
     entityType: "GeneratedDocument",
     entityId: id,
     after: { ...document, notes: input.notes } as unknown as Prisma.InputJsonValue,
@@ -368,7 +385,7 @@ export async function approveDocument(context: RequestContext, id: string, input
         data: { documentId: id, status: document.status },
       });
     }
-  } else if (input.status === "REJECTED") {
+  } else if (input.status === "CHANGES_REQUESTED") {
     if (document.submittedById) {
       await createNotification(context, {
         userId: document.submittedById,
@@ -383,6 +400,15 @@ export async function approveDocument(context: RequestContext, id: string, input
       data: { documentId: id, status: document.status },
       excludeUserId: context.userId,
     });
+  } else if (input.status === "REJECTED") {
+    if (document.submittedById) {
+      await createNotification(context, {
+        userId: document.submittedById,
+        title: "Allotment rejected",
+        body: `${document.number ?? document.type} was rejected${input.notes ? `: ${input.notes}` : "."}`,
+        data: { documentId: id, status: document.status },
+      });
+    }
   } else {
     await createNotification(context, {
       title: "Document issued",
@@ -401,7 +427,7 @@ export const signDocumentSchema = z.object({
 });
 
 export async function signDocument(context: RequestContext, id: string, input: z.infer<typeof signDocumentSchema>) {
-  const current = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  const current = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId, archivedAt: null } });
   if (current.status !== DocumentStatus.SENT_FOR_SIGNATURE && current.status !== DocumentStatus.APPROVED) {
     const error = new Error("Only approved letters awaiting signature can be signed.");
     error.name = "BadRequestError";
@@ -450,19 +476,46 @@ export async function signDocument(context: RequestContext, id: string, input: z
 }
 
 export async function deleteDocument(context: RequestContext, id: string) {
-  const document = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
-  // Detach any ownership records that still point at this letter (plain String? field, no FK cascade).
-  await prisma.ownershipRecord.updateMany({ where: { tenantId: context.tenantId, documentId: id }, data: { documentId: null } });
-  // Remove revision history, then the document itself (hard delete — no deletedAt column).
-  await prisma.generatedDocumentRevision.deleteMany({ where: { tenantId: context.tenantId, documentId: id } });
-  await prisma.generatedDocument.delete({ where: { id } });
-  await writeAuditEvent(context, { action: AuditAction.DELETE, entityType: "GeneratedDocument", entityId: id, before: document });
-  await createNotification(context, {
-    title: "Document deleted",
-    body: `${document.number ?? document.type} was deleted.`,
-    data: { documentId: id, status: "DELETED" },
+  const document = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId, archivedAt: null } });
+  const archived = await prisma.generatedDocument.update({
+    where: { id },
+    data: {
+      archivedAt: new Date(),
+      archivedById: context.userId,
+      archiveReason: "Archived from generated letters",
+    },
   });
-  return { id };
+  await writeAuditEvent(context, {
+    action: AuditAction.DELETE,
+    entityType: "GeneratedDocument",
+    entityId: id,
+    before: document as unknown as Prisma.InputJsonValue,
+    after: archived as unknown as Prisma.InputJsonValue,
+  });
+  await createNotification(context, {
+    title: "Document archived",
+    body: `${document.number ?? document.type} was archived and remains available in the audit trail.`,
+    data: { documentId: id, status: "ARCHIVED" },
+  });
+  return { id, archived: true };
+}
+
+export async function restoreDocument(context: RequestContext, id: string) {
+  const before = await prisma.generatedDocument.findFirstOrThrow({
+    where: { id, tenantId: context.tenantId, archivedAt: { not: null } },
+  });
+  const document = await prisma.generatedDocument.update({
+    where: { id },
+    data: { archivedAt: null, archivedById: null, archiveReason: null },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.UPDATE,
+    entityType: "GeneratedDocument",
+    entityId: id,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: { restored: true, status: document.status } as Prisma.InputJsonValue,
+  });
+  return document;
 }
 
 async function linkDocumentToLatestOwnershipRecord(context: RequestContext, document: GeneratedDocument) {
@@ -475,7 +528,7 @@ async function linkDocumentToLatestOwnershipRecord(context: RequestContext, docu
       : null;
   if (!kind) return;
   const record = await prisma.ownershipRecord.findFirst({
-    where: { tenantId: context.tenantId, plotId: document.recordId, kind, documentId: null },
+    where: { tenantId: context.tenantId, plotId: document.recordId, kind, documentId: null, cancelledAt: null },
     orderBy: { createdAt: "desc" },
   });
   if (!record) return;
@@ -485,7 +538,7 @@ async function linkDocumentToLatestOwnershipRecord(context: RequestContext, docu
 async function reconcilePlotOwnershipForDocument(context: RequestContext, document: GeneratedDocument) {
   if (document.recordType !== "Plot" || !document.type.toLowerCase().match(/allotment|transfer/)) return;
   const linked = await prisma.ownershipRecord.findFirst({
-    where: { tenantId: context.tenantId, plotId: document.recordId, documentId: document.id },
+    where: { tenantId: context.tenantId, plotId: document.recordId, documentId: document.id, cancelledAt: null },
   });
   if (!linked || (linked.kind !== OwnershipKind.ALLOTMENT && linked.kind !== OwnershipKind.TRANSFER)) return;
 
@@ -515,14 +568,20 @@ async function reconcilePlotOwnershipForDocument(context: RequestContext, docume
 
 async function previousAcceptedOwnership(tenantId: string, plotId: string, excludedRecordId: string) {
   const records = await prisma.ownershipRecord.findMany({
-    where: { tenantId, plotId, id: { not: excludedRecordId }, kind: { in: [OwnershipKind.COMPANY_INVENTORY, OwnershipKind.ALLOTMENT, OwnershipKind.TRANSFER] } },
+    where: {
+      tenantId,
+      plotId,
+      id: { not: excludedRecordId },
+      cancelledAt: null,
+      kind: { in: [OwnershipKind.COMPANY_INVENTORY, OwnershipKind.ALLOTMENT, OwnershipKind.TRANSFER] },
+    },
     orderBy: { effectiveAt: "desc" },
   });
   for (const record of records) {
     if (record.kind === OwnershipKind.COMPANY_INVENTORY) return record;
     if (!record.documentId) return record;
     const document = await prisma.generatedDocument.findFirst({
-      where: { id: record.documentId, tenantId, status: { in: OWNERSHIP_ACCEPTED_STATUSES } },
+      where: { id: record.documentId, tenantId, archivedAt: null, status: { in: OWNERSHIP_ACCEPTED_STATUSES } },
       select: { id: true },
     });
     if (document) return record;
@@ -532,11 +591,11 @@ async function previousAcceptedOwnership(tenantId: string, plotId: string, exclu
 
 export async function getDocumentDownload(context: RequestContext, id: string) {
   const document = await prisma.generatedDocument.findFirstOrThrow({
-    where: { id, tenantId: context.tenantId },
+    where: { id, tenantId: context.tenantId, archivedAt: null },
   });
   if (context.role === "PLOT_OWNER") {
     if (document.recordType !== "Plot") throwForbidden("Document is not visible to this owner");
-    if (document.status !== "APPROVED" && document.status !== "ISSUED") throwForbidden("Document is not approved for owner download");
+    if (!OWNERSHIP_ACCEPTED_STATUSES.includes(document.status)) throwForbidden("Document is not approved for owner download");
     const user = await prisma.user.findUnique({ where: { id: context.userId } });
     const owner = await prisma.owner.findFirst({
       where: {
@@ -561,6 +620,12 @@ export async function getDocumentDownload(context: RequestContext, id: string) {
 function throwForbidden(message: string): never {
   const error = new Error(message);
   error.name = "ForbiddenError";
+  throw error;
+}
+
+function throwBadRequest(message: string): never {
+  const error = new Error(message);
+  error.name = "BadRequestError";
   throw error;
 }
 
@@ -686,7 +751,8 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
       tenantId: context.tenantId,
       recordId: plot.id,
       type: { in: ["allotment_letter", "allotment_letter_joint"] },
-      status: { notIn: [DocumentStatus.REJECTED] },
+      archivedAt: null,
+      status: { notIn: [DocumentStatus.REJECTED, DocumentStatus.CHANGES_REQUESTED] },
       number: { not: null },
     },
     orderBy: { createdAt: "desc" },

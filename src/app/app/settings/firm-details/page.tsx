@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { Building2, Plus, Settings } from "lucide-react";
-import { redirect } from "next/navigation";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { firmFieldsForUser, firmsForUser } from "@/server/services/firms";
 import { prisma } from "@/server/db";
 import { AddFirmFieldForm, OwnershipSettingsForm } from "./settings-actions";
@@ -11,8 +10,7 @@ import { SettingsTabs } from "../settings-tabs";
 export const dynamic = "force-dynamic";
 
 export default async function FirmDetailsPage() {
-  const session = await getSessionUser();
-  if (!session) redirect("/login");
+  const session = await requirePagePermission("tenant.manage");
 
   const [firms, fields, selectedFirm] = await Promise.all([
     firmsForUser(session),

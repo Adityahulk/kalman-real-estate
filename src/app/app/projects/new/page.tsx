@@ -1,13 +1,11 @@
 import { CreateProjectForm } from "../project-actions";
 import { BackButton } from "@/components/back-button";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { prisma } from "@/server/db";
 
 export default async function NewProjectPage() {
-  const session = await getSessionUser();
-  const fields = session
-    ? await prisma.projectFileField.findMany({ where: { tenantId: session.tenantId, section: "PROJECT_DETAILS", parentId: null }, orderBy: { createdAt: "asc" } })
-    : [];
+  const session = await requirePagePermission("projects.manage");
+  const fields = await prisma.projectFileField.findMany({ where: { tenantId: session.tenantId, section: "PROJECT_DETAILS", parentId: null }, orderBy: { createdAt: "asc" } });
   return (
     <main className="px-4 py-6 lg:px-8">
       <div className="mx-auto max-w-2xl">

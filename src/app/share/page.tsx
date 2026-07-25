@@ -24,8 +24,8 @@ function ShareShell({ title, message }: { title: string; message: string }) {
   );
 }
 
-export default async function SharedFilesPage({ searchParams }: { searchParams: { d?: string } }) {
-  const token = searchParams.d;
+export default async function SharedFilesPage({ searchParams }: { searchParams: Promise<{ d?: string }> }) {
+  const token = (await searchParams).d;
   const bundle = token ? decodeFileBundleToken(token) : null;
   if (!bundle) {
     return <ShareShell title="Link expired or invalid" message="This shared link is no longer valid. Ask the sender to share the files again." />;

@@ -138,12 +138,13 @@ export async function getProjectWorkspace(context: RequestContext, projectId: st
     prisma.registryRecord.count({
       where: {
         tenantId: context.tenantId,
+        archivedAt: null,
         plot: { projectId, archivedAt: null },
         NOT: { status: { in: ["Completed", "COMPLETED", "Registered", "REGISTERED"] } },
       },
     }),
     prisma.ownershipRecord.findMany({
-      where: { tenantId: context.tenantId, kind: "TRANSFER", plot: { projectId, archivedAt: null } },
+      where: { tenantId: context.tenantId, kind: "TRANSFER", cancelledAt: null, plot: { projectId, archivedAt: null } },
       include: { plot: true, owner: true },
       orderBy: { effectiveAt: "desc" },
       take: 6,
@@ -151,6 +152,7 @@ export async function getProjectWorkspace(context: RequestContext, projectId: st
     prisma.auditEvent.findMany({
       where: {
         tenantId: context.tenantId,
+        archivedAt: null,
         OR: [
           { entityType: "Project", entityId: projectId },
           { entityType: "Plot", entityId: { in: plotIds } },

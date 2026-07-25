@@ -8,7 +8,8 @@ export function generateStaticParams() {
     .map((engagement) => ({ slug: engagement.slug }));
 }
 
-export default function Page({ params }: { params: { slug: string } }) {
+export default async function Page(props: { params: Promise<{ slug: string }> }) {
+  const params = await props.params;
   const engagement = publicEngagements.find((item) => item.slug === params.slug && item.evidence !== "PRODUCT_CAPABILITY");
   if (!engagement) notFound();
   return <CaseStudyPage engagement={engagement} />;

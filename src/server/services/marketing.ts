@@ -40,7 +40,7 @@ export async function createMarketingTask(context: RequestContext, input: z.infe
 }
 
 export async function updateMarketingTask(context: RequestContext, taskId: string, input: z.infer<typeof updateMarketingTaskSchema>) {
-  await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId } });
+  await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId, archivedAt: null } });
   const task = await prisma.marketingTask.update({
     where: { id: taskId },
     data: {
@@ -57,15 +57,33 @@ export async function updateMarketingTask(context: RequestContext, taskId: strin
 }
 
 export async function deleteMarketingTask(context: RequestContext, taskId: string) {
-  await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId } });
-  await prisma.$transaction([
-    prisma.approval.deleteMany({ where: { tenantId: context.tenantId, recordType: "MarketingTask", recordId: taskId } }),
-    prisma.reviewComment.deleteMany({ where: { tenantId: context.tenantId, taskId } }),
-    prisma.mediaAsset.deleteMany({ where: { tenantId: context.tenantId, taskId } }),
-    prisma.marketingTask.delete({ where: { id: taskId } }),
-  ]);
-  await writeAuditEvent(context, { action: AuditAction.DELETE, entityType: "MarketingTask", entityId: taskId, after: { deleted: true } });
-  return { id: taskId };
+  const before = await prisma.marketingTask.findFirstOrThrow({
+    where: { id: taskId, tenantId: context.tenantId, archivedAt: null },
+  });
+  const task = await prisma.marketingTask.update({
+    where: { id: taskId },
+    data: { archivedAt: new Date(), archivedById: context.userId, archiveReason: "Archived from marketing workflow" },
+  });
+  await writeAuditEvent(context, { action: AuditAction.DELETE, entityType: "MarketingTask", entityId: taskId, before, after: task });
+  return { id: taskId, archived: true };
+}
+
+export async function restoreMarketingTask(context: RequestContext, taskId: string) {
+  const before = await prisma.marketingTask.findFirstOrThrow({
+    where: { id: taskId, tenantId: context.tenantId, archivedAt: { not: null } },
+  });
+  const task = await prisma.marketingTask.update({
+    where: { id: taskId },
+    data: { archivedAt: null, archivedById: null, archiveReason: null },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.UPDATE,
+    entityType: "MarketingTask",
+    entityId: taskId,
+    before,
+    after: { restored: true },
+  });
+  return task;
 }
 
 export const mediaSchema = z.object({
@@ -74,7 +92,7 @@ export const mediaSchema = z.object({
 });
 
 export async function addMarketingMedia(context: RequestContext, taskId: string, input: z.infer<typeof mediaSchema>) {
-  await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId } });
+  await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId, archivedAt: null } });
   await prisma.fileAsset.findFirstOrThrow({ where: { id: input.fileAssetId, tenantId: context.tenantId, deletedAt: null } });
   const version = await prisma.mediaAsset.count({ where: { tenantId: context.tenantId, taskId, kind: input.kind } });
   const media = await prisma.mediaAsset.create({
@@ -106,7 +124,7 @@ export const commentSchema = z.object({
 });
 
 export async function addMarketingComment(context: RequestContext, taskId: string, input: z.infer<typeof commentSchema>) {
-  await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId } });
+  await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId, archivedAt: null } });
   const comment = await prisma.reviewComment.create({
     data: {
       tenantId: context.tenantId,
@@ -126,7 +144,7 @@ export const marketingApprovalSchema = z.object({
 });
 
 export async function approveMarketingTask(context: RequestContext, taskId: string, input: z.infer<typeof marketingApprovalSchema>) {
-  await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId } });
+  await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId, archivedAt: null } });
   const task = await prisma.marketingTask.update({
     where: { id: taskId },
     data: { status: input.status === "APPROVED" ? "APPROVED" : "CHANGES_REQUESTED" },
@@ -147,7 +165,7 @@ export async function approveMarketingTask(context: RequestContext, taskId: stri
 }
 
 export async function rejectMarketingTask(context: RequestContext, taskId: string, input: z.infer<typeof marketingApprovalSchema>) {
-  await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId } });
+  await prisma.marketingTask.findFirstOrThrow({ where: { id: taskId, tenantId: context.tenantId, archivedAt: null } });
   const task = await prisma.marketingTask.update({
     where: { id: taskId },
     data: { status: "CHANGES_REQUESTED" },

@@ -29,6 +29,34 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+async function createAndApproveOwnershipLetter({ cookie, plotId, type, data = {} }) {
+  const draft = await request("/api/v1/documents/drafts", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify({ type, recordType: "Plot", recordId: plotId, data }),
+  });
+  assert(draft.response.status === 201, `${type} draft creation failed`);
+  const documentId = draft.json.data.document.id;
+  const render = await request(`/api/v1/documents/${documentId}/render`, {
+    method: "POST",
+    headers: { cookie },
+  });
+  assert(render.response.status === 200, `${type} render failed`);
+  const submit = await request(`/api/v1/documents/${documentId}/submit`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify({ notes: "Smoke workflow submission" }),
+  });
+  assert(submit.response.status === 200, `${type} submission failed`);
+  const approve = await request(`/api/v1/documents/${documentId}/approve`, {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify({ status: "APPROVED", notes: "Smoke workflow approval" }),
+  });
+  assert(approve.response.status === 200, `${type} approval failed`);
+  return approve.json.data;
+}
+
 const login = await request("/api/v1/auth/login", {
   method: "POST",
   headers: { "content-type": "application/json" },
@@ -177,6 +205,19 @@ const download = await fetch(`${baseUrl}/api/v1/files/${doc.json.data.document.f
 assert(download.status === 200, "document download failed");
 assert(download.headers.get("content-type")?.includes("pdf"), "download is not a PDF");
 
+// The development database is intentionally long-lived and A-101 may have been transferred during
+// manual testing. Temporarily attach it to the seeded owner account so this check remains stable,
+// then restore the exact plot state before continuing.
+const owner = await prisma.owner.findFirstOrThrow({ where: { tenantId, email: "amandeep@example.com" } });
+const originalPlotAccess = await prisma.plot.findUniqueOrThrow({
+  where: { id: plot.id },
+  select: { currentOwnerId: true, ownerVisible: true },
+});
+await prisma.plot.update({
+  where: { id: plot.id },
+  data: { currentOwnerId: owner.id, ownerVisible: true },
+});
+
 const ownerLogin = await request("/api/v1/auth/login", {
   method: "POST",
   headers: { "content-type": "application/json" },
@@ -189,12 +230,28 @@ const blockedOwnerDownload = await fetch(`${baseUrl}/api/v1/files/${doc.json.dat
 });
 assert(blockedOwnerDownload.status === 403, "owner downloaded unapproved document");
 
+const prematureApproval = await request(`/api/v1/documents/${doc.json.data.document.id}/approve`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ status: "APPROVED", notes: "Must be submitted first" }),
+});
+assert(prematureApproval.response.status === 400, "generated document bypassed submission state");
+
+const submit = await request(`/api/v1/documents/${doc.json.data.document.id}/submit`, {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({ notes: "Smoke test submission" }),
+});
+assert(submit.response.status === 200, "document submission failed");
+assert(submit.json.data?.status === "SUBMITTED", "document did not enter submitted state");
+
 const approve = await request(`/api/v1/documents/${doc.json.data.document.id}/approve`, {
   method: "POST",
   headers: { "content-type": "application/json", cookie },
   body: JSON.stringify({ status: "APPROVED", notes: "Smoke test approval" }),
 });
 assert(approve.response.status === 200, "document approval failed");
+assert(approve.json.data?.status === "APPROVED", "approved document entered the wrong state");
 const approvedOwnerDownload = await fetch(`${baseUrl}/api/v1/files/${doc.json.data.document.fileAssetId}/download`, {
   headers: { cookie: ownerCookie },
 });
@@ -207,7 +264,6 @@ function writeLocalSmokeFile(storageKey) {
   writeFileSync(path, localPdfBytes);
 }
 
-const owner = await prisma.owner.findFirstOrThrow({ where: { tenantId, email: "amandeep@example.com" } });
 const registryDocKey = `local/smoke/registry-${stamp}.pdf`;
 writeLocalSmokeFile(registryDocKey);
 const registryDoc = await prisma.fileAsset.create({
@@ -269,6 +325,10 @@ const ownerPanDownload = await fetch(`${baseUrl}/api/v1/files/${panDoc.id}/downl
   headers: { cookie: ownerCookie },
 });
 assert(ownerPanDownload.status === 403, "owner could download internal PAN document");
+await prisma.plot.update({
+  where: { id: plot.id },
+  data: originalPlotAccess,
+});
 
 const vendor = await request("/api/v1/finance/vendors", {
   method: "POST",
@@ -315,6 +375,16 @@ const allot = await request(`/api/v1/ownership/plots/${smokePlot.id}/allot`, {
   body: JSON.stringify({ ownerId: newOwner.json.data.id, amountInr: 2500000, sharePct: 100 }),
 });
 assert(allot.response.status === 200, "plot allotment failed");
+const pendingAllotmentPlot = await prisma.plot.findUniqueOrThrow({ where: { id: smokePlot.id } });
+assert(pendingAllotmentPlot.status === "COMPANY_OWNED", "unapproved allotment changed plot ownership");
+await createAndApproveOwnershipLetter({
+  cookie,
+  plotId: smokePlot.id,
+  type: "allotment_letter",
+  data: { ownerName: newOwner.json.data.name, plotCode: smokePlot.code },
+});
+const approvedAllotmentPlot = await prisma.plot.findUniqueOrThrow({ where: { id: smokePlot.id } });
+assert(approvedAllotmentPlot.currentOwnerId === newOwner.json.data.id, "approved allotment did not update current owner");
 
 const buyer = await request("/api/v1/ownership/owners", {
   method: "POST",
@@ -329,6 +399,16 @@ const transfer = await request(`/api/v1/ownership/plots/${smokePlot.id}/transfer
   body: JSON.stringify({ buyerOwnerId: buyer.json.data.id, amountInr: 2700000 }),
 });
 assert(transfer.response.status === 200, "plot transfer failed");
+const pendingTransferPlot = await prisma.plot.findUniqueOrThrow({ where: { id: smokePlot.id } });
+assert(pendingTransferPlot.currentOwnerId === newOwner.json.data.id, "unapproved transfer changed plot ownership");
+await createAndApproveOwnershipLetter({
+  cookie,
+  plotId: smokePlot.id,
+  type: "transfer_letter",
+  data: { ownerName: buyer.json.data.name, plotCode: smokePlot.code },
+});
+const approvedTransferPlot = await prisma.plot.findUniqueOrThrow({ where: { id: smokePlot.id } });
+assert(approvedTransferPlot.currentOwnerId === buyer.json.data.id, "approved transfer did not update current owner");
 
 const registry = await request(`/api/v1/ownership/plots/${smokePlot.id}/registry`, {
   method: "POST",

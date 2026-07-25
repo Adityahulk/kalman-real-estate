@@ -3,7 +3,8 @@ import { apiError, created, getRequestContext, ok, parseJson } from "@/server/ap
 import { prisma } from "@/server/db";
 import { ensureProjectLetterTemplates, saveProjectLetterTemplate, saveProjectLetterTemplateSchema } from "@/server/services/document-templates";
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "documents.generate");
     await ensureProjectLetterTemplates(context.tenantId, params.id);
@@ -18,7 +19,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "documents.generate");
     return created(await saveProjectLetterTemplate(context, params.id, await parseJson(request, saveProjectLetterTemplateSchema)));

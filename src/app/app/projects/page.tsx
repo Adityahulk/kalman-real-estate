@@ -2,14 +2,14 @@ import Link from "next/link";
 import { Building2, FileDown, Map, Plus, Search, Users } from "lucide-react";
 import { PlotStatus } from "@prisma/client";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { WhatsAppShareLink } from "./simplified-workflow-actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProjectsPage({ searchParams }: { searchParams: { q?: string; city?: string } }) {
-  const session = await getSessionUser();
-  if (!session) return null;
+export default async function ProjectsPage(props: { searchParams: Promise<{ q?: string; city?: string }> }) {
+  const searchParams = await props.searchParams;
+  const session = await requirePagePermission("projects.view");
   const q = searchParams.q?.trim();
   const city = searchParams.city?.trim();
   const projects = await prisma.project.findMany({
