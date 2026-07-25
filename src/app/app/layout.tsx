@@ -35,6 +35,20 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       }}
       canManageUsers={hasPermission(session.role, "users.manage", session.permissions)}
       canViewLiaison={hasPermission(session.role, "liaison.view", session.permissions)}
+      access={{
+        projects: hasPermission(session.role, "projects.view", session.permissions),
+        createProjects: hasPermission(session.role, "projects.manage", session.permissions),
+        ownership: hasPermission(session.role, "ownership.view", session.permissions),
+        development: hasPermission(session.role, "development.view", session.permissions),
+        marketing: hasPermission(session.role, "marketing.manage", session.permissions)
+          || hasPermission(session.role, "marketing.execute", session.permissions),
+        documents: hasPermission(session.role, "documents.view", session.permissions),
+        settings: hasPermission(session.role, "tenant.manage", session.permissions)
+          || hasPermission(session.role, "users.manage", session.permissions),
+        audit: hasPermission(session.role, "audit.view", session.permissions),
+        reports: hasPermission(session.role, "reports.view", session.permissions),
+        restore: hasPermission(session.role, "records.restore", session.permissions),
+      }}
       projects={projects}
       firms={firms.map((firm) => ({ id: firm.id, name: firm.name, logoDataUrl: firm.logoDataUrl }))}
       activeFirmId={session.tenantId}

@@ -1,13 +1,12 @@
 import { Bot, Sparkles } from "lucide-react";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { AiInsightActions } from "./insight-actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function AiPage() {
-  const session = await getSessionUser();
-  if (!session) return null;
+  const session = await requirePagePermission("ai.generate");
 
   const insights = await prisma.costInsight.findMany({
     where: { tenantId: session.tenantId },

@@ -8,17 +8,26 @@ import { listEngineeringAssignees } from "@/server/services/development";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProjectDevelopmentPage({ params }: { params: { projectId: string } }) {
+export default async function ProjectDevelopmentPage(props: { params: Promise<{ projectId: string }> }) {
+  const params = await props.params;
   const session = await getSessionUser();
   if (!session) return null;
   if (!hasPermission(session.role, "development.view", session.permissions)) notFound();
+  const canManageAllTasks = hasPermission(session.role, "development.manage", session.permissions)
+    || hasPermission(session.role, "engineering.assign", session.permissions)
+    || hasPermission(session.role, "engineering.verify", session.permissions);
 
   const [project, assets, configuredCategories, taskFiles, users] = await Promise.all([
     prisma.project.findFirstOrThrow({
       where: { id: params.projectId, tenantId: session.tenantId },
     }),
     prisma.siteAsset.findMany({
-      where: { tenantId: session.tenantId, projectId: params.projectId, archivedAt: null },
+      where: {
+        tenantId: session.tenantId,
+        projectId: params.projectId,
+        archivedAt: null,
+        ...(!canManageAllTasks ? { assignedToId: session.id } : {}),
+      },
       orderBy: [{ deadline: "asc" }, { updatedAt: "desc" }],
     }),
     prisma.projectFileField.findMany({

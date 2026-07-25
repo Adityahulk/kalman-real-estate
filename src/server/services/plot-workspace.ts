@@ -7,8 +7,12 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
     include: {
       project: true,
       currentOwner: true,
-      ownershipRecords: { include: { owner: true, createdBy: { select: { name: true, email: true } } }, orderBy: { effectiveAt: "desc" } },
-      registryRecords: { orderBy: { createdAt: "desc" } },
+      ownershipRecords: {
+        where: { cancelledAt: null },
+        include: { owner: true, createdBy: { select: { name: true, email: true } } },
+        orderBy: { effectiveAt: "desc" },
+      },
+      registryRecords: { where: { archivedAt: null }, orderBy: { createdAt: "desc" } },
       checklistItems: { orderBy: [{ category: "asc" }, { label: "asc" }] },
     },
   });
@@ -25,7 +29,7 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
     childCadFiles,
   ] = await Promise.all([
     prisma.generatedDocument.findMany({
-      where: { tenantId: context.tenantId, recordType: "Plot", recordId: plot.id },
+      where: { tenantId: context.tenantId, recordType: "Plot", recordId: plot.id, archivedAt: null },
       orderBy: { createdAt: "desc" },
     }),
     prisma.fileAsset.findMany({
@@ -63,6 +67,7 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
     prisma.auditEvent.findMany({
       where: {
         tenantId: context.tenantId,
+        archivedAt: null,
         OR: [
           { entityType: "Plot", entityId: plot.id },
           { entityType: "GeneratedDocument", entityId: { in: [] } },
@@ -108,7 +113,7 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
   const fileIds = historicalFiles.map((file) => file.id);
   const documentAudit = documentIds.length
     ? await prisma.auditEvent.findMany({
-        where: { tenantId: context.tenantId, entityType: "GeneratedDocument", entityId: { in: documentIds } },
+        where: { tenantId: context.tenantId, entityType: "GeneratedDocument", entityId: { in: documentIds }, archivedAt: null },
         include: { actor: { select: { name: true, email: true } } },
         orderBy: { createdAt: "desc" },
         take: 40,
@@ -116,7 +121,7 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
     : [];
   const fileAudit = fileIds.length
     ? await prisma.auditEvent.findMany({
-        where: { tenantId: context.tenantId, entityType: "FileAsset", entityId: { in: fileIds } },
+        where: { tenantId: context.tenantId, entityType: "FileAsset", entityId: { in: fileIds }, archivedAt: null },
         include: { actor: { select: { name: true, email: true } } },
         orderBy: { createdAt: "desc" },
         take: 40,

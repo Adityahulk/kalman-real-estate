@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { PlotStatus } from "@prisma/client";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { prisma } from "@/server/db";
 import { sortByPlotCode } from "@/lib/plot-code-sort";
 import { ActionHint, ActionPageShell } from "../../../action-page-shell";
@@ -10,15 +10,15 @@ import { listLetterFieldSettings } from "@/server/services/letter-field-settings
 
 export const dynamic = "force-dynamic";
 
-export default async function NewAllotmentPage({
-  params,
-  searchParams,
-}: {
-  params: { projectId: string };
-  searchParams: { plotId?: string; edit?: string };
-}) {
-  const session = await getSessionUser();
-  if (!session) return null;
+export default async function NewAllotmentPage(
+  props: {
+    params: Promise<{ projectId: string }>;
+    searchParams: Promise<{ plotId?: string; edit?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
+  const session = await requirePagePermission("documents.generate");
   const project = await prisma.project.findFirst({ where: { id: params.projectId, tenantId: session.tenantId } });
   if (!project) notFound();
   await ensureProjectLetterTemplates(session.tenantId, project.id);
@@ -43,7 +43,7 @@ export default async function NewAllotmentPage({
     listLetterFieldSettings(session.tenantId),
     searchParams.edit && searchParams.plotId
       ? prisma.ownershipRecord.findFirst({
-          where: { tenantId: session.tenantId, plotId: searchParams.plotId, kind: "ALLOTMENT" },
+          where: { tenantId: session.tenantId, plotId: searchParams.plotId, kind: "ALLOTMENT", cancelledAt: null },
           include: { owner: true },
           orderBy: { createdAt: "desc" },
         })

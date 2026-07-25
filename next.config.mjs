@@ -1,15 +1,14 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
-  experimental: {
-    serverComponentsExternalPackages: ["@napi-rs/canvas", "sharp", "pdfjs-dist", "puppeteer"],
-    outputFileTracingIncludes: {
-      "/api/**/*": [
-        "./node_modules/sharp/**/*",
-        "./node_modules/@img/**/*",
-        "./node_modules/@napi-rs/canvas/**/*",
-      ],
-    },
+  outputFileTracingRoot: process.cwd(),
+  serverExternalPackages: ["@napi-rs/canvas", "sharp", "pdfjs-dist", "puppeteer"],
+  outputFileTracingIncludes: {
+    "/api/**/*": [
+      "./node_modules/sharp/**/*",
+      "./node_modules/@img/**/*",
+      "./node_modules/@napi-rs/canvas/**/*",
+    ],
   },
   images: {
     remotePatterns: [

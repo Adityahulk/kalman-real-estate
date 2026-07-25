@@ -7,7 +7,8 @@ const assignSchema = z.object({
   assignedToId: z.string().min(1),
 });
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "engineering.assign");
     const input = await parseJson(request, assignSchema);

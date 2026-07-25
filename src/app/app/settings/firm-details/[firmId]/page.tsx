@@ -1,14 +1,14 @@
-import { notFound, redirect } from "next/navigation";
-import { getSessionUser } from "@/server/session";
+import { notFound } from "next/navigation";
+import { requirePagePermission } from "@/server/page-auth";
 import { firmFieldsForUser, firmForUser } from "@/server/services/firms";
 import { FirmDetailsEditor } from "./firm-details-editor";
 import { BackButton } from "@/components/back-button";
 
 export const dynamic = "force-dynamic";
 
-export default async function FirmDetailPage({ params }: { params: { firmId: string } }) {
-  const session = await getSessionUser();
-  if (!session) redirect("/login");
+export default async function FirmDetailPage(props: { params: Promise<{ firmId: string }> }) {
+  const params = await props.params;
+  const session = await requirePagePermission("tenant.manage");
 
   const [firm, fields] = await Promise.all([
     firmForUser(session, params.firmId).catch(() => null),

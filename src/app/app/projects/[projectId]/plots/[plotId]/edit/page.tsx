@@ -1,14 +1,14 @@
 import { notFound } from "next/navigation";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { prisma } from "@/server/db";
 import { ActionPageShell } from "../../../../action-page-shell";
 import { ManualPlotForm } from "../../../../manual-entry-actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function EditPlotPage({ params }: { params: { projectId: string; plotId: string } }) {
-  const session = await getSessionUser();
-  if (!session) return null;
+export default async function EditPlotPage(props: { params: Promise<{ projectId: string; plotId: string }> }) {
+  const params = await props.params;
+  const session = await requirePagePermission("ownership.manage");
   const plot = await prisma.plot.findFirst({
     where: { id: params.plotId, projectId: params.projectId, tenantId: session.tenantId, archivedAt: null },
     include: { project: true },

@@ -1,16 +1,16 @@
 import { notFound } from "next/navigation";
 import { BackButton } from "@/components/back-button";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { listLetterFieldSettings } from "@/server/services/letter-field-settings";
 import { ensureProjectLetterTemplates } from "@/server/services/document-templates";
 import { HtmlTemplateEditor } from "../../html-template-editor";
 
 export const dynamic = "force-dynamic";
 
-export default async function ProjectLettersPage({ params }: { params: { projectId: string } }) {
-  const session = await getSessionUser();
-  if (!session) return null;
+export default async function ProjectLettersPage(props: { params: Promise<{ projectId: string }> }) {
+  const params = await props.params;
+  const session = await requirePagePermission("projects.manage");
   const project = await prisma.project.findFirst({ where: { id: params.projectId, tenantId: session.tenantId } });
   if (!project) notFound();
   await ensureProjectLetterTemplates(session.tenantId, project.id);

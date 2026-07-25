@@ -16,7 +16,7 @@ type DocumentJob = {
 
 async function processDocument(job: DocumentJob) {
   const document = await prisma.generatedDocument.findFirstOrThrow({
-    where: { id: job.documentId, tenantId: job.tenantId },
+    where: { id: job.documentId, tenantId: job.tenantId, archivedAt: null },
   });
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { id: job.tenantId } });
 
@@ -46,6 +46,18 @@ async function processDocument(job: DocumentJob) {
 
   const key = generatedDocumentStorageKey(job.tenantId, document.id);
   const stored = await putGeneratedObject(key, pdf, "application/pdf");
+  const categoryKey = `generated-${document.type.toLowerCase().replaceAll("_", "-")}`;
+  const previousFile = await prisma.fileAsset.findFirst({
+    where: {
+      tenantId: job.tenantId,
+      ownerType: document.recordType,
+      ownerId: document.recordId,
+      categoryKey,
+      deletedAt: null,
+    },
+    orderBy: [{ version: "desc" }, { createdAt: "desc" }],
+    select: { id: true, version: true },
+  });
 
   const file = await prisma.fileAsset.create({
     data: {
@@ -60,7 +72,10 @@ async function processDocument(job: DocumentJob) {
       documentType: documentTypeForLetter(document.type),
       ownerType: document.recordType,
       ownerId: document.recordId,
+      categoryKey,
       uploadedById: document.createdById,
+      version: (previousFile?.version ?? 0) + 1,
+      previousFileId: previousFile?.id,
     },
   });
 

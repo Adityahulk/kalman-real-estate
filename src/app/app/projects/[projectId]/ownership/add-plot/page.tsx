@@ -1,14 +1,14 @@
 import { notFound } from "next/navigation";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { prisma } from "@/server/db";
 import { ActionPageShell } from "../../../action-page-shell";
 import { ManualPlotForm } from "../../../manual-entry-actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function AddPlotPage({ params }: { params: { projectId: string } }) {
-  const session = await getSessionUser();
-  if (!session) return null;
+export default async function AddPlotPage(props: { params: Promise<{ projectId: string }> }) {
+  const params = await props.params;
+  const session = await requirePagePermission("ownership.manage");
   const project = await prisma.project.findFirst({ where: { id: params.projectId, tenantId: session.tenantId } });
   if (!project) notFound();
   const [latestCad, latestPlot] = await Promise.all([

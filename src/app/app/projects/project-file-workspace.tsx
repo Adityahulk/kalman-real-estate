@@ -7,7 +7,15 @@ import { FileUploader } from "@/components/file-uploader";
 import { FileActions } from "@/components/file-actions";
 import { FilePreview } from "@/components/file-preview";
 
-type FileItem = { id: string; fileName: string; mimeType: string; createdAt: Date | string; categoryLabel?: string };
+type FileItem = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  createdAt: Date | string;
+  categoryLabel?: string;
+  version?: number;
+  uploadedByName?: string;
+};
 
 export function ProjectFileWorkspace({ projectId, label, categoryKey, files, canUpload = true }: { projectId: string; label: string; categoryKey?: string; files: FileItem[]; canUpload?: boolean }) {
   const router = useRouter();
@@ -116,7 +124,7 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
             {files.map((file) => <div className={`p-3 ${selected?.id === file.id ? "bg-navy-100" : ""}`} key={file.id}>
               <div className="flex items-start gap-2">
                 {shareMode ? <input className="mt-1 size-4" type="checkbox" checked={shareIds.has(file.id)} onChange={() => toggleShare(file.id)} aria-label={`Share ${file.fileName}`} /> : null}
-                <button className="flex min-w-0 flex-1 items-start gap-2 text-left" type="button" onClick={() => selectFile(file.id)}><File className="mt-0.5 shrink-0" size={15} /><span className="min-w-0"><span className="block break-words text-sm font-medium sm:truncate">{file.fileName}</span>{file.categoryLabel ? <span className="block break-words text-xs text-slate-500 sm:truncate">{file.categoryLabel}</span> : null}<span className="text-xs text-slate-500">{new Date(file.createdAt).toLocaleString()}</span></span></button>
+                <button className="flex min-w-0 flex-1 items-start gap-2 text-left" type="button" onClick={() => selectFile(file.id)}><File className="mt-0.5 shrink-0" size={15} /><span className="min-w-0"><span className="block break-words text-sm font-medium sm:truncate">{file.fileName}</span>{file.categoryLabel ? <span className="block break-words text-xs text-slate-500 sm:truncate">{file.categoryLabel}</span> : null}<span className="block text-xs text-slate-500">Version {file.version ?? 1} · {file.uploadedByName ?? "System"}</span><span className="text-xs text-slate-500">{new Date(file.createdAt).toLocaleString()}</span></span></button>
               </div>
               <div className="mt-2 flex flex-wrap gap-1"><a className="btn-ghost h-8 px-2 text-xs" href={`/api/v1/files/${file.id}/download`}><Download size={13} /> Download</a><FileActions fileId={file.id} fileName={file.fileName} /></div>
             </div>)}

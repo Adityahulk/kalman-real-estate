@@ -1,14 +1,13 @@
 import Link from "next/link";
 import { ArrowRight, Building2 } from "lucide-react";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { prisma } from "@/server/db";
 import { ActionHint, ActionPageShell } from "../../projects/action-page-shell";
 
 export const dynamic = "force-dynamic";
 
 export default async function GlobalNewAllotmentPage() {
-  const session = await getSessionUser();
-  if (!session) return null;
+  const session = await requirePagePermission("documents.generate");
   const projects = await prisma.project.findMany({
     where: { tenantId: session.tenantId },
     orderBy: { updatedAt: "desc" },

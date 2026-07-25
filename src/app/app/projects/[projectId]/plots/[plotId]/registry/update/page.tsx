@@ -1,17 +1,17 @@
 import { notFound } from "next/navigation";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { prisma } from "@/server/db";
 import { ActionHint, ActionPageShell } from "../../../../../action-page-shell";
 import { OwnershipDocumentUpload, PlotRegistryForm } from "../../../../../../ownership/ownership-actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function UpdateRegistryPage({ params }: { params: { projectId: string; plotId: string } }) {
-  const session = await getSessionUser();
-  if (!session) return null;
+export default async function UpdateRegistryPage(props: { params: Promise<{ projectId: string; plotId: string }> }) {
+  const params = await props.params;
+  const session = await requirePagePermission("ownership.manage");
   const plot = await prisma.plot.findFirst({
     where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId, archivedAt: null },
-    include: { project: true, registryRecords: { orderBy: { createdAt: "desc" }, take: 1 } },
+    include: { project: true, registryRecords: { where: { archivedAt: null }, orderBy: { createdAt: "desc" }, take: 1 } },
   });
   if (!plot) notFound();
   const latest = plot.registryRecords[0];

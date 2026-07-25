@@ -4,8 +4,9 @@ import { updatePublishedEntity, updatePublishedEntitySchema } from "@/server/ser
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string; entityId: string } },
+  props: { params: Promise<{ id: string; entityId: string }> }
 ) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "cad.review");
     const input = await parseJson(request, updatePublishedEntitySchema);

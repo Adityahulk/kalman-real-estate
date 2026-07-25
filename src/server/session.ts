@@ -66,7 +66,7 @@ export async function verifySessionToken(token?: string): Promise<SessionUser | 
 }
 
 export async function getSessionUser() {
-  const tokenUser = await verifySessionToken(cookies().get("kalman_session")?.value);
+  const tokenUser = await verifySessionToken((await cookies()).get("kalman_session")?.value);
   if (!tokenUser) return null;
   const user = await prisma.user.findUnique({
     where: { id: tokenUser.id },

@@ -7,8 +7,9 @@ import {
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string; runId: string; index: string } },
+  props: { params: Promise<{ id: string; runId: string; index: string }> }
 ) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "cad.review");
     const input = await parseJson(request, browserExtractionChunkSchema);

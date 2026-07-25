@@ -5,7 +5,8 @@ import { prisma } from "@/server/db";
 import { verifyFileShareToken } from "@/server/file-share";
 import { createDownloadUrl, getLocalObject, isLocalStorageKey } from "@/server/storage";
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const valid = verifyFileShareToken(
       params.id,

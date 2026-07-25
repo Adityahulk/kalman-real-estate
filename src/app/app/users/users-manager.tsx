@@ -165,16 +165,16 @@ export function UsersManager({
 
   async function deleteUser(user: ManagedUser) {
     const confirmed = window.confirm(
-      `Delete ${user.name}?\n\nDeleting this user will permanently delete all data in this login. The user will immediately lose access and will not be able to sign in again.`,
+      `Disable ${user.name}?\n\nThe user will immediately lose access and will not be able to sign in. Their records and audit history will be preserved and the account can be reactivated later.`,
     );
     if (!confirmed) return;
     setBusyId(user.id);
     const response = await fetch(`/api/v1/users/${user.id}`, { method: "DELETE" });
     const body = await response.json().catch(() => null);
     setBusyId(null);
-    if (!response.ok) return setMessage({ kind: "error", text: body?.error ?? "Could not delete user." });
-    setUsers((list) => list.filter((item) => item.id !== user.id));
-    setMessage({ kind: "success", text: `${user.name} was deleted and can no longer sign in.` });
+    if (!response.ok) return setMessage({ kind: "error", text: body?.error ?? "Could not disable user." });
+    setUsers((list) => list.map((item) => item.id === user.id ? { ...item, status: "DISABLED" } : item));
+    setMessage({ kind: "success", text: `${user.name} was disabled. Their records and audit history were preserved.` });
   }
 
   function startEdit(user: ManagedUser) {

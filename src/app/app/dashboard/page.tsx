@@ -1,9 +1,7 @@
-import { notFound } from "next/navigation";
 import Link from "next/link";
-import { LayoutDashboard } from "lucide-react";
+import { Download, LayoutDashboard } from "lucide-react";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
-import { hasPermission } from "@/server/rbac";
+import { requirePagePermission } from "@/server/page-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -20,34 +18,45 @@ function StatCard({ label, value, href, tone = "slate" }: { label: string; value
 }
 
 export default async function DashboardPage() {
-  const session = await getSessionUser();
-  if (!session) return null;
-  if (!hasPermission(session.role, "users.manage", session.permissions)) notFound();
+  const session = await requirePagePermission("reports.view");
   const tenantId = session.tenantId;
 
   const [
-    availablePlots, allottedPlots, soldPlots, owners,
+    availablePlots, reservedPlots, allottedPlots, soldPlots, owners,
     pendingAllotments, pendingSignatures, signedLetters,
-    tasksInProgress, tasksAwaitingVerification, tasksOverdue,
-    approvalsExpiring, approvalsExpired,
+    tasksPlanned, tasksInProgress, tasksCompleted, tasksAwaitingVerification, tasksOverdue,
+    approvalsExpiring, approvalsExpired, pendingNocs, activeRera, activeLdc,
+    projects,
   ] = await Promise.all([
     prisma.plot.count({ where: { tenantId, archivedAt: null, status: "COMPANY_OWNED" } }),
+    prisma.plot.count({ where: { tenantId, archivedAt: null, status: "HOLD" } }),
     prisma.plot.count({ where: { tenantId, archivedAt: null, status: "ALLOTTED" } }),
     prisma.plot.count({ where: { tenantId, archivedAt: null, status: { in: ["TRANSFERRED", "REGISTERED"] } } }),
     prisma.owner.count({ where: { tenantId } }),
-    prisma.generatedDocument.count({ where: { tenantId, status: "SUBMITTED" } }),
-    prisma.generatedDocument.count({ where: { tenantId, status: "SENT_FOR_SIGNATURE" } }),
-    prisma.generatedDocument.count({ where: { tenantId, status: "SIGNED" } }),
+    prisma.generatedDocument.count({ where: { tenantId, archivedAt: null, status: "SUBMITTED" } }),
+    prisma.generatedDocument.count({ where: { tenantId, archivedAt: null, status: { in: ["APPROVED", "SENT_FOR_SIGNATURE"] } } }),
+    prisma.generatedDocument.count({ where: { tenantId, archivedAt: null, status: "SIGNED" } }),
+    prisma.siteAsset.count({ where: { tenantId, archivedAt: null, status: "PLANNED" } }),
     prisma.siteAsset.count({ where: { tenantId, archivedAt: null, status: "IN_PROGRESS" } }),
+    prisma.siteAsset.count({ where: { tenantId, archivedAt: null, status: "COMPLETED" } }),
     prisma.siteAsset.count({ where: { tenantId, archivedAt: null, status: "SENT_FOR_VERIFICATION" } }),
     prisma.siteAsset.count({ where: { tenantId, archivedAt: null, deadline: { lt: new Date() }, status: { notIn: ["COMPLETED"] } } }),
     prisma.approvalDocument.count({ where: { tenantId, status: "ACTIVE", expiresAt: { gte: new Date(), lte: new Date(Date.now() + 30 * 864e5) } } }),
     prisma.approvalDocument.count({ where: { tenantId, status: "ACTIVE", expiresAt: { lt: new Date() } } }),
+    prisma.approvalDocument.count({ where: { tenantId, type: "NOC", status: "ACTIVE", fileAssetId: null } }),
+    prisma.approvalDocument.count({ where: { tenantId, type: "RERA", status: "ACTIVE" } }),
+    prisma.approvalDocument.count({ where: { tenantId, type: "LDC", status: "ACTIVE" } }),
+    prisma.project.findMany({
+      where: { tenantId },
+      select: { id: true, name: true, city: true, state: true, progressPct: true },
+      orderBy: { name: "asc" },
+    }),
   ]);
 
   const groups = [
     { title: "Inventory & customers", cards: [
       { label: "Available plots", value: availablePlots, href: undefined, tone: "emerald" },
+      { label: "Reserved plots", value: reservedPlots, href: "/app/ownership", tone: "amber" },
       { label: "Allotted plots", value: allottedPlots, tone: "sky" },
       { label: "Sold / registered plots", value: soldPlots, tone: "slate" },
       { label: "Customers", value: owners, tone: "slate" },
@@ -59,12 +68,16 @@ export default async function DashboardPage() {
     ]},
     { title: "Engineering", cards: [
       { label: "In progress", value: tasksInProgress, tone: "sky" },
+      { label: "Upcoming / planned", value: tasksPlanned, href: "/app/development", tone: "slate" },
+      { label: "Completed", value: tasksCompleted, href: "/app/development", tone: "emerald" },
       { label: "Awaiting verification", value: tasksAwaitingVerification, tone: "amber" },
       { label: "Overdue", value: tasksOverdue, tone: "rose" },
     ]},
     { title: "Government approvals", cards: [
       { label: "Expiring within 30 days", value: approvalsExpiring, href: "/app/liaison", tone: "amber" },
       { label: "Expired", value: approvalsExpired, href: "/app/liaison", tone: "rose" },
+      { label: "Pending NOCs", value: pendingNocs, href: "/app/liaison", tone: "amber" },
+      { label: "Active RERA / LDC", value: activeRera + activeLdc, href: "/app/liaison", tone: "emerald" },
     ]},
   ];
 
@@ -91,6 +104,26 @@ export default async function DashboardPage() {
             </div>
           </section>
         ))}
+        <section>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Reports</h2>
+          <div className="card overflow-hidden">
+            <div className="divide-y divide-slate-100">
+              {projects.map((project) => (
+                <div className="flex flex-col gap-3 px-5 py-4 sm:flex-row sm:items-center sm:justify-between" key={project.id}>
+                  <div>
+                    <div className="font-medium">{project.name}</div>
+                    <div className="text-xs text-slate-500">{[project.city, project.state].filter(Boolean).join(", ")} · Development {project.progressPct}%</div>
+                  </div>
+                  <a className="btn-outline h-9 px-3 text-xs" href={`/api/v1/projects/${project.id}/report`}>
+                    <Download size={14} />
+                    Download plot report
+                  </a>
+                </div>
+              ))}
+              {!projects.length ? <div className="px-5 py-8 text-center text-sm text-slate-500">No projects available.</div> : null}
+            </div>
+          </div>
+        </section>
       </div>
     </main>
   );

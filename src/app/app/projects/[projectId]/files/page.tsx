@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { FileStack, Search } from "lucide-react";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
+import { hasPermission } from "@/server/rbac";
 import { ProjectFileWorkspace } from "../../project-file-workspace";
 import { BackButton } from "@/components/back-button";
 import { CategoryLinks } from "../../category-links";
@@ -33,8 +34,12 @@ function fileFieldLookup(fields: FileField[]) {
   return map;
 }
 
-export default async function ProjectFilesPage({ params, searchParams }: { params: { projectId: string }; searchParams: { category?: string; sub?: string; q?: string } }) {
-  const session = await getSessionUser(); if (!session) return null;
+export default async function ProjectFilesPage(
+  props: { params: Promise<{ projectId: string }>; searchParams: Promise<{ category?: string; sub?: string; q?: string }> }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
+  const session = await requirePagePermission("documents.view");
   const query = searchParams.q?.trim() ?? "";
   const [project, fields] = await Promise.all([
     prisma.project.findFirstOrThrow({ where: { id: params.projectId, tenantId: session.tenantId } }),
@@ -44,6 +49,8 @@ export default async function ProjectFilesPage({ params, searchParams }: { param
   const selectedChild = selected?.children.find((field) => field.key === searchParams.sub);
   const activeField = selectedChild ?? (selected?.children.length ? null : selected);
   const lookup = fileFieldLookup(fields);
+  const canUpload = hasPermission(session.role, "files.upload", session.permissions);
+  const canManageFields = hasPermission(session.role, "projects.manage", session.permissions);
   const files = query
     ? await prisma.fileAsset.findMany({ where: { tenantId: session.tenantId, ownerType: "Project", ownerId: project.id, deletedAt: null }, orderBy: { createdAt: "desc" } })
     : activeField
@@ -57,6 +64,11 @@ export default async function ProjectFilesPage({ params, searchParams }: { param
         return haystack.includes(normalizedQuery);
       })
     : files;
+  const uploaderIds = [...new Set(visibleFiles.map((file) => file.uploadedById).filter((id): id is string => Boolean(id)))];
+  const uploaders = uploaderIds.length
+    ? await prisma.user.findMany({ where: { id: { in: uploaderIds }, tenantId: session.tenantId }, select: { id: true, name: true } })
+    : [];
+  const uploaderNames = new Map(uploaders.map((user) => [user.id, user.name]));
   const filesWithContext = visibleFiles.map((file) => {
     const field = file.categoryKey ? lookup.get(file.categoryKey) : null;
     return {
@@ -64,6 +76,8 @@ export default async function ProjectFilesPage({ params, searchParams }: { param
       fileName: file.fileName,
       mimeType: file.mimeType,
       createdAt: file.createdAt,
+      version: file.version,
+      uploadedByName: file.uploadedById ? uploaderNames.get(file.uploadedById) ?? "Former user" : "System",
       categoryLabel: field?.path ?? file.categoryKey ?? "Uncategorised",
     };
   });
@@ -83,10 +97,10 @@ export default async function ProjectFilesPage({ params, searchParams }: { param
       </form>
       {!query ? <CategoryLinks fields={fields} selectedId={selected?.id} hrefPrefix={`/app/projects/${project.id}/files?category=`} /> : null}
       {!query && selected?.children.length ? <div className="border-t border-slate-100 pt-3"><CategoryLinks fields={selected.children} selectedId={selectedChild?.id} hrefPrefix={`/app/projects/${project.id}/files?category=${selected.key}&sub=`} /></div> : null}
-      <Link className="btn-ghost mt-2" href="/app/settings/project-files"><FileStack size={15} /> Manage fields</Link>
+      {canManageFields ? <Link className="btn-ghost mt-2" href="/app/settings/project-files"><FileStack size={15} /> Manage fields</Link> : null}
     </header>
     <div className="mt-5 flex flex-1">
-      {query ? <ProjectFileWorkspace projectId={project.id} label={`Search results for "${query}"`} files={filesWithContext} canUpload={false} /> : activeField ? <ProjectFileWorkspace projectId={project.id} label={activeField.label} categoryKey={activeField.key} files={filesWithContext} /> : selected?.children.length ? <div className="flex min-h-[360px] flex-1 items-center justify-center rounded-lg border border-dashed border-slate-300 text-sm text-slate-500">Select a {selected.label} sub-category.</div> : <div className="flex min-h-[360px] flex-1 items-center justify-center rounded-lg border border-dashed border-slate-300 text-sm text-slate-500">{fields.length ? "Select a file field or search all files." : "Add project file fields in Settings first."}</div>}
+      {query ? <ProjectFileWorkspace projectId={project.id} label={`Search results for "${query}"`} files={filesWithContext} canUpload={false} /> : activeField ? <ProjectFileWorkspace projectId={project.id} label={activeField.label} categoryKey={activeField.key} files={filesWithContext} canUpload={canUpload} /> : selected?.children.length ? <div className="flex min-h-[360px] flex-1 items-center justify-center rounded-lg border border-dashed border-slate-300 text-sm text-slate-500">Select a {selected.label} sub-category.</div> : <div className="flex min-h-[360px] flex-1 items-center justify-center rounded-lg border border-dashed border-slate-300 text-sm text-slate-500">{fields.length ? "Select a file field or search all files." : "Add project file fields in Settings first."}</div>}
     </div>
   </main>;
 }

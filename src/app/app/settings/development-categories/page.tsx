@@ -1,6 +1,5 @@
-import { redirect } from "next/navigation";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { BackButton } from "@/components/back-button";
 import { SettingsTabs } from "../settings-tabs";
 import { ProjectMapFieldEditor } from "../project-maps/project-map-field-editor";
@@ -9,8 +8,7 @@ import { ProjectFileFieldForm } from "../project-files/project-file-field-form";
 export const dynamic = "force-dynamic";
 
 export default async function DevelopmentCategoriesSettingsPage() {
-  const session = await getSessionUser();
-  if (!session) redirect("/login");
+  const session = await requirePagePermission("development.manage");
 
   const categories = await prisma.projectFileField.findMany({
     where: { tenantId: session.tenantId, section: "DEVELOPMENT_TASK_CATEGORIES", parentId: null },

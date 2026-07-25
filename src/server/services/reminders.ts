@@ -57,33 +57,58 @@ export async function sendExpiryReminders(opts?: { withinDays?: number; cooldown
   return { documents: due.length, notifications };
 }
 
-// Notifies the assigned site engineer about overdue tasks (past deadline, not completed). Fires at most
-// once per cooldown window per task via the ProgressUpdate-free lastReminder marker on the audit side —
-// here we simply notify daily; the notification centre naturally de-dupes by day of run.
-export async function sendOverdueTaskReminders() {
+// Sends one daily engineering reminder per open task. Tasks due today, due tomorrow, overdue, and
+// assigned but still pending are covered. `lastReminderAt` prevents duplicate notifications when the
+// worker runs more than once per day.
+export async function sendDailyTaskReminders() {
   const now = new Date();
-  const overdue = await prisma.siteAsset.findMany({
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+  const endOfTomorrow = new Date(startOfToday);
+  endOfTomorrow.setDate(endOfTomorrow.getDate() + 2);
+  const cooldown = new Date(now.getTime() - 20 * 60 * 60 * 1000);
+  const tasks = await prisma.siteAsset.findMany({
     where: {
       archivedAt: null,
-      deadline: { not: null, lt: now },
-      status: { notIn: ["COMPLETED"] },
+      status: { notIn: ["COMPLETED", "CLOSED"] },
       assignedToId: { not: null },
+      OR: [
+        { deadline: { not: null, lt: endOfTomorrow } },
+        { status: "PLANNED" },
+      ],
+      AND: [
+        { OR: [{ lastReminderAt: null }, { lastReminderAt: { lte: cooldown } }] },
+      ],
     },
-    select: { id: true, tenantId: true, name: true, deadline: true, assignedToId: true },
+    select: { id: true, tenantId: true, name: true, deadline: true, assignedToId: true, status: true },
   });
   let notifications = 0;
-  for (const task of overdue) {
+  for (const task of tasks) {
+    const overdue = Boolean(task.deadline && task.deadline < startOfToday);
+    const dueToday = Boolean(task.deadline && task.deadline >= startOfToday && task.deadline < new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000));
+    const dueTomorrow = Boolean(task.deadline && task.deadline >= new Date(startOfToday.getTime() + 24 * 60 * 60 * 1000));
+    const title = overdue ? "Task overdue" : dueToday ? "Task due today" : dueTomorrow ? "Task due tomorrow" : "Task pending";
+    const body = overdue
+      ? `"${task.name}" was due on ${task.deadline!.toLocaleDateString()} and is still open.`
+      : dueToday
+        ? `"${task.name}" is due today.`
+        : dueTomorrow
+          ? `"${task.name}" is due tomorrow.`
+          : `"${task.name}" is assigned and still pending.`;
     await prisma.notification.create({
       data: {
         tenantId: task.tenantId,
         userId: task.assignedToId,
         channel: "in_app",
-        title: "Task overdue",
-        body: `"${task.name}" was due on ${task.deadline!.toLocaleDateString()} and is still open.`,
-        data: { siteAssetId: task.id },
+        title,
+        body,
+        data: { siteAssetId: task.id, status: task.status, deadline: task.deadline?.toISOString() ?? null },
       },
     });
+    await prisma.siteAsset.update({ where: { id: task.id }, data: { lastReminderAt: now } });
     notifications += 1;
   }
-  return { tasks: overdue.length, notifications };
+  return { tasks: tasks.length, notifications };
 }
+
+export const sendOverdueTaskReminders = sendDailyTaskReminders;

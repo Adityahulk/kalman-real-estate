@@ -28,8 +28,23 @@ export async function writeAuditEvent(
 }
 
 export async function deleteAuditEvent(context: RequestContext, id: string) {
-  await prisma.auditEvent.deleteMany({ where: { id, tenantId: context.tenantId } });
-  return { id };
+  const event = await prisma.auditEvent.findFirstOrThrow({ where: { id, tenantId: context.tenantId, archivedAt: null } });
+  await prisma.auditEvent.update({
+    where: { id: event.id },
+    data: {
+      archivedAt: new Date(),
+      archivedById: context.userId,
+      archiveReason: "Archived by an authorized administrator.",
+    },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.DELETE,
+    entityType: "AuditEvent",
+    entityId: id,
+    before: event as unknown as Prisma.InputJsonValue,
+    after: { archived: true } as Prisma.InputJsonValue,
+  });
+  return { id, archived: true };
 }
 
 export async function cleanPlotAuditEvents(context: RequestContext, plotId: string) {
@@ -44,7 +59,7 @@ export async function cleanPlotAuditEvents(context: RequestContext, plotId: stri
     });
     const documents = await tx.generatedDocument.findMany({
       where: { tenantId: context.tenantId, recordType: "Plot", recordId: plot.id },
-      select: { id: true, fileAssetId: true },
+      select: { id: true, fileAssetId: true, signedFileAssetId: true },
     });
     const documentIds = documents.map((document) => document.id);
     const revisions = documentIds.length
@@ -57,6 +72,7 @@ export async function cleanPlotAuditEvents(context: RequestContext, plotId: stri
     const fileIdsFromRecords = records.flatMap((record) => collectFileIds(record.extraDetails));
     const generatedFileIds = unique([
       ...documents.map((document) => document.fileAssetId).filter((id): id is string => Boolean(id)),
+      ...documents.map((document) => document.signedFileAssetId).filter((id): id is string => Boolean(id)),
       ...revisions.flatMap((revision) => [revision.baseFileId, revision.outputFileId]).filter((id): id is string => Boolean(id)),
     ]);
     const fileFilters: Prisma.FileAssetWhereInput[] = [
@@ -77,26 +93,34 @@ export async function cleanPlotAuditEvents(context: RequestContext, plotId: stri
     if (documentIds.length) auditFilters.push({ entityType: "GeneratedDocument", entityId: { in: documentIds } });
     if (fileIds.length) auditFilters.push({ entityType: "FileAsset", entityId: { in: fileIds } });
 
-    const auditDelete = await tx.auditEvent.deleteMany({ where: { tenantId: context.tenantId, OR: auditFilters } });
-    const approvalDelete = documentIds.length
-      ? await tx.approval.deleteMany({ where: { tenantId: context.tenantId, recordType: "GeneratedDocument", recordId: { in: documentIds } } })
+    const now = new Date();
+    const auditArchive = await tx.auditEvent.updateMany({
+      where: { tenantId: context.tenantId, archivedAt: null, OR: auditFilters },
+      data: {
+        archivedAt: now,
+        archivedById: context.userId,
+        archiveReason: "Plot history cleanup",
+      },
+    });
+    const documentArchive = documentIds.length
+      ? await tx.generatedDocument.updateMany({
+          where: { tenantId: context.tenantId, id: { in: documentIds }, archivedAt: null },
+          data: { archivedAt: now, archivedById: context.userId, archiveReason: "Plot history cleanup" },
+        })
       : { count: 0 };
-    if (documentIds.length) {
-      await tx.ownershipRecord.updateMany({
-        where: { tenantId: context.tenantId, documentId: { in: documentIds } },
-        data: { documentId: null },
-      });
-    }
-    const revisionDelete = documentIds.length
-      ? await tx.generatedDocumentRevision.deleteMany({ where: { tenantId: context.tenantId, documentId: { in: documentIds } } })
-      : { count: 0 };
-    const documentDelete = documentIds.length
-      ? await tx.generatedDocument.deleteMany({ where: { tenantId: context.tenantId, id: { in: documentIds } } })
-      : { count: 0 };
-    const registryDelete = await tx.registryRecord.deleteMany({ where: { tenantId: context.tenantId, plotId: plot.id } });
-    const ownershipDelete = await tx.ownershipRecord.deleteMany({ where: { tenantId: context.tenantId, plotId: plot.id } });
-    const fileDelete = fileIds.length
-      ? await tx.fileAsset.deleteMany({ where: { tenantId: context.tenantId, id: { in: fileIds } } })
+    const registryArchive = await tx.registryRecord.updateMany({
+      where: { tenantId: context.tenantId, plotId: plot.id, archivedAt: null },
+      data: { archivedAt: now, archivedById: context.userId, archiveReason: "Plot history cleanup" },
+    });
+    const ownershipArchive = await tx.ownershipRecord.updateMany({
+      where: { tenantId: context.tenantId, plotId: plot.id, cancelledAt: null },
+      data: { cancelledAt: now, cancelledById: context.userId, cancellationReason: "Plot history cleanup" },
+    });
+    const fileArchive = fileIds.length
+      ? await tx.fileAsset.updateMany({
+          where: { tenantId: context.tenantId, id: { in: fileIds }, deletedAt: null },
+          data: { deletedAt: now, deletedById: context.userId, deleteReason: "Plot history cleanup" },
+        })
       : { count: 0 };
 
     await tx.plot.update({
@@ -117,14 +141,21 @@ export async function cleanPlotAuditEvents(context: RequestContext, plotId: stri
 
     return {
       plotId: plot.id,
-      auditDeleted: auditDelete.count,
-      approvalsDeleted: approvalDelete.count,
-      revisionsDeleted: revisionDelete.count,
-      documentsDeleted: documentDelete.count,
-      registryDeleted: registryDelete.count,
-      ownershipDeleted: ownershipDelete.count,
-      filesDeleted: fileDelete.count,
+      auditArchived: auditArchive.count,
+      documentsArchived: documentArchive.count,
+      registryArchived: registryArchive.count,
+      ownershipArchived: ownershipArchive.count,
+      filesArchived: fileArchive.count,
     };
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.DELETE,
+    entityType: "Plot",
+    entityId: plotId,
+    after: {
+      operation: "ARCHIVE_HISTORY",
+      ...result,
+    } as unknown as Prisma.InputJsonValue,
   });
   return result;
 }

@@ -1,8 +1,6 @@
-import { notFound } from "next/navigation";
 import { ScrollText } from "lucide-react";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
-import { hasPermission } from "@/server/rbac";
+import { requirePagePermission } from "@/server/page-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -17,14 +15,14 @@ const ACTION_CHIP: Record<string, string> = {
   DELETE: "bg-rose-50 text-rose-700",
 };
 
-export default async function AuditPage({ searchParams }: { searchParams: { entityType?: string; action?: string } }) {
-  const session = await getSessionUser();
-  if (!session) return null;
-  if (!hasPermission(session.role, "users.manage", session.permissions)) notFound();
+export default async function AuditPage(props: { searchParams: Promise<{ entityType?: string; action?: string }> }) {
+  const searchParams = await props.searchParams;
+  const session = await requirePagePermission("audit.view");
 
   const events = await prisma.auditEvent.findMany({
     where: {
       tenantId: session.tenantId,
+      archivedAt: null,
       ...(searchParams.entityType ? { entityType: searchParams.entityType } : {}),
       ...(searchParams.action ? { action: searchParams.action as never } : {}),
     },

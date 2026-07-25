@@ -4,7 +4,8 @@ import { getCadSource } from "@/server/services/cad-browser-extraction";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "cad.review");
     const source = await getCadSource(context, params.id);

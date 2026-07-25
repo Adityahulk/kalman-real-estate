@@ -282,7 +282,7 @@ async function appendSourceFile(context: RequestContext, output: PDFDocument, op
 }
 
 async function requireDocument(context: RequestContext, documentId: string) {
-  return prisma.generatedDocument.findFirstOrThrow({ where: { id: documentId, tenantId: context.tenantId } });
+  return prisma.generatedDocument.findFirstOrThrow({ where: { id: documentId, tenantId: context.tenantId, archivedAt: null } });
 }
 
 async function requireRevision(context: RequestContext, documentId: string, revisionId: string) {

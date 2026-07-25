@@ -2,13 +2,13 @@ import { BackButton } from "@/components/back-button";
 import { ExternalLink, FileStack } from "lucide-react";
 import { engineeringFileLabel } from "@/app/app/development/development-actions";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 
 export const dynamic = "force-dynamic";
 
-export default async function DevelopmentPlansPage({ params }: { params: { projectId: string } }) {
-  const session = await getSessionUser();
-  if (!session) return null;
+export default async function DevelopmentPlansPage(props: { params: Promise<{ projectId: string }> }) {
+  const params = await props.params;
+  const session = await requirePagePermission("development.view");
 
   const [project, assets, files] = await Promise.all([
     prisma.project.findFirstOrThrow({ where: { id: params.projectId, tenantId: session.tenantId } }),

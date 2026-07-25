@@ -1,5 +1,5 @@
 import "@/server/load-env";
-import { sendExpiryReminders, sendOverdueTaskReminders } from "@/server/services/reminders";
+import { sendDailyTaskReminders, sendExpiryReminders } from "@/server/services/reminders";
 
 // Standalone scheduled runner for time-based notifications that no user action can trigger:
 //  • government-approval expiry / renewal reminders (Liaison)
@@ -12,9 +12,9 @@ const INTERVAL_MS = Number(process.env.REMINDER_INTERVAL_MS ?? 12 * 60 * 60 * 10
 async function tick() {
   try {
     const expiry = await sendExpiryReminders();
-    const overdue = await sendOverdueTaskReminders();
+    const engineering = await sendDailyTaskReminders();
     console.log(
-      `[reminder-worker] ${new Date().toISOString()} — expiry: ${expiry.documents} docs / ${expiry.notifications} notifs; overdue tasks: ${overdue.tasks} / ${overdue.notifications} notifs`,
+      `[reminder-worker] ${new Date().toISOString()} — expiry: ${expiry.documents} docs / ${expiry.notifications} notifs; engineering tasks: ${engineering.tasks} / ${engineering.notifications} notifs`,
     );
   } catch (error) {
     console.error("[reminder-worker] run failed:", error);

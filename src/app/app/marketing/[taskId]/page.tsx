@@ -3,17 +3,17 @@ import { Download, FileText, Film, ImageIcon } from "lucide-react";
 import { BackButton } from "@/components/back-button";
 import { FileActions } from "@/components/file-actions";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
+import { requireAnyPagePermission } from "@/server/page-auth";
 import { MarketingMediaPanel, MarketingProjectDetailEditor } from "../marketing-actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function MarketingProjectDetailPage({ params }: { params: { taskId: string } }) {
-  const session = await getSessionUser();
-  if (!session) return null;
+export default async function MarketingProjectDetailPage(props: { params: Promise<{ taskId: string }> }) {
+  const params = await props.params;
+  const session = await requireAnyPagePermission(["marketing.manage", "marketing.execute"]);
 
   const task = await prisma.marketingTask.findFirst({
-    where: { id: params.taskId, tenantId: session.tenantId, status: "APPROVED" },
+    where: { id: params.taskId, tenantId: session.tenantId, status: "APPROVED", archivedAt: null },
     include: { media: true },
   });
 

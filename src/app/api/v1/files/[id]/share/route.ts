@@ -3,7 +3,8 @@ import { apiError, getRequestContext, ok } from "@/server/api";
 import { createFileShareToken } from "@/server/file-share";
 import { getFileForDownload } from "@/server/services/files";
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "documents.view");
     const file = await getFileForDownload(context, params.id);

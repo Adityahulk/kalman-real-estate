@@ -1,17 +1,13 @@
-import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Settings, ShieldCheck } from "lucide-react";
-import { getSessionUser } from "@/server/session";
-import { hasPermission } from "@/server/rbac";
+import { requirePagePermission } from "@/server/page-auth";
 import { listUsers } from "@/server/services/users";
 import { UsersManager } from "./users-manager";
 
 export const dynamic = "force-dynamic";
 
 export default async function UsersPage() {
-  const session = await getSessionUser();
-  if (!session) return null;
-  if (!hasPermission(session.role, "users.manage", session.permissions)) notFound();
+  const session = await requirePagePermission("users.manage");
 
   const data = await listUsers({ tenantId: session.tenantId, userId: session.id, role: session.role, permissions: session.permissions });
 

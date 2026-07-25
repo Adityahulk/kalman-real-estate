@@ -43,7 +43,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           # No npm cache here: a corrupted/interrupted cache entry for a transitive dep (e.g. tar,
           # used by @capacitor/cli to extract its native project templates) can silently poison every
           # future run with the same deterministic failure. A cold npm install is slower but reliable.
@@ -148,7 +148,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
           # No npm cache here: a corrupted/interrupted cache entry for a transitive dep (e.g. tar,
           # used by @capacitor/cli to extract its native project templates) can silently poison every
           # future run with the same deterministic failure. A cold npm install is slower but reliable.
@@ -214,7 +214,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
 
       - name: Install desktop dependencies
         run: npm --prefix desktop ci

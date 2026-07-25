@@ -8,7 +8,8 @@ import {
   updateLetterFieldSchema,
 } from "@/server/services/letter-field-settings";
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "projects.manage");
     const kind = new URL(request.url).searchParams.get("kind");
@@ -19,7 +20,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
   }
 }
 
-export async function DELETE(request: NextRequest, { params }: { params: { id: string } }) {
+export async function DELETE(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "projects.manage");
     const kind = new URL(request.url).searchParams.get("kind");

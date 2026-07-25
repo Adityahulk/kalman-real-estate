@@ -97,16 +97,18 @@ export async function archiveManualPlot(context: RequestContext, plotId: string)
   const before = await prisma.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
   const result = await prisma.$transaction(async (tx) => {
     const generatedDocuments = await tx.generatedDocument.findMany({
-      where: { tenantId: context.tenantId, recordType: "Plot", recordId: plotId },
+      where: { tenantId: context.tenantId, recordType: "Plot", recordId: plotId, archivedAt: null },
       select: { id: true, fileAssetId: true },
     });
     const generatedDocumentIds = generatedDocuments.map((document) => document.id);
     const generatedFileIds = generatedDocuments.map((document) => document.fileAssetId).filter((id): id is string => Boolean(id));
 
+    const now = new Date();
     if (generatedDocumentIds.length) {
-      await tx.generatedDocumentRevision.deleteMany({ where: { tenantId: context.tenantId, documentId: { in: generatedDocumentIds } } });
-      await tx.approval.deleteMany({ where: { tenantId: context.tenantId, recordType: "GeneratedDocument", recordId: { in: generatedDocumentIds } } });
-      await tx.generatedDocument.deleteMany({ where: { tenantId: context.tenantId, id: { in: generatedDocumentIds } } });
+      await tx.generatedDocument.updateMany({
+        where: { tenantId: context.tenantId, id: { in: generatedDocumentIds }, archivedAt: null },
+        data: { archivedAt: now, archivedById: context.userId, archiveReason: `Plot ${before.code} archived` },
+      });
     }
     await tx.fileAsset.updateMany({
       where: {
@@ -118,29 +120,24 @@ export async function archiveManualPlot(context: RequestContext, plotId: string)
         ],
       },
       data: {
-        deletedAt: new Date(),
+        deletedAt: now,
         deletedById: context.userId,
         deleteReason: `Plot ${before.code} deleted.`,
       },
     });
-    await tx.ownershipRecord.deleteMany({ where: { tenantId: context.tenantId, plotId } });
-    await tx.registryRecord.deleteMany({ where: { tenantId: context.tenantId, plotId } });
-    await tx.checklistItem.deleteMany({
-      where: {
-        tenantId: context.tenantId,
-        OR: [
-          { plotId },
-          { parentType: "Plot", parentId: plotId },
-        ],
-      },
+    await tx.ownershipRecord.updateMany({
+      where: { tenantId: context.tenantId, plotId, cancelledAt: null },
+      data: { cancelledAt: now, cancelledById: context.userId, cancellationReason: `Plot ${before.code} archived` },
     });
-    await tx.approval.deleteMany({ where: { tenantId: context.tenantId, recordType: "Plot", recordId: plotId } });
-    await tx.spatialLink.deleteMany({ where: { tenantId: context.tenantId, recordType: "Plot", recordId: plotId } });
+    await tx.registryRecord.updateMany({
+      where: { tenantId: context.tenantId, plotId, archivedAt: null },
+      data: { archivedAt: now, archivedById: context.userId, archiveReason: `Plot ${before.code} archived` },
+    });
     const plot = await tx.plot.update({
       where: { id: plotId },
       data: {
         code: deletedPlotCode(before.code, before.id),
-        archivedAt: new Date(),
+        archivedAt: now,
         archiveReason: "Deleted from ownership module.",
         currentOwnerId: null,
         status: PlotStatus.COMPANY_OWNED,
@@ -156,6 +153,45 @@ export async function archiveManualPlot(context: RequestContext, plotId: string)
     after: result as unknown as Prisma.InputJsonValue,
   });
   return result.plot;
+}
+
+export async function restoreManualPlot(context: RequestContext, plotId: string) {
+  const before = await prisma.plot.findFirstOrThrow({
+    where: { id: plotId, tenantId: context.tenantId, archivedAt: { not: null } },
+  });
+  const originalCode = before.code.split("__deleted__")[0] || before.code;
+  const conflict = await prisma.plot.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      projectId: before.projectId,
+      code: originalCode,
+      archivedAt: null,
+    },
+    select: { id: true },
+  });
+  if (conflict) {
+    const error = new Error(`Plot ${originalCode} is already active. Rename or archive it before restoring this record.`);
+    error.name = "BadRequestError";
+    throw error;
+  }
+  const plot = await prisma.plot.update({
+    where: { id: plotId },
+    data: {
+      code: originalCode,
+      archivedAt: null,
+      archiveReason: null,
+      currentOwnerId: null,
+      status: PlotStatus.COMPANY_OWNED,
+    },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.UPDATE,
+    entityType: "Plot",
+    entityId: plotId,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: { restored: true, plot } as unknown as Prisma.InputJsonValue,
+  });
+  return plot;
 }
 
 async function releaseArchivedPlotCodes(

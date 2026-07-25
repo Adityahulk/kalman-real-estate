@@ -1,14 +1,14 @@
 import { notFound } from "next/navigation";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { prisma } from "@/server/db";
 import { ActionHint, ActionPageShell } from "../../../../../action-page-shell";
 import { OwnershipDocumentUpload } from "../../../../../../ownership/ownership-actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function UploadPlotDocumentPage({ params }: { params: { projectId: string; plotId: string } }) {
-  const session = await getSessionUser();
-  if (!session) return null;
+export default async function UploadPlotDocumentPage(props: { params: Promise<{ projectId: string; plotId: string }> }) {
+  const params = await props.params;
+  const session = await requirePagePermission("files.upload");
   const [plot, generatedOwnershipLetterCount] = await Promise.all([
     prisma.plot.findFirst({
       where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId, archivedAt: null },
@@ -19,6 +19,7 @@ export default async function UploadPlotDocumentPage({ params }: { params: { pro
         tenantId: session.tenantId,
         recordType: "Plot",
         recordId: params.plotId,
+        archivedAt: null,
         OR: [
           { type: { contains: "allotment", mode: "insensitive" } },
           { type: { contains: "transfer", mode: "insensitive" } },

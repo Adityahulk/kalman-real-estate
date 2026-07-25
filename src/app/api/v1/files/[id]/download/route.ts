@@ -4,7 +4,8 @@ import { apiError, getRequestContext } from "@/server/api";
 import { getFileForDownload } from "@/server/services/files";
 import { createDownloadUrl, getLocalObject, getObjectResilient, isLocalStorageKey } from "@/server/storage";
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "documents.view");
     const file = await getFileForDownload(context, params.id);

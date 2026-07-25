@@ -6,7 +6,8 @@ import {
   listBrowserExtractions,
 } from "@/server/services/cad-browser-extraction";
 
-export async function GET(request: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "cad.review");
     return ok(await listBrowserExtractions(context, params.id));
@@ -15,7 +16,8 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
   }
 }
 
-export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "cad.review");
     const input = await parseJson(request, createBrowserExtractionSchema);

@@ -9,7 +9,8 @@ const schema = z.object({
   note: z.string().max(1000).optional(),
 });
 
-export async function PATCH(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PATCH(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "tenant.manage");
     const input = await parseJson(request, schema);

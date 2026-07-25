@@ -1309,12 +1309,13 @@ export async function rollbackCadPublish(context: RequestContext, id: string, in
         where: {
           tenantId: context.tenantId,
           plotId,
+          cancelledAt: null,
           OR: [{ kind: { not: "COMPANY_INVENTORY" } }, { ownerId: { not: null } }],
         },
       }),
-      prisma.registryRecord.count({ where: { tenantId: context.tenantId, plotId } }),
-      prisma.fileAsset.count({ where: { tenantId: context.tenantId, ownerType: "Plot", ownerId: plotId } }),
-      prisma.generatedDocument.count({ where: { tenantId: context.tenantId, recordType: "Plot", recordId: plotId } }),
+      prisma.registryRecord.count({ where: { tenantId: context.tenantId, plotId, archivedAt: null } }),
+      prisma.fileAsset.count({ where: { tenantId: context.tenantId, ownerType: "Plot", ownerId: plotId, deletedAt: null } }),
+      prisma.generatedDocument.count({ where: { tenantId: context.tenantId, recordType: "Plot", recordId: plotId, archivedAt: null } }),
       prisma.checklistItem.count({ where: { tenantId: context.tenantId, plotId } }),
       prisma.progressUpdate.count({ where: { tenantId: context.tenantId, parentType: "Plot", parentId: plotId } }),
       prisma.issue.count({ where: { tenantId: context.tenantId, parentType: "Plot", parentId: plotId } }),
@@ -1860,12 +1861,13 @@ export async function updatePublishedEntity(
           where: {
             tenantId: context.tenantId,
             plotId: plot.id,
+            cancelledAt: null,
             OR: [{ kind: { not: "COMPANY_INVENTORY" } }, { ownerId: { not: null } }],
           },
         }),
-        prisma.registryRecord.count({ where: { tenantId: context.tenantId, plotId: plot.id } }),
-        prisma.fileAsset.count({ where: { tenantId: context.tenantId, ownerType: "Plot", ownerId: plot.id } }),
-        prisma.generatedDocument.count({ where: { tenantId: context.tenantId, recordType: "Plot", recordId: plot.id } }),
+        prisma.registryRecord.count({ where: { tenantId: context.tenantId, plotId: plot.id, archivedAt: null } }),
+        prisma.fileAsset.count({ where: { tenantId: context.tenantId, ownerType: "Plot", ownerId: plot.id, deletedAt: null } }),
+        prisma.generatedDocument.count({ where: { tenantId: context.tenantId, recordType: "Plot", recordId: plot.id, archivedAt: null } }),
       ]);
       if (ownershipActivity || registryCount || fileCount || documentCount) {
         const reasons = [];
@@ -1877,12 +1879,18 @@ export async function updatePublishedEntity(
       }
 
       return prisma.$transaction(async (tx) => {
-        await tx.ownershipRecord.deleteMany({
-          where: { tenantId: context.tenantId, plotId: plot.id, kind: "COMPANY_INVENTORY", ownerId: null },
+        const convertedAt = new Date();
+        await tx.ownershipRecord.updateMany({
+          where: { tenantId: context.tenantId, plotId: plot.id, kind: "COMPANY_INVENTORY", ownerId: null, cancelledAt: null },
+          data: {
+            cancelledAt: convertedAt,
+            cancelledById: context.userId,
+            cancellationReason: `Converted to ${input.type} via map editor`,
+          },
         });
         await tx.plot.update({
           where: { id: plot.id },
-          data: { archivedAt: new Date(), archiveReason: `Converted to ${input.type} via map editor` },
+          data: { archivedAt: convertedAt, archiveReason: `Converted to ${input.type} via map editor` },
         });
         const asset = await tx.siteAsset.create({
           data: {

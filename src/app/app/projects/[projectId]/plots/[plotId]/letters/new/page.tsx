@@ -1,20 +1,20 @@
 import { notFound } from "next/navigation";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { prisma } from "@/server/db";
 import { ActionHint, ActionPageShell } from "../../../../../action-page-shell";
 import { LetterDraftStartForm } from "../../../../../workflow-action-forms";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewLetterPage({
-  params,
-  searchParams,
-}: {
-  params: { projectId: string; plotId: string };
-  searchParams: { type?: "allotment_letter" | "allotment_letter_joint" | "transfer_letter" | "registry_status_letter" };
-}) {
-  const session = await getSessionUser();
-  if (!session) return null;
+export default async function NewLetterPage(
+  props: {
+    params: Promise<{ projectId: string; plotId: string }>;
+    searchParams: Promise<{ type?: "allotment_letter" | "allotment_letter_joint" | "transfer_letter" | "registry_status_letter" }>;
+  }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
+  const session = await requirePagePermission("documents.generate");
   const plot = await prisma.plot.findFirst({
     where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId, archivedAt: null },
     include: { project: true, currentOwner: true },

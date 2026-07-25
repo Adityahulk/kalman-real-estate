@@ -1055,6 +1055,8 @@ function letterStatusChipClass(status: string) {
       return "bg-amber-50 text-amber-800";
     case "REJECTED":
       return "bg-rose-50 text-rose-700";
+    case "CHANGES_REQUESTED":
+      return "bg-amber-50 text-amber-800";
     default:
       return "bg-slate-100 text-slate-700";
   }
@@ -1099,7 +1101,7 @@ export function LetterStudioEditor({
   const [mounted, setMounted] = useState(false);
   const [message, setMessage] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const [loading, setLoading] = useState<"save" | "render" | "">("");
-  const [approvalLoading, setApprovalLoading] = useState<"APPROVED" | "ISSUED" | "REJECTED" | "SUBMIT" | "SIGN" | "">("");
+  const [approvalLoading, setApprovalLoading] = useState<"APPROVED" | "ISSUED" | "REJECTED" | "CHANGES_REQUESTED" | "SUBMIT" | "SIGN" | "">("");
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [view, setView] = useState<"edit" | "preview">(letter.fileAssetId ? "preview" : "edit");
@@ -1235,11 +1237,11 @@ export function LetterStudioEditor({
     }
   }
 
-  async function decide(nextStatus: "APPROVED" | "ISSUED" | "REJECTED") {
+  async function decide(nextStatus: "APPROVED" | "ISSUED" | "REJECTED" | "CHANGES_REQUESTED") {
     if ((nextStatus === "APPROVED" || nextStatus === "ISSUED") && !fileAssetId) return;
     setApprovalLoading(nextStatus);
     setMessage(null);
-    const endpoint = nextStatus === "REJECTED" ? "reject" : "approve";
+    const endpoint = nextStatus === "REJECTED" ? "reject" : nextStatus === "CHANGES_REQUESTED" ? "return" : "approve";
     const response = await fetch(`/api/v1/documents/${letter.id}/${endpoint}`, {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -1312,7 +1314,7 @@ export function LetterStudioEditor({
   const isRejected = status === "REJECTED";
   // Workflow-state derived flags. Editing/generating is only meaningful before submission; the
   // approve/sign controls appear only for the right role at the right stage of the chain.
-  const isEditableStage = status === "DRAFT" || status === "GENERATED" || status === "REJECTED";
+  const isEditableStage = status === "DRAFT" || status === "GENERATED" || status === "CHANGES_REQUESTED";
   const showEditingTools = permissions.generate && isEditableStage;
   const showSubmit = permissions.submit && isEditableStage && Boolean(fileAssetId);
   const showApprovalDecision = permissions.approve && status === "SUBMITTED";
@@ -1431,9 +1433,13 @@ export function LetterStudioEditor({
                     {approvalLoading === "APPROVED" ? <Loader2 className="animate-spin" size={14} /> : <CheckCircle2 size={14} />}
                     Approve
                   </button>
-                  <button type="button" className="btn-outline h-9 px-3 text-xs" disabled={Boolean(approvalLoading)} onClick={() => decide("REJECTED")}>
-                    {approvalLoading === "REJECTED" ? <Loader2 className="animate-spin" size={14} /> : <X size={14} />}
+                  <button type="button" className="btn-outline h-9 px-3 text-xs" disabled={Boolean(approvalLoading)} onClick={() => decide("CHANGES_REQUESTED")}>
+                    {approvalLoading === "CHANGES_REQUESTED" ? <Loader2 className="animate-spin" size={14} /> : <X size={14} />}
                     Send back
+                  </button>
+                  <button type="button" className="btn-outline h-9 px-3 text-xs text-rose-700" disabled={Boolean(approvalLoading)} onClick={() => decide("REJECTED")}>
+                    {approvalLoading === "REJECTED" ? <Loader2 className="animate-spin" size={14} /> : <X size={14} />}
+                    Reject
                   </button>
                 </>
               ) : null}
@@ -1548,7 +1554,7 @@ function LetterDraftCanvas({
   draftHtml,
   onInput,
 }: {
-  editorRef: RefObject<HTMLDivElement>;
+  editorRef: RefObject<HTMLDivElement | null>;
   savedRangeRef: MutableRefObject<Range | null>;
   draftHtml: string;
   onInput: () => void;

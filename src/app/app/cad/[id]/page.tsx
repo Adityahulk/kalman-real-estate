@@ -1,13 +1,12 @@
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
-import { hasPermission } from "@/server/rbac";
+import { requireAnyPagePermission } from "@/server/page-auth";
 
 export const dynamic = "force-dynamic";
 
-export default async function CadEntryPage({ params }: { params: { id: string } }) {
-  const session = await getSessionUser();
-  if (!session || !hasPermission(session.role, "cad.review", session.permissions)) notFound();
+export default async function CadEntryPage(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
+  const session = await requireAnyPagePermission(["cad.view", "cad.review"]);
   const cadFile = await prisma.cadFile.findFirst({
     where: { id: params.id, tenantId: session.tenantId },
     select: { format: true },

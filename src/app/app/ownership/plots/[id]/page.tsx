@@ -1,12 +1,12 @@
 import { notFound, redirect } from "next/navigation";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 
 export const dynamic = "force-dynamic";
 
-export default async function LegacyPlotDetailPage({ params }: { params: { id: string } }) {
-  const session = await getSessionUser();
-  if (!session) return null;
+export default async function LegacyPlotDetailPage(props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
+  const session = await requirePagePermission("ownership.view");
   const plot = await prisma.plot.findFirst({
     where: { id: params.id, tenantId: session.tenantId, archivedAt: null },
     select: { id: true, projectId: true },

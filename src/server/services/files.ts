@@ -35,6 +35,18 @@ export const uploadCompleteSchema = z.object({
 
 export async function createFileUpload(context: RequestContext, input: z.infer<typeof fileUploadSchema>) {
   await assertOwnerRecord(context, input.ownerType, input.ownerId);
+  const previous = input.ownerType && input.ownerId && input.categoryKey
+    ? await prisma.fileAsset.findFirst({
+        where: {
+          tenantId: context.tenantId,
+          ownerType: input.ownerType,
+          ownerId: input.ownerId,
+          categoryKey: input.categoryKey,
+        },
+        orderBy: [{ version: "desc" }, { createdAt: "desc" }],
+        select: { id: true, version: true },
+      })
+    : null;
   const key = storageKey([context.tenantId, "files", `${Date.now()}-${input.fileName}`]);
   const upload = await createUploadTargets({ key, contentType: input.mimeType });
   const file = await prisma.fileAsset.create({
@@ -54,6 +66,8 @@ export async function createFileUpload(context: RequestContext, input: z.infer<t
       ownerId: input.ownerId,
       categoryKey: input.categoryKey,
       uploadedById: context.userId,
+      version: (previous?.version ?? 0) + 1,
+      previousFileId: previous?.id,
     },
   });
 
@@ -82,8 +96,22 @@ export async function createGeneratedFileAsset(
     ownerId?: string;
     storageProvider?: FileStorageProvider;
     fallbackStorageKey?: string;
+    categoryKey?: string;
   },
 ) {
+  const categoryKey = input.categoryKey ?? input.documentType?.toLowerCase().replaceAll("_", "-");
+  const previous = input.ownerType && input.ownerId && categoryKey
+    ? await prisma.fileAsset.findFirst({
+        where: {
+          tenantId: context.tenantId,
+          ownerType: input.ownerType,
+          ownerId: input.ownerId,
+          categoryKey,
+        },
+        orderBy: [{ version: "desc" }, { createdAt: "desc" }],
+        select: { id: true, version: true },
+      })
+    : null;
   return prisma.fileAsset.create({
     data: {
       tenantId: context.tenantId,
@@ -100,7 +128,10 @@ export async function createGeneratedFileAsset(
       notes: input.notes,
       ownerType: input.ownerType,
       ownerId: input.ownerId,
+      categoryKey,
       uploadedById: context.userId,
+      version: (previous?.version ?? 0) + 1,
+      previousFileId: previous?.id,
     },
   });
 }
@@ -160,7 +191,7 @@ async function assertOwnerRecord(context: RequestContext, ownerType?: string, ow
     return;
   }
   if (ownerType === "RegistryRecord") {
-    await prisma.registryRecord.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
+    await prisma.registryRecord.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId, archivedAt: null } });
     return;
   }
   if (ownerType === "ProgressUpdate") {
@@ -172,7 +203,7 @@ async function assertOwnerRecord(context: RequestContext, ownerType?: string, ow
     return;
   }
   if (ownerType === "MarketingTask") {
-    await prisma.marketingTask.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
+    await prisma.marketingTask.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId, archivedAt: null } });
     return;
   }
   if (ownerType === "GeneratedDocumentRevision") {
@@ -180,7 +211,7 @@ async function assertOwnerRecord(context: RequestContext, ownerType?: string, ow
     return;
   }
   if (ownerType === "GeneratedDocument") {
-    await prisma.generatedDocument.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId } });
+    await prisma.generatedDocument.findFirstOrThrow({ where: { id: ownerId, tenantId: context.tenantId, archivedAt: null } });
     return;
   }
   if (ownerType === "User") {
@@ -265,6 +296,24 @@ export async function renameFileAsset(context: RequestContext, id: string, input
   return file;
 }
 
+export async function restoreFileAsset(context: RequestContext, id: string) {
+  const before = await prisma.fileAsset.findFirstOrThrow({
+    where: { id, tenantId: context.tenantId, deletedAt: { not: null } },
+  });
+  const file = await prisma.fileAsset.update({
+    where: { id },
+    data: { deletedAt: null, deletedById: null, deleteReason: null },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.UPDATE,
+    entityType: "FileAsset",
+    entityId: id,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: { restored: true, fileName: file.fileName } as Prisma.InputJsonValue,
+  });
+  return file;
+}
+
 async function ownerForUser(context: RequestContext) {
   const user = await prisma.user.findUnique({ where: { id: context.userId } });
   if (!user) return null;
@@ -284,7 +333,7 @@ async function ownerCanAccessFile(ownerId: string, file: FileAsset) {
 
   if (file.ownerType === "Plot") {
     const document = await prisma.generatedDocument.findFirst({
-      where: { tenantId: file.tenantId, fileAssetId: file.id },
+      where: { tenantId: file.tenantId, fileAssetId: file.id, archivedAt: null },
       select: { status: true },
     });
     // A letter is owner-visible once it has been approved. Approval now advances the letter into the

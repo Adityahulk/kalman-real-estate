@@ -1,7 +1,6 @@
-import { redirect } from "next/navigation";
 import { BackButton } from "@/components/back-button";
 import { prisma } from "@/server/db";
-import { getSessionUser } from "@/server/session";
+import { requirePagePermission } from "@/server/page-auth";
 import { ProjectFileFieldForm } from "../project-files/project-file-field-form";
 import { SettingsTabs } from "../settings-tabs";
 import { ProjectMapFieldEditor } from "./project-map-field-editor";
@@ -9,8 +8,7 @@ import { ProjectMapFieldEditor } from "./project-map-field-editor";
 export const dynamic = "force-dynamic";
 
 export default async function ProjectMapsSettingsPage() {
-  const session = await getSessionUser();
-  if (!session) redirect("/login");
+  const session = await requirePagePermission("projects.manage");
   const fields = await prisma.projectFileField.findMany({
     where: { tenantId: session.tenantId, section: "PROJECT_MAPS", parentId: null },
     include: { children: { orderBy: { createdAt: "asc" } } },

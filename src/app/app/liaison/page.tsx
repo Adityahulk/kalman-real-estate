@@ -1,17 +1,14 @@
-import { notFound } from "next/navigation";
 import { Landmark } from "lucide-react";
-import { getSessionUser } from "@/server/session";
 import { hasPermission } from "@/server/rbac";
 import { prisma } from "@/server/db";
+import { requirePagePermission } from "@/server/page-auth";
 import { listApprovals } from "@/server/services/approvals";
 import { LiaisonManager } from "./liaison-manager";
 
 export const dynamic = "force-dynamic";
 
 export default async function LiaisonPage() {
-  const session = await getSessionUser();
-  if (!session) return null;
-  if (!hasPermission(session.role, "liaison.view", session.permissions)) notFound();
+  const session = await requirePagePermission("liaison.view");
 
   const context = { tenantId: session.tenantId, userId: session.id, role: session.role };
   const [approvals, projects] = await Promise.all([

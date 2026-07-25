@@ -5,7 +5,8 @@ import { replaceCadFile } from "@/server/services/cad";
 
 export const runtime = "nodejs";
 
-export async function PUT(request: NextRequest, { params }: { params: { id: string } }) {
+export async function PUT(request: NextRequest, props: { params: Promise<{ id: string }> }) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "cad.upload");
     const form = await request.formData();

@@ -15,7 +15,8 @@ import {
   Wrench,
 } from "lucide-react";
 import type React from "react";
-import { getSessionUser } from "@/server/session";
+import { requireAnyPagePermission } from "@/server/page-auth";
+import { hasPermission } from "@/server/rbac";
 import { getPlotWorkspace } from "@/server/services/plot-workspace";
 import { prisma } from "@/server/db";
 import { fullInr } from "@/lib/format";
@@ -41,15 +42,20 @@ const primaryTabs = ["overview", "status", "ownership", "plot-map", "documents",
 const advancedTabs = ["registry", "transfers", "development"] as const;
 const tabs = [...primaryTabs, ...advancedTabs] as const;
 
-export default async function ProjectPlotWorkspacePage({
-  params,
-  searchParams,
-}: {
-  params: { projectId: string; plotId: string };
-  searchParams: { tab?: string };
-}) {
-  const session = await getSessionUser();
-  if (!session) return null;
+export default async function ProjectPlotWorkspacePage(
+  props: {
+    params: Promise<{ projectId: string; plotId: string }>;
+    searchParams: Promise<{ tab?: string }>;
+  }
+) {
+  const searchParams = await props.searchParams;
+  const params = await props.params;
+  const session = await requireAnyPagePermission(["ownership.view", "owner.portal"]);
+  const canManageOwnership = hasPermission(session.role, "ownership.manage", session.permissions);
+  const canGenerateDocuments = hasPermission(session.role, "documents.generate", session.permissions);
+  const canApproveDocuments = hasPermission(session.role, "documents.approve", session.permissions);
+  const canUploadFiles = hasPermission(session.role, "files.upload", session.permissions);
+  const canRestoreRecords = hasPermission(session.role, "records.restore", session.permissions);
   const [workspace, firm] = await Promise.all([
     getPlotWorkspace({ tenantId: session.tenantId, userId: session.id, role: session.role }, params.plotId),
     prisma.tenant.findUniqueOrThrow({ where: { id: session.tenantId }, select: { name: true, maxTransfersPerPlot: true } }),
@@ -68,7 +74,7 @@ export default async function ProjectPlotWorkspacePage({
   const registryDocuments = workspace.plotFiles.filter((file) => file.documentType === "REGISTRY_RECEIPT" || file.documentType === "REGISTRY_DEED");
   const ownershipLetters = workspace.generatedDocuments.filter((document) => document.type.includes("allotment") || document.type.includes("transfer"));
   const latestSignedLetterUploadTargetId = ownershipLetters
-    .filter((document) => document.type.includes("allotment") && document.fileAssetId && document.status !== "REJECTED")
+    .filter((document) => document.type.includes("allotment") && document.fileAssetId && !["REJECTED", "CHANGES_REQUESTED"].includes(document.status))
     .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0]?.id ?? null;
   const latestSignedByDocumentNo = new globalThis.Map<string, typeof signedAllotmentFiles[number]>();
   for (const file of signedAllotmentFiles) {
@@ -116,10 +122,12 @@ export default async function ProjectPlotWorkspacePage({
             <Map size={17} />
             Plot map
           </Link>
-          <Link className="btn-outline" href={`/app/projects/${plot.projectId}/plots/${plot.id}/edit`}>
-            <Pencil size={17} />
-            Edit plot
-          </Link>
+          {canManageOwnership ? (
+            <Link className="btn-outline" href={`/app/projects/${plot.projectId}/plots/${plot.id}/edit`}>
+              <Pencil size={17} />
+              Edit plot
+            </Link>
+          ) : null}
           <Link className="btn-outline" href={`/app/projects/${plot.projectId}/ownership`}>
             Back to ledger
           </Link>
@@ -171,7 +179,13 @@ export default async function ProjectPlotWorkspacePage({
 
             <AccordionRow label="Status" value={allotmentStatus}>
               <div className="overflow-x-auto rounded-lg border border-slate-200">
-                <OwnershipLetterRows documents={ownershipLetters} plotId={plot.id} latestSignedLetterUploadTargetId={latestSignedLetterUploadTargetId} signedByDocumentNo={latestSignedByDocumentNo} />
+                <OwnershipLetterRows
+                  documents={ownershipLetters}
+                  plotId={plot.id}
+                  latestSignedLetterUploadTargetId={latestSignedLetterUploadTargetId}
+                  signedByDocumentNo={latestSignedByDocumentNo}
+                  canUploadSigned={canUploadFiles}
+                />
               </div>
             </AccordionRow>
 
@@ -195,17 +209,17 @@ export default async function ProjectPlotWorkspacePage({
 
             <AccordionRow label="Actions" value={plot.currentOwnerId ? "Transfer or registry" : "New allotment"}>
               <div className="flex flex-wrap gap-2">
-                {!plot.currentOwnerId || !transferLimitReached ? <Link className="btn-primary justify-center" href={plot.currentOwnerId ? `/app/projects/${plot.projectId}/plots/${plot.id}/transfer` : `/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}`}>
+                {((!plot.currentOwnerId && canGenerateDocuments) || (plot.currentOwnerId && canManageOwnership && !transferLimitReached)) ? <Link className="btn-primary justify-center" href={plot.currentOwnerId ? `/app/projects/${plot.projectId}/plots/${plot.id}/transfer` : `/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}`}>
                   <GitBranch size={17} />
                   + {plot.currentOwnerId ? "New transfer" : "New allotment"}
                 </Link> : null}
                 {plot.currentOwnerId && transferLimitReached ? <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">Transfer limit reached. Registry is the only next ownership action.</div> : null}
-                {plot.currentOwnerId ? <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/registry/update`}><Upload size={17} />{registryDocuments.length ? "+ New registry" : "Upload registry"}</Link> : null}
-                {latestAllotmentRecord ? <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}&edit=1`}><Pencil size={17} />Allotment details</Link> : null}
+                {plot.currentOwnerId && canManageOwnership ? <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/registry/update`}><Upload size={17} />{registryDocuments.length ? "+ New registry" : "Upload registry"}</Link> : null}
+                {latestAllotmentRecord && canGenerateDocuments ? <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}&edit=1`}><Pencil size={17} />Allotment details</Link> : null}
                 {registryDocuments.length ? <Link className="btn-outline justify-center" href={`?tab=registry`}><Landmark size={17} />View registry</Link> : null}
                 <Link className="btn-outline justify-center" href={`?tab=documents`}><FileText size={17} />Documents</Link>
                 <Link className="btn-outline justify-center" href={`?tab=history`}><History size={17} />History</Link>
-                <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/edit`}><Pencil size={17} />Edit plot details</Link>
+                {canManageOwnership ? <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/edit`}><Pencil size={17} />Edit plot details</Link> : null}
               </div>
             </AccordionRow>
           </div>
@@ -219,7 +233,13 @@ export default async function ProjectPlotWorkspacePage({
               <h2 className="font-semibold">Allotment and transfer letters</h2>
               <p className="mt-1 text-sm text-slate-500">Letters recorded during allotment and every owner transfer.</p>
             </div>
-            <OwnershipLetterRows documents={ownershipLetters} plotId={plot.id} latestSignedLetterUploadTargetId={latestSignedLetterUploadTargetId} signedByDocumentNo={latestSignedByDocumentNo} />
+            <OwnershipLetterRows
+              documents={ownershipLetters}
+              plotId={plot.id}
+              latestSignedLetterUploadTargetId={latestSignedLetterUploadTargetId}
+              signedByDocumentNo={latestSignedByDocumentNo}
+              canUploadSigned={canUploadFiles}
+            />
           </div>
         </section>
       ) : null}
@@ -314,10 +334,10 @@ export default async function ProjectPlotWorkspacePage({
                         <div className="mt-1 text-xs text-slate-500">{document.status} · {document.createdAt.toLocaleDateString("en-IN")}</div>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <Link className="btn-outline h-8 px-3 text-xs" href={`/app/projects/${plot.projectId}/plots/${plot.id}/letters/${document.id}`}>Edit</Link>
+                        {canGenerateDocuments ? <Link className="btn-outline h-8 px-3 text-xs" href={`/app/projects/${plot.projectId}/plots/${plot.id}/letters/${document.id}`}>Edit</Link> : null}
                         {document.fileAssetId ? <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`}>Download</a> : null}
-                        <DeleteDocumentButton documentId={document.id} documentName={document.number ?? document.type} />
-                        <DocumentApprovalButtons documentId={document.id} status={document.status} fileAssetId={document.fileAssetId} />
+                        {canRestoreRecords ? <DeleteDocumentButton documentId={document.id} documentName={document.number ?? document.type} /> : null}
+                        {canApproveDocuments ? <DocumentApprovalButtons documentId={document.id} status={document.status} fileAssetId={document.fileAssetId} /> : null}
                       </div>
                     </div>
                   </div>
@@ -646,11 +666,13 @@ function OwnershipLetterRows({
   plotId,
   latestSignedLetterUploadTargetId,
   signedByDocumentNo,
+  canUploadSigned,
 }: {
   documents: Awaited<ReturnType<typeof getPlotWorkspace>>["generatedDocuments"];
   plotId: string;
   latestSignedLetterUploadTargetId: string | null;
   signedByDocumentNo: Map<string, Awaited<ReturnType<typeof getPlotWorkspace>>["plotFiles"][number]>;
+  canUploadSigned: boolean;
 }) {
   return (
     <>
@@ -678,7 +700,7 @@ function OwnershipLetterRows({
                         <Eye size={14} />
                       </a>
                     ) : null}
-                    {document.id === latestSignedLetterUploadTargetId ? (
+                    {canUploadSigned && document.id === latestSignedLetterUploadTargetId ? (
                       <FileUploader compact label={signed ? "Replace signed" : "Upload signed"} ownerType="Plot" ownerId={plotId} visibility="OWNER_VISIBLE" accept="application/pdf,image/*" metadata={{ categoryKey: "signed-allotment-letter", documentType: "ALLOTMENT_LETTER", documentNo: document.number ?? undefined, documentDate: document.createdAt.toISOString(), notes: "Signed version of allotment letter" }} refreshOnUpload />
                     ) : null}
                   </div>
@@ -795,13 +817,18 @@ function boundaryValue(boundaries: unknown, direction: string) {
 
 async function acceptedTransferCountForPlot(tenantId: string, plotId: string) {
   const records = await prisma.ownershipRecord.findMany({
-    where: { tenantId, plotId, kind: "TRANSFER" },
+    where: { tenantId, plotId, kind: "TRANSFER", cancelledAt: null },
     select: { documentId: true },
   });
   const documentIds = records.map((record) => record.documentId).filter(Boolean) as string[];
   if (!documentIds.length) return 0;
   return prisma.generatedDocument.count({
-    where: { tenantId, id: { in: documentIds }, status: { in: ["APPROVED", "ISSUED"] } },
+    where: {
+      tenantId,
+      id: { in: documentIds },
+      archivedAt: null,
+      status: { in: ["APPROVED", "ISSUED", "SENT_FOR_SIGNATURE", "SIGNED"] },
+    },
   });
 }
 

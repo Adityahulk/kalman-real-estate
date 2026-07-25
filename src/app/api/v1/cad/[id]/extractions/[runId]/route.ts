@@ -4,8 +4,9 @@ import { cancelBrowserExtraction } from "@/server/services/cad-browser-extractio
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string; runId: string } },
+  props: { params: Promise<{ id: string; runId: string }> }
 ) {
+  const params = await props.params;
   try {
     const context = await getRequestContext(request, "cad.review");
     return ok(await cancelBrowserExtraction(context, params.id, params.runId));
