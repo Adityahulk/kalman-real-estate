@@ -617,9 +617,16 @@
   white-space: normal;
   text-align: left;
 }
-.letter-paper-editor .transfer-party {
-  line-height: 1.55;
-  margin: 14px 0 20px;
+/* Recipient details (name/address/PAN/Aadhaar) as a real bordered table instead of stacked
+   centered lines, so the fields read as clearly labelled data rather than freeform text. */
+.letter-paper-editor .transfer-recipient-table {
+  width: 72%;
+  margin: 16px auto 22px;
+}
+.letter-paper-editor .transfer-recipient-table th {
+  width: 32%;
+  text-align: left;
+  font-weight: 700;
 }
 .letter-paper-editor .transfer-heading {
   text-align: center;

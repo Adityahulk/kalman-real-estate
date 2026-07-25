@@ -9,7 +9,7 @@ import { generatedDocumentStorageKey, putGeneratedObject } from "../storage";
 import { createGeneratedFileAsset } from "./files";
 import { buildGeneratedDocumentPdf, buildGeneratedDocumentPdfFromHtml } from "./document-pdf";
 import { createNotification, notifyRoleWithPermission } from "./notifications";
-import { defaultLetterBody, ensureProjectLetterTemplates, jointAllotmentTemplateBody } from "./document-templates";
+import { defaultLetterBody, ensureProjectLetterTemplates } from "./document-templates";
 
 // Statuses in which a letter still counts as "accepted" for plot-ownership purposes. Approving a
 // letter reconciles the plot to its new owner; the letter then moves on to signature (SENT_FOR_SIGNATURE
@@ -49,7 +49,7 @@ export const generateDocumentSchema = z.object({
 
 export const createDocumentDraftSchema = z.object({
   templateId: z.string().optional(),
-  type: z.enum(["allotment_letter", "transfer_letter", "registry_status_letter"]),
+  type: z.enum(["allotment_letter", "allotment_letter_joint", "transfer_letter", "registry_status_letter"]),
   recordType: z.literal("Plot"),
   recordId: z.string().min(1),
   data: z.record(z.unknown()).default({}),
@@ -143,13 +143,7 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
     ?? await prisma.documentTemplate.findFirst({ where: { tenantId: context.tenantId, projectId: snapshot.projectId, type: input.type, active: true }, orderBy: { createdAt: "desc" } })
     ?? templateByProject;
   const hasRealBody = template?.body && template.body.length > 100 && !template.body.includes("data-pdf-layout-template") && !template.body.includes("data-exact-pdf-draft");
-  // Joint/partnership allotments use the two-allottee variant of the letter. The variant is an
-  // explicit request from the draft form (data.templateVariant) and never changes the default.
-  const wantsJointVariant =
-    input.type === "allotment_letter" && !input.templateId && input.data.templateVariant === "joint";
-  const templateBody = wantsJointVariant
-    ? await jointAllotmentTemplateBody(context.tenantId, snapshot.projectId)
-    : hasRealBody ? template.body : defaultLetterBody(input.type);
+  const templateBody = hasRealBody ? template.body : defaultLetterBody(input.type);
   const { html, missingVariables, usedFileVariables } = renderTemplate(templateBody, snapshot.variables, snapshot.fileVariables);
   const reconciledHtml = reconcileStructuredBlocks(html, snapshot.variables);
   const draftHtml = usedFileVariables ? reconciledHtml : appendSupportingDocumentPages(reconciledHtml, snapshot.supportingDocumentPages);
@@ -681,7 +675,7 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     where: {
       tenantId: context.tenantId,
       recordId: plot.id,
-      type: "allotment_letter",
+      type: { in: ["allotment_letter", "allotment_letter_joint"] },
       status: { notIn: [DocumentStatus.REJECTED] },
       number: { not: null },
     },
@@ -733,7 +727,18 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
       fileVariables[`manual.${key}`] = await buildInlineFileMarkup(context.tenantId, files);
     }
   }
-  const supportingDocumentPages = await buildSupportingDocumentPagesLight(context.tenantId, plot.id, plot.currentOwnerId, extraDetails);
+  // Bug fix: KYC/payment/etc. photos uploaded on the ALLOTMENT are contextually specific to that
+  // allotment and must never auto-attach to a transfer or registry-status letter. Without a
+  // documentType, `ownershipRecordForDocument` above already falls back toward the ALLOTMENT
+  // record (the most complete one) for whatever the caller ends up rendering, so a transfer
+  // letter drafted before its own TRANSFER ownership record exists would otherwise silently pull
+  // in the seller's KYC photographs. Scope the automatic page-append to allotment letter types
+  // only; an explicit {{files.*}} placeholder in a custom template still works for any type via
+  // includeFileMarkup below, so this only removes the *implicit* attach-everything fallback.
+  const isAllotmentDocumentType = !options.documentType || options.documentType === "allotment_letter" || options.documentType === "allotment_letter_joint";
+  const supportingDocumentPages = isAllotmentDocumentType
+    ? await buildSupportingDocumentPagesLight(context.tenantId, plot.id, plot.currentOwnerId, extraDetails)
+    : [];
   const variables: Record<string, string> = {
     "tenant.name": tenant.name,
     "tenant.address": tenant.address ?? tenant.region ?? "",
@@ -925,7 +930,7 @@ async function buildSupportingDocumentPages(tenantId: string, plotId: string, ow
 }
 
 function ownershipRecordForDocument<T extends { kind: OwnershipKind }>(records: T[], documentType?: string) {
-  if (documentType === "allotment_letter") {
+  if (documentType === "allotment_letter" || documentType === "allotment_letter_joint") {
     return records.find((record) => record.kind === OwnershipKind.ALLOTMENT)
       ?? records.find((record) => record.kind === OwnershipKind.TRANSFER)
       ?? records.find((record) => record.kind !== OwnershipKind.COMPANY_INVENTORY)

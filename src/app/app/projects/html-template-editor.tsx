@@ -26,6 +26,7 @@ type FieldCategory = {
 
 const LETTER_TYPES = [
   { value: "allotment_letter", label: "Allotment Letter" },
+  { value: "allotment_letter_joint", label: "Allotment Letter — Joint / Partnership" },
   { value: "transfer_letter", label: "Transfer Letter" },
   { value: "registry_status_letter", label: "Registry Status Letter" },
 ] as const;

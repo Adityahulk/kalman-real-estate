@@ -11,7 +11,7 @@ export default async function NewLetterPage({
   searchParams,
 }: {
   params: { projectId: string; plotId: string };
-  searchParams: { type?: "allotment_letter" | "transfer_letter" | "registry_status_letter" };
+  searchParams: { type?: "allotment_letter" | "allotment_letter_joint" | "transfer_letter" | "registry_status_letter" };
 }) {
   const session = await getSessionUser();
   if (!session) return null;

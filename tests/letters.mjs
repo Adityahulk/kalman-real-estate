@@ -278,12 +278,7 @@ await exerciseLetterType("registry_status_letter");
     const created = await request("/api/v1/documents/drafts", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({
-        type: "allotment_letter",
-        recordType: "Plot",
-        recordId: plot.id,
-        data: { templateVariant: "joint" },
-      }),
+      body: JSON.stringify({ type: "allotment_letter_joint", recordType: "Plot", recordId: plot.id }),
     });
     assert(created.response.status === 201, `joint: draft creation failed (${created.json.error ?? created.response.status})`);
     const doc = created.json.data.document;
@@ -369,6 +364,13 @@ await exerciseLetterType("registry_status_letter");
     assert(html.includes(`Transfer Buyer TB${stamp}`), "transfer wiring: buyer name missing from draft");
     console.log("  ✓ seller, buyer, and original allotment number auto-filled");
 
+    // Bug fix: the recipient block (Name/Address/PAN/Aadhaar) must be a real <table>, not the old
+    // stacked <p><br> lines.
+    assert(html.includes('<table class="transfer-recipient-table">'), "transfer wiring: recipient block is not a table");
+    assert(!html.includes('class="center transfer-party"'), "transfer wiring: old non-table recipient markup still present");
+    assert(html.includes("<th>PAN No.</th>") && html.includes("<th>Aadhaar No.</th>"), "transfer wiring: recipient table missing labelled rows");
+    console.log("  ✓ recipient block renders as a labelled table");
+
     const render = await request(`/api/v1/documents/${created.json.data.document.id}/render`, { method: "POST", headers: { cookie } });
     assert(render.response.status === 200, `transfer wiring: render failed (${render.json.error ?? render.response.status})`);
     const pdf = await pdfText(await downloadPdf(render.json.data.document.fileAssetId));
@@ -383,6 +385,112 @@ await exerciseLetterType("registry_status_letter");
     await prisma.plot.update({ where: { id: plot.id }, data: { currentOwnerId: plotBefore.currentOwnerId } }).catch(() => undefined);
     await prisma.ownershipRecord.delete({ where: { id: transferRecord.id } }).catch(() => undefined);
     await prisma.owner.delete({ where: { id: buyer.id } }).catch(() => undefined);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bug fix regression: a transfer letter drafted while only the ALLOTMENT ownership record exists
+// (the normal case — you draft the transfer request before any TRANSFER record is created) must
+// NOT pull in the allottee's KYC photograph that was uploaded during the original allotment. An
+// allotment_letter draft in the exact same state SHOULD still show it (the feature is scoped to
+// allotment types, not switched off entirely).
+{
+  console.log("\n■ transfer_letter must not leak the allotment's KYC photos");
+  const allotmentRecord = await prisma.ownershipRecord.findFirstOrThrow({
+    where: { plotId: plot.id, kind: "ALLOTMENT" },
+    orderBy: [{ createdAt: "desc" }],
+  });
+  const originalExtra = allotmentRecord.extraDetails ?? {};
+  const kycFile = await prisma.fileAsset.create({
+    data: {
+      tenantId: allotmentRecord.tenantId,
+      storageKey: `test/${stamp}/kyc-photo.png`,
+      storageProvider: "LOCAL",
+      fileName: `aadhaar-${stamp}.png`,
+      mimeType: "image/png",
+      sizeBytes: 1024,
+      visibility: "TEAM",
+      ownerType: "Owner",
+      ownerId: allotmentRecord.ownerId,
+    },
+  });
+  await prisma.ownershipRecord.update({
+    where: { id: allotmentRecord.id },
+    data: {
+      extraDetails: {
+        ...originalExtra,
+        allottee: { documents: [{ kind: "Aadhaar", files: [{ id: kycFile.id, fileName: kycFile.fileName }] }] },
+      },
+    },
+  });
+
+  try {
+    // Sanity check: the allotment letter itself DOES still pick up the KYC photo.
+    const allotmentDraft = await request("/api/v1/documents/drafts", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ type: "allotment_letter", recordType: "Plot", recordId: plot.id }),
+    });
+    assert(allotmentDraft.response.status === 201, "photo-leak: allotment draft creation failed");
+    const allotmentHtml = allotmentDraft.json.data.document.editableHtml ?? "";
+    assert(allotmentHtml.includes("Supporting documents") && allotmentHtml.includes(kycFile.id), "photo-leak: allotment letter unexpectedly lost its own supporting KYC photo");
+    await request(`/api/v1/documents/${allotmentDraft.json.data.document.id}`, { method: "DELETE", headers: { cookie } });
+    console.log("  ✓ allotment letter still attaches its own KYC photo (feature intact)");
+
+    // The actual bug: with no TRANSFER ownership record yet, the transfer draft must NOT inherit
+    // the allotment's KYC photo.
+    const transferDraft = await request("/api/v1/documents/drafts", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ type: "transfer_letter", recordType: "Plot", recordId: plot.id }),
+    });
+    assert(transferDraft.response.status === 201, "photo-leak: transfer draft creation failed");
+    const transferHtml = transferDraft.json.data.document.editableHtml ?? "";
+    assert(!transferHtml.includes("Supporting documents"), "photo-leak: transfer letter still has a Supporting documents section");
+    assert(!transferHtml.includes(kycFile.id), "photo-leak: transfer letter still embeds the allotment's KYC photo");
+    await request(`/api/v1/documents/${transferDraft.json.data.document.id}`, { method: "DELETE", headers: { cookie } });
+    console.log("  ✓ transfer letter no longer inherits the allotment's KYC photo");
+  } finally {
+    await prisma.ownershipRecord.update({ where: { id: allotmentRecord.id }, data: { extraDetails: originalExtra } });
+    await prisma.fileAsset.delete({ where: { id: kycFile.id } }).catch(() => undefined);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bug fix regression: the joint allotment letter must be a first-class, independently editable
+// letter type — selectable and savable from the project's "Set your letters" template editor
+// (not just draftable), and its default body reachable via the same defaults endpoint as the
+// other three types.
+{
+  console.log("\n■ allotment_letter_joint is editable in Set your letters");
+  const project = await prisma.project.findFirstOrThrow({ where: { id: plot.projectId } });
+  // Saving a new active template deactivates the project's current active one of that type
+  // (same as every other letter type) — remember it so this check leaves the project exactly as
+  // it found it.
+  const previousActive = await prisma.documentTemplate.findFirst({
+    where: { tenantId: project.tenantId, projectId: project.id, type: "allotment_letter_joint", active: true },
+    select: { id: true },
+  });
+
+  try {
+    const defaults = await request(`/api/v1/projects/${project.id}/letter-templates/defaults?type=allotment_letter_joint`, { headers: { cookie } });
+    assert(defaults.response.status === 200, "joint type: defaults endpoint rejected allotment_letter_joint");
+    assert(defaults.json.data?.body?.includes('data-template-variant="joint"'), "joint type: defaults endpoint did not return the joint template body");
+
+    const saved = await request(`/api/v1/projects/${project.id}/letter-templates`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ name: `Custom joint template ${stamp}`, type: "allotment_letter_joint", body: defaults.json.data.body }),
+    });
+    assert(saved.response.status === 201, `joint type: saving a custom joint template failed (${saved.json.error ?? saved.response.status})`);
+    assert(saved.json.data.type === "allotment_letter_joint", "joint type: saved template did not keep the joint type");
+    console.log("  ✓ joint template is listed, defaulted, and savable like the other letter types");
+
+    await prisma.documentTemplate.delete({ where: { id: saved.json.data.id } }).catch(() => undefined);
+  } finally {
+    if (previousActive) {
+      await prisma.documentTemplate.update({ where: { id: previousActive.id }, data: { active: true } }).catch(() => undefined);
+    }
   }
 }
 

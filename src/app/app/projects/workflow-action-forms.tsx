@@ -572,15 +572,14 @@ export function ProjectAllotmentFlow({
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          type: "allotment_letter",
+          // A filled joint-allottee section drafts the two-allottee (partnership) letter type.
+          type: jointAllottee.name ? "allotment_letter_joint" : "allotment_letter",
           recordType: "Plot",
           recordId: plotId,
           data: {
             documentNumber: allotmentNumber || undefined,
             customLetterFields: letterFields,
             customLetterFiles: mergedManualLetterFiles,
-            // A filled joint-allottee section switches the draft to the two-allottee template.
-            ...(jointAllottee.name ? { templateVariant: "joint" } : {}),
           },
         }),
       });
@@ -985,10 +984,10 @@ export function LetterDraftStartForm({
 }: {
   plotId: string;
   projectId: string;
-  defaultType?: "allotment_letter" | "transfer_letter" | "registry_status_letter";
+  defaultType?: "allotment_letter" | "allotment_letter_joint" | "transfer_letter" | "registry_status_letter";
 }) {
   const router = useRouter();
-  const [choice, setChoice] = useState<string>(defaultType);
+  const [type, setType] = useState(defaultType);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -996,19 +995,10 @@ export function LetterDraftStartForm({
     event.preventDefault();
     setLoading(true);
     setMessage("");
-    // "allotment_letter_joint" is a UI-level variant of the allotment letter: same document type,
-    // but the draft is built from the two-allottee (partnership) template.
-    const isJoint = choice === "allotment_letter_joint";
-    const type = isJoint ? "allotment_letter" : choice;
     const response = await fetch("/api/v1/documents/drafts", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        type,
-        recordType: "Plot",
-        recordId: plotId,
-        ...(isJoint ? { data: { templateVariant: "joint" } } : {}),
-      }),
+      body: JSON.stringify({ type, recordType: "Plot", recordId: plotId }),
     });
     const body = await response.json();
     setLoading(false);
@@ -1023,7 +1013,7 @@ export function LetterDraftStartForm({
     <form onSubmit={submit} className="grid gap-4">
       <label>
         <span className="label">Letter type</span>
-        <select className="input" value={choice} onChange={(event) => setChoice(event.target.value)}>
+        <select className="input" value={type} onChange={(event) => setType(event.target.value as typeof type)}>
           <option value="allotment_letter">Allotment letter</option>
           <option value="allotment_letter_joint">Allotment letter — Joint / Partnership (two allottees)</option>
           <option value="transfer_letter">Transfer letter</option>
