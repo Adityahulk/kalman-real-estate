@@ -21,6 +21,7 @@
     "electron-builder": "^25.1.8"
   },
   "build": {
+    "afterPack": "scripts/ad-hoc-sign.cjs",
     "appId": "estate.kalman.desktop",
     "productName": "WIDESTATE OS",
     "copyright": "Copyright © WIDESTATE OS",
@@ -37,7 +38,9 @@
     "mac": {
       "category": "public.app-category.business",
       "target": ["dmg", "zip"],
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist"
     },
     "win": {
       "target": ["nsis"],

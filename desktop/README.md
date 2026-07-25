@@ -13,6 +13,9 @@ The shell connects to `DESKTOP_SERVER_URL` (defaults to `https://kalman.estate`)
 export DESKTOP_SERVER_URL="https://app.your-domain.com"   # your deployed web app
 ```
 
+If a release was built without the correct URL, the offline screen lets the Mac user enter and
+save the hosted app URL locally, then reconnect without rebuilding the installer.
+
 For local development you can point it at your dev server (use a LAN IP or a tunnel, not
 `localhost`, if testing from another machine):
 

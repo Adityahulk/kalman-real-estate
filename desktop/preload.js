@@ -2,7 +2,7 @@
 // needs almost nothing from the shell — we only expose a tiny, safe surface the web code can
 // feature-detect (see isElectron() in src/lib/native.ts) plus version/platform info.
 
-const { contextBridge } = require("electron");
+const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("widestateDesktop", {
   isDesktop: true,
@@ -11,4 +11,7 @@ contextBridge.exposeInMainWorld("widestateDesktop", {
     electron: process.versions.electron,
     chrome: process.versions.chrome,
   },
+  getServerUrl: () => ipcRenderer.invoke("desktop:get-server-url"),
+  setServerUrl: (url) => ipcRenderer.invoke("desktop:set-server-url", url),
+  retryServer: () => ipcRenderer.invoke("desktop:retry-server"),
 });
