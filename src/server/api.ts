@@ -128,6 +128,10 @@ export function apiError(error: unknown, context: Record<string, unknown> = {}) 
     return NextResponse.json({ ok: false, error: message }, { status });
   }
 
+  if (error && typeof error === "object" && "code" in error && (error as NodeJS.ErrnoException).code === "ENOENT") {
+    return NextResponse.json({ ok: false, error: "File not found" }, { status: 404 });
+  }
+
   if (error instanceof Error) {
     const status = namedErrorStatus(error.name);
     return NextResponse.json(

@@ -44,7 +44,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
+          # No npm cache here: a corrupted/interrupted cache entry for a transitive dep (e.g. tar,
+          # used by @capacitor/cli to extract its native project templates) can silently poison every
+          # future run with the same deterministic failure. A cold npm install is slower but reliable.
 
       - uses: actions/setup-java@v4
         with:
@@ -55,7 +57,23 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm cache clean --force
+          npm ci
+
+      - name: Verify tar module (fast-fail with a clear error, not a cryptic Capacitor stack trace)
+        # @capacitor/cli extracts its native project templates via tar.extract(). If npm ever installs
+        # a broken tar module again (corrupted cache, registry hiccup, etc.), this fails here with an
+        # actionable message instead of 15 stack frames deep inside extractTemplate.
+        run: |
+          node -e "
+            const t = require('tar');
+            if (typeof t.extract !== 'function') {
+              console.error('tar module is broken (missing extract fn)');
+              process.exit(1);
+            }
+            console.log('tar OK:', require('tar/package.json').version);
+          "
 
       - name: Generate & sync Android project
         run: |
@@ -131,10 +149,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
+          # No npm cache here: a corrupted/interrupted cache entry for a transitive dep (e.g. tar,
+          # used by @capacitor/cli to extract its native project templates) can silently poison every
+          # future run with the same deterministic failure. A cold npm install is slower but reliable.
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          npm cache clean --force
+          npm ci
+
+      - name: Verify tar module (fast-fail with a clear error, not a cryptic Capacitor stack trace)
+        run: |
+          node -e "
+            const t = require('tar');
+            if (typeof t.extract !== 'function') {
+              console.error('tar module is broken (missing extract fn)');
+              process.exit(1);
+            }
+            console.log('tar OK:', require('tar/package.json').version);
+          "
 
       - name: Generate & sync iOS project
         run: |
