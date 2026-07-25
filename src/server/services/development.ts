@@ -197,6 +197,30 @@ export async function updateDevelopmentTask(context: RequestContext, siteAssetId
     before: before as unknown as Prisma.InputJsonValue,
     after: task as unknown as Prisma.InputJsonValue,
   });
+  if (task.assignedToId && task.assignedToId !== before.assignedToId) {
+    await createNotification(context, {
+      userId: task.assignedToId,
+      title: before.assignedToId ? "Task reassigned" : "Task assigned",
+      body: `You have been assigned "${task.name}"${task.deadline ? ` (due ${task.deadline.toLocaleDateString()})` : ""}.`,
+      data: { siteAssetId: task.id, status: task.status },
+    });
+  }
+  if (task.status !== before.status) {
+    if (task.assignedToId && task.assignedToId !== context.userId) {
+      await createNotification(context, {
+        userId: task.assignedToId,
+        title: "Task status updated",
+        body: `"${task.name}" is now ${formatTaskStatus(task.status)}.`,
+        data: { siteAssetId: task.id, status: task.status },
+      });
+    }
+    await notifyRoleWithPermission(context, "development.manage", {
+      title: "Task status updated",
+      body: `"${task.name}" is now ${formatTaskStatus(task.status)}.`,
+      data: { siteAssetId: task.id, status: task.status },
+      excludeUserId: context.userId,
+    });
+  }
   return task;
 }
 
@@ -390,7 +414,25 @@ export async function closeDevelopmentTask(context: RequestContext, siteAssetId:
     before: before as unknown as Prisma.InputJsonValue,
     after: { ...task, closedById: context.userId } as unknown as Prisma.InputJsonValue,
   });
+  if (task.assignedToId && task.assignedToId !== context.userId) {
+    await createNotification(context, {
+      userId: task.assignedToId,
+      title: "Task closed",
+      body: `"${task.name}" has been closed.`,
+      data: { siteAssetId: task.id, status: task.status },
+    });
+  }
+  await notifyRoleWithPermission(context, "development.manage", {
+    title: "Task closed",
+    body: `"${task.name}" has been closed.`,
+    data: { siteAssetId: task.id, status: task.status },
+    excludeUserId: context.userId,
+  });
   return task;
+}
+
+function formatTaskStatus(status: string) {
+  return status.toLowerCase().replaceAll("_", " ");
 }
 
 export async function listEngineeringAssignees(tenantId: string) {

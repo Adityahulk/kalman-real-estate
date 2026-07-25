@@ -5,7 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import {
   ArchiveRestore,
   Building2,
-  Bell,
   ChevronLeft,
   ChevronRight,
   Clapperboard,
@@ -27,6 +26,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { requestJson } from "@/lib/api-client";
 import { clearSessionToken } from "@/lib/native";
+import { NotificationBell } from "@/components/notification-bell";
 
 type ShellProject = {
   id: string;
@@ -389,9 +389,7 @@ export function AppShell({
             ) : null}
           </div>
           <div className="flex items-center gap-4">
-            <Link className="btn-ghost h-9 w-9 px-0" href="/app/notifications" title="Notifications" aria-label="Open notifications">
-              <Bell size={18} />
-            </Link>
+            <NotificationBell />
             <div className="text-right text-sm">
               <div className="font-medium">{user.name}</div>
               <div className="text-xs text-slate-500">{user.email}</div>

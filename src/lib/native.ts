@@ -7,6 +7,7 @@
 import { Capacitor } from "@capacitor/core";
 
 const SESSION_TOKEN_KEY = "kalman_session_token";
+let pushListenersBound = false;
 
 export function isNative(): boolean {
   try {
@@ -76,13 +77,24 @@ export async function registerForPush(): Promise<void> {
     const perm = await PushNotifications.requestPermissions();
     if (perm.receive !== "granted") return;
 
-    PushNotifications.addListener("registration", (token) => {
-      void nativeFetch("/api/v1/notifications/devices", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ token: token.value, platform: nativePlatform() }),
-      }).catch(() => undefined);
-    });
+    if (!pushListenersBound) {
+      pushListenersBound = true;
+      PushNotifications.addListener("registration", (token) => {
+        void nativeFetch("/api/v1/notifications/devices", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ token: token.value, platform: nativePlatform() }),
+        }).catch(() => undefined);
+      });
+      // The web UI remains the single notification center inside the app. Refresh it when a
+      // foreground push arrives, and let a tap bring the user back to that same screen.
+      PushNotifications.addListener("pushNotificationReceived", () => {
+        window.dispatchEvent(new Event("widestate:notification"));
+      });
+      PushNotifications.addListener("pushNotificationActionPerformed", () => {
+        window.location.assign("/app/notifications");
+      });
+    }
     await PushNotifications.register();
   } catch {
     // Push is best-effort; never block login on it.

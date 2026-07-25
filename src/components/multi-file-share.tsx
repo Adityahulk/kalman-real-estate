@@ -2,27 +2,9 @@
 
 import { useState } from "react";
 import { Check, Link2, Mail, MessageCircle, Share2, X } from "lucide-react";
+import { createDirectShareLinks, shareFiles, whatsappTextShare } from "@/lib/file-sharing";
 
 type ShareFile = { id: string; fileName: string };
-
-// Builds ONE short public link that lists every selected file, instead of pasting one long signed
-// URL per file (which overflows WhatsApp's text limit and stops the links being clickable).
-async function createBundleUrl(fileIds: string[]) {
-  const response = await fetch("/api/v1/files/share-bundle", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ fileIds }),
-  });
-  const body = await response.json().catch(() => null);
-  if (!response.ok || !body?.data?.url) throw new Error(body?.error ?? "Could not create share link.");
-  return body.data.url as string;
-}
-
-function whatsAppShareUrl(text: string) {
-  const encoded = encodeURIComponent(text);
-  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-  return isMobile ? `whatsapp://send?text=${encoded}` : `https://api.whatsapp.com/send?text=${encoded}`;
-}
 
 export function MultiFileShare({ files }: { files: ShareFile[] }) {
   const [open, setOpen] = useState(false);
@@ -43,19 +25,22 @@ export function MultiFileShare({ files }: { files: ShareFile[] }) {
   }
 
   async function share(target: "whatsapp" | "email" | "copy") {
-    const ids = files.filter((file) => selected.has(file.id)).map((file) => file.id);
-    if (!ids.length) return;
+    const chosen = files.filter((file) => selected.has(file.id));
+    if (!chosen.length) return;
     setBusy(target);
     try {
-      const url = await createBundleUrl(ids);
-      const message = `${ids.length} file${ids.length === 1 ? "" : "s"} shared with you:\n${url}`;
       if (target === "whatsapp") {
-        window.location.href = whatsAppShareUrl(message);
+        if (await shareFiles(chosen, "Shared files")) return;
+        const urls = await createDirectShareLinks(chosen);
+        whatsappTextShare(`${chosen.length} file${chosen.length === 1 ? "" : "s"} shared with you:\n${urls.join("\n")}`);
       } else if (target === "email") {
+        const urls = await createDirectShareLinks(chosen);
+        const message = `${chosen.length} file${chosen.length === 1 ? "" : "s"} shared with you:\n${urls.join("\n")}`;
         window.location.href = `mailto:?subject=${encodeURIComponent("Shared files")}&body=${encodeURIComponent(message)}`;
       } else {
-        await navigator.clipboard?.writeText(url);
-        window.alert("Share link copied.");
+        const urls = await createDirectShareLinks(chosen);
+        await navigator.clipboard?.writeText(urls.join("\n"));
+        window.alert("Direct download link copied.");
       }
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "Could not create share link.");
@@ -82,7 +67,7 @@ export function MultiFileShare({ files }: { files: ShareFile[] }) {
       {open ? (
         <div className="space-y-2 p-3">
           <div className="flex items-center justify-between">
-            <div className="text-xs text-slate-500">Select files, then send one link.</div>
+            <div className="text-xs text-slate-500">WhatsApp opens the share sheet with the selected files attached.</div>
             <button type="button" className="text-xs font-medium text-navy-700 hover:text-navy-900" onClick={selectAll}>
               {selected.size === files.length ? "Clear all" : "Select all"}
             </button>

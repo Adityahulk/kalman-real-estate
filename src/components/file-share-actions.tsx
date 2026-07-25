@@ -2,31 +2,20 @@
 
 import { useState } from "react";
 import { Mail, MessageCircle } from "lucide-react";
+import { createDirectShareLinks, shareFiles, whatsappTextShare } from "@/lib/file-sharing";
 
 export function FileShareActions({ fileId, fileName }: { fileId: string; fileName: string }) {
   const [loading, setLoading] = useState<"whatsapp" | "email" | null>(null);
 
-  async function createPublicShareText() {
-    // Use the bundle endpoint (single-file bundle) so the recipient gets one short, reliably
-    // clickable link to a download page rather than a long raw signed URL that some apps mangle.
-    const response = await fetch("/api/v1/files/share-bundle", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ fileIds: [fileId] }),
-    });
-    const body = await response.json().catch(() => null);
-    if (!response.ok || !body?.data?.url) throw new Error(body?.error ?? "Could not create share link.");
-    return `${fileName}:\n${body.data.url}`;
-  }
-
   async function share(target: "whatsapp" | "email") {
     setLoading(target);
     try {
-      const text = await createPublicShareText();
-      const url = target === "whatsapp"
-        ? whatsAppShareUrl(text)
-        : `mailto:?subject=${encodeURIComponent(fileName)}&body=${encodeURIComponent(text)}`;
-      window.location.href = url;
+      const file = { id: fileId, fileName };
+      if (target === "whatsapp" && await shareFiles([file], fileName)) return;
+      const [url] = await createDirectShareLinks([file]);
+      const text = `${fileName}:\n${url}`;
+      if (target === "whatsapp") whatsappTextShare(text);
+      else window.location.href = `mailto:?subject=${encodeURIComponent(fileName)}&body=${encodeURIComponent(text)}`;
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "Could not create share link.");
     } finally {
@@ -46,10 +35,4 @@ export function FileShareActions({ fileId, fileName }: { fileId: string; fileNam
       </button>
     </>
   );
-}
-
-function whatsAppShareUrl(text: string) {
-  const encoded = encodeURIComponent(text);
-  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-  return isMobile ? `whatsapp://send?text=${encoded}` : `https://api.whatsapp.com/send?text=${encoded}`;
 }

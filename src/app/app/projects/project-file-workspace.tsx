@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { FileUploader } from "@/components/file-uploader";
 import { FileActions } from "@/components/file-actions";
 import { FilePreview } from "@/components/file-preview";
+import { createDirectShareLinks, shareFiles, whatsappTextShare } from "@/lib/file-sharing";
 
 type FileItem = {
   id: string;
@@ -41,39 +42,17 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
   }
 
   async function shareText() {
-    // One short bundle link for all selected files — avoids pasting many long signed URLs into a
-    // single WhatsApp message (which overflows the text limit and breaks link detection).
-    const response = await fetch("/api/v1/files/share-bundle", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ fileIds: selectedShareFiles.map((file) => file.id) }),
-    });
-    const body = await response.json().catch(() => null);
-    if (!response.ok || !body?.data?.url) throw new Error(body?.error ?? "Could not create share link.");
+    const urls = await createDirectShareLinks(selectedShareFiles);
     const count = selectedShareFiles.length;
-    return `${count} file${count === 1 ? "" : "s"} shared with you:\n${body.data.url}`;
+    return `${count} file${count === 1 ? "" : "s"} shared with you:\n${urls.join("\n")}`;
   }
 
   async function nativeShare() {
     if (!selectedShareFiles.length) return;
-    if (navigator.share) {
-      const shareFiles = await Promise.all(selectedShareFiles.map(async (file) => {
-        const response = await fetch(`/api/v1/files/${file.id}/download?proxy=1`);
-        if (!response.ok) throw new Error("Could not prepare file for sharing");
-        const blob = await response.blob();
-        return new globalThis.File([blob], file.fileName, { type: file.mimeType || blob.type || "application/octet-stream" });
-      })).catch(() => []);
-      if (shareFiles.length && navigator.canShare?.({ files: shareFiles })) {
-        await navigator.share({ title: "Project files", files: shareFiles }).catch(() => undefined);
-        return;
-      }
-      const text = await shareText();
-      await navigator.share({ title: "Project files", text }).catch(() => undefined);
-      return;
-    }
+    if (await shareFiles(selectedShareFiles, "Project files")) return;
     const text = await shareText();
     await navigator.clipboard?.writeText(text).catch(() => undefined);
-    window.alert("File links copied. You can paste them into any app.");
+    window.alert("Your browser cannot attach files. Direct download links were copied.");
   }
 
   async function shareViaEmail() {
@@ -87,8 +66,8 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
 
   async function shareViaWhatsApp() {
     try {
-      const text = await shareText();
-      window.location.href = whatsAppShareUrl(text);
+      if (await shareFiles(selectedShareFiles, "Project files")) return;
+      whatsappTextShare(await shareText());
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "Could not create share links.");
     }
@@ -112,7 +91,7 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
           </div>
           {shareMode ? (
             <div className="space-y-2 border-b border-slate-100 bg-slate-50 p-3">
-              <div className="text-xs text-slate-600">Select files, then choose how to share their download links.</div>
+              <div className="text-xs text-slate-600">WhatsApp shares the selected files as attachments on supported mobile browsers and the mobile app.</div>
               <div className="grid gap-2 sm:grid-cols-3">
                 <button className="btn-primary h-9 justify-center px-3 text-xs sm:h-8" type="button" disabled={!shareIds.size} onClick={() => void nativeShare()}><Share2 size={13} /> Share</button>
                 <button className="btn-outline h-9 justify-center px-3 text-xs sm:h-8" type="button" disabled={!shareIds.size} onClick={() => void shareViaEmail()}><Mail size={13} /> Email</button>
@@ -134,10 +113,4 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
       </aside>
     </div>
   );
-}
-
-function whatsAppShareUrl(text: string) {
-  const encoded = encodeURIComponent(text);
-  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-  return isMobile ? `whatsapp://send?text=${encoded}` : `https://api.whatsapp.com/send?text=${encoded}`;
 }
