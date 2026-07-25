@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Check, Link2, Mail, MessageCircle, Share2, X } from "lucide-react";
-import { createDirectShareLinks, shareFiles } from "@/lib/file-sharing";
+import { createDirectShareLinks, createFileBundleShareLink, openWhatsAppWithLink } from "@/lib/file-sharing";
 
 type ShareFile = { id: string; fileName: string };
 
@@ -32,8 +32,8 @@ export function MultiFileShare({ files }: { files: ShareFile[] }) {
     setMessage("");
     try {
       if (target === "whatsapp") {
-        const shared = await shareFiles(chosen, "Shared files");
-        if (!shared) setMessage("This browser cannot attach files to a share target. Use the mobile app or a browser that supports file sharing.");
+        const url = await createFileBundleShareLink(chosen);
+        openWhatsAppWithLink(`${chosen.length} file${chosen.length === 1 ? "" : "s"} shared with you:\n${url}`);
       } else if (target === "email") {
         const urls = await createDirectShareLinks(chosen);
         const message = `${chosen.length} file${chosen.length === 1 ? "" : "s"} shared with you:\n${urls.join("\n")}`;
@@ -68,7 +68,7 @@ export function MultiFileShare({ files }: { files: ShareFile[] }) {
       {open ? (
         <div className="space-y-2 p-3">
           <div className="flex items-center justify-between">
-            <div className="text-xs text-slate-500">WhatsApp shares the selected files as attachments. Choose WhatsApp in the device share sheet.</div>
+            <div className="text-xs text-slate-500">WhatsApp opens with one secure download link for all selected files.</div>
             <button type="button" className="text-xs font-medium text-navy-700 hover:text-navy-900" onClick={selectAll}>
               {selected.size === files.length ? "Clear all" : "Select all"}
             </button>

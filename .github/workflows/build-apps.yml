@@ -20,8 +20,8 @@ env:
   # Shells load the live web app from these origins. Override by setting repo Variables of the
   # same name (Settings → Secrets and variables → Actions → Variables); otherwise the config
   # defaults apply.
-  MOBILE_SERVER_URL: ${{ vars.MOBILE_SERVER_URL || 'https://kalman.estate' }}
-  DESKTOP_SERVER_URL: ${{ vars.DESKTOP_SERVER_URL || 'https://kalman.estate' }}
+  MOBILE_SERVER_URL: ${{ vars.MOBILE_SERVER_URL || 'https://widestateos.com' }}
+  DESKTOP_SERVER_URL: ${{ vars.DESKTOP_SERVER_URL || 'https://widestateos.com' }}
   # These shells don't need Puppeteer's bundled Chromium; skip the slow download during install.
   PUPPETEER_SKIP_DOWNLOAD: "true"
 

@@ -7,7 +7,7 @@ origin, the existing httpOnly cookie auth works unchanged.
 
 ## Configure the target server
 
-The shell connects to `DESKTOP_SERVER_URL` (defaults to `https://kalman.estate`):
+The shell connects to `DESKTOP_SERVER_URL` (defaults to `https://widestateos.com`):
 
 ```bash
 export DESKTOP_SERVER_URL="https://app.your-domain.com"   # your deployed web app

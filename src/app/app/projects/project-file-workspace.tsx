@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { FileUploader } from "@/components/file-uploader";
 import { FileActions } from "@/components/file-actions";
 import { FilePreview } from "@/components/file-preview";
-import { createDirectShareLinks, shareFiles } from "@/lib/file-sharing";
+import { createDirectShareLinks, createFileBundleShareLink, openWhatsAppWithLink, shareFiles } from "@/lib/file-sharing";
 
 type FileItem = {
   id: string;
@@ -81,10 +81,10 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
     setShareBusy("whatsapp");
     setShareMessage("");
     try {
-      if (await shareFiles(selectedShareFiles, "Project files")) return;
-      setShareMessage("This browser cannot attach files to WhatsApp. Use the mobile app or a browser that supports file sharing.");
+      const url = await createFileBundleShareLink(selectedShareFiles);
+      openWhatsAppWithLink(`${selectedShareFiles.length} file${selectedShareFiles.length === 1 ? "" : "s"} shared with you:\n${url}`);
     } catch (error) {
-      setShareMessage(error instanceof Error ? error.message : "Could not prepare files for WhatsApp.");
+      setShareMessage(error instanceof Error ? error.message : "Could not create the WhatsApp download link.");
     } finally {
       setShareBusy(null);
     }
@@ -108,7 +108,7 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
           </div>
           {shareMode ? (
             <div className="space-y-2 border-b border-slate-100 bg-slate-50 p-3">
-              <div className="text-xs text-slate-600">WhatsApp shares selected files as attachments. Choose WhatsApp in the device share sheet.</div>
+              <div className="text-xs text-slate-600">WhatsApp opens with one secure download link for all selected files.</div>
               <div className="grid gap-2 sm:grid-cols-3">
                 <button className="btn-primary h-9 justify-center px-3 text-xs sm:h-8" type="button" disabled={!shareIds.size || Boolean(shareBusy)} onClick={() => void nativeShare()}><Share2 size={13} /> {shareBusy === "native" ? "Preparing" : "Share"}</button>
                 <button className="btn-outline h-9 justify-center px-3 text-xs sm:h-8" type="button" disabled={!shareIds.size || Boolean(shareBusy)} onClick={() => void shareViaEmail()}><Mail size={13} /> {shareBusy === "email" ? "Preparing" : "Email"}</button>

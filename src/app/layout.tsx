@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   },
   description:
     "Real estate builder software for Map visualization, ownership ledgers, site progress, documents, cost control, and AI insights.",
-  metadataBase: new URL("https://kalman.estate"),
+  metadataBase: new URL("https://widestateos.com"),
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, statusBarStyle: "default", title: "WIDESTATE OS" },
 };

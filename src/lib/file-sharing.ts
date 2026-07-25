@@ -34,6 +34,31 @@ export async function createDirectShareLinks(files: ShareableFile[]): Promise<st
   }));
 }
 
+/** Creates one public download page for a selection, keeping WhatsApp messages short and clickable. */
+export async function createFileBundleShareLink(files: ShareableFile[]): Promise<string> {
+  const response = await fetch("/api/v1/files/share-bundle", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ fileIds: files.map((file) => file.id) }),
+  });
+  const body = await response.json().catch(() => null);
+  if (!response.ok || !body?.data?.url) throw new Error(body?.error ?? "Could not create a secure download link.");
+
+  const url = new URL(body.data.url as string);
+  if (url.protocol !== "https:" || isLocalHost(url.hostname)) {
+    throw new Error("WhatsApp links require the app to be served from its public HTTPS URL. Configure PUBLIC_APP_URL on the deployed app.");
+  }
+  return url.toString();
+}
+
+/** WhatsApp supports text URLs, not browser-side file attachments. Use this only for public links. */
+export function openWhatsAppWithLink(text: string) {
+  const encoded = encodeURIComponent(text);
+  const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  const href = isMobile ? `whatsapp://send?text=${encoded}` : `https://web.whatsapp.com/send?text=${encoded}`;
+  window.open(href, "_blank", "noopener,noreferrer");
+}
+
 async function downloadFiles(files: ShareableFile[]): Promise<File[]> {
   return Promise.all(files.map(async (file) => {
     const response = await fetch(`/api/v1/files/${file.id}/download?proxy=1`);
@@ -67,6 +92,10 @@ async function shareNativeFiles(files: ShareableFile[], title: string): Promise<
 
 function safeFileName(fileName: string) {
   return fileName.replace(/[^a-zA-Z0-9._-]/g, "_") || "attachment";
+}
+
+function isLocalHost(hostname: string) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
 }
 
 function isShareCancellation(error: unknown) {

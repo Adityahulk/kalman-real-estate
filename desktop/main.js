@@ -11,7 +11,7 @@ const { app, BrowserWindow, Menu, shell, session, dialog, ipcMain } = require("e
 const path = require("path");
 const { readFile, writeFile } = require("fs/promises");
 
-const DEFAULT_SERVER_URL = process.env.DESKTOP_SERVER_URL || "https://kalman.estate";
+const DEFAULT_SERVER_URL = process.env.DESKTOP_SERVER_URL || "https://widestateos.com";
 let serverUrl = normaliseServerUrl(DEFAULT_SERVER_URL);
 let appOrigin = new URL(serverUrl).origin;
 const isDev = !app.isPackaged;

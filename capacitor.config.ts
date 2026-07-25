@@ -7,7 +7,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
 // Set MOBILE_SERVER_URL at build time (e.g. https://app.kalman.estate). If unset we fall back to
 // the production origin. `webDir` (native/www) is only the offline bootstrap that shows a loader
 // until the remote app is reachable.
-const serverUrl = process.env.MOBILE_SERVER_URL ?? "https://kalman.estate";
+const serverUrl = process.env.MOBILE_SERVER_URL ?? "https://widestateos.com";
 const { hostname } = new URL(serverUrl);
 
 const config: CapacitorConfig = {
