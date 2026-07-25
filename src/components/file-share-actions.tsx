@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Mail, MessageCircle } from "lucide-react";
-import { createDirectShareLinks, shareFiles, whatsappTextShare } from "@/lib/file-sharing";
+import { createDirectShareLinks, whatsappTextShare } from "@/lib/file-sharing";
 
 export function FileShareActions({ fileId, fileName }: { fileId: string; fileName: string }) {
   const [loading, setLoading] = useState<"whatsapp" | "email" | null>(null);
@@ -11,7 +11,6 @@ export function FileShareActions({ fileId, fileName }: { fileId: string; fileNam
     setLoading(target);
     try {
       const file = { id: fileId, fileName };
-      if (target === "whatsapp" && await shareFiles([file], fileName)) return;
       const [url] = await createDirectShareLinks([file]);
       const text = `${fileName}:\n${url}`;
       if (target === "whatsapp") whatsappTextShare(text);

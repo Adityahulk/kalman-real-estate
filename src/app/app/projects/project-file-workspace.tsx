@@ -24,6 +24,7 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
   const [selectedId, setSelectedId] = useState(files[0]?.id ?? "");
   const [shareMode, setShareMode] = useState(false);
   const [shareIds, setShareIds] = useState<Set<string>>(new Set());
+  const [shareBusy, setShareBusy] = useState<"native" | "email" | "whatsapp" | null>(null);
   const selected = files.find((file) => file.id === selectedId) ?? files[0];
   const selectedShareFiles = files.filter((file) => shareIds.has(file.id));
 
@@ -48,28 +49,42 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
   }
 
   async function nativeShare() {
-    if (!selectedShareFiles.length) return;
-    if (await shareFiles(selectedShareFiles, "Project files")) return;
-    const text = await shareText();
-    await navigator.clipboard?.writeText(text).catch(() => undefined);
-    window.alert("Your browser cannot attach files. Direct download links were copied.");
+    if (!selectedShareFiles.length || shareBusy) return;
+    setShareBusy("native");
+    try {
+      if (await shareFiles(selectedShareFiles, "Project files")) return;
+      const text = await shareText();
+      await navigator.clipboard?.writeText(text).catch(() => undefined);
+      window.alert("Your browser cannot attach files. Direct download links were copied.");
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Could not prepare files for sharing.");
+    } finally {
+      setShareBusy(null);
+    }
   }
 
   async function shareViaEmail() {
+    if (shareBusy) return;
+    setShareBusy("email");
     try {
       const text = await shareText();
       window.open(`mailto:?subject=${encodeURIComponent("Project files")}&body=${encodeURIComponent(text)}`, "_self");
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "Could not create share links.");
+    } finally {
+      setShareBusy(null);
     }
   }
 
   async function shareViaWhatsApp() {
+    if (shareBusy) return;
+    setShareBusy("whatsapp");
     try {
-      if (await shareFiles(selectedShareFiles, "Project files")) return;
       whatsappTextShare(await shareText());
     } catch (error) {
       window.alert(error instanceof Error ? error.message : "Could not create share links.");
+    } finally {
+      setShareBusy(null);
     }
   }
 
@@ -91,11 +106,11 @@ export function ProjectFileWorkspace({ projectId, label, categoryKey, files, can
           </div>
           {shareMode ? (
             <div className="space-y-2 border-b border-slate-100 bg-slate-50 p-3">
-              <div className="text-xs text-slate-600">WhatsApp shares the selected files as attachments on supported mobile browsers and the mobile app.</div>
+              <div className="text-xs text-slate-600">WhatsApp opens directly with secure download links. Use Share for the device share sheet.</div>
               <div className="grid gap-2 sm:grid-cols-3">
-                <button className="btn-primary h-9 justify-center px-3 text-xs sm:h-8" type="button" disabled={!shareIds.size} onClick={() => void nativeShare()}><Share2 size={13} /> Share</button>
-                <button className="btn-outline h-9 justify-center px-3 text-xs sm:h-8" type="button" disabled={!shareIds.size} onClick={() => void shareViaEmail()}><Mail size={13} /> Email</button>
-                <button className="btn-outline h-9 justify-center px-3 text-xs sm:h-8" type="button" disabled={!shareIds.size} onClick={() => void shareViaWhatsApp()}><MessageCircle size={13} /> WhatsApp</button>
+                <button className="btn-primary h-9 justify-center px-3 text-xs sm:h-8" type="button" disabled={!shareIds.size || Boolean(shareBusy)} onClick={() => void nativeShare()}><Share2 size={13} /> {shareBusy === "native" ? "Preparing" : "Share"}</button>
+                <button className="btn-outline h-9 justify-center px-3 text-xs sm:h-8" type="button" disabled={!shareIds.size || Boolean(shareBusy)} onClick={() => void shareViaEmail()}><Mail size={13} /> {shareBusy === "email" ? "Preparing" : "Email"}</button>
+                <button className="btn-outline h-9 justify-center px-3 text-xs sm:h-8" type="button" disabled={!shareIds.size || Boolean(shareBusy)} onClick={() => void shareViaWhatsApp()}><MessageCircle size={13} /> {shareBusy === "whatsapp" ? "Preparing" : "WhatsApp"}</button>
               </div>
             </div>
           ) : null}

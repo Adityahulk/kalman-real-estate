@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Check, Link2, Mail, MessageCircle, Share2, X } from "lucide-react";
-import { createDirectShareLinks, shareFiles, whatsappTextShare } from "@/lib/file-sharing";
+import { createDirectShareLinks, whatsappTextShare } from "@/lib/file-sharing";
 
 type ShareFile = { id: string; fileName: string };
 
@@ -30,7 +30,6 @@ export function MultiFileShare({ files }: { files: ShareFile[] }) {
     setBusy(target);
     try {
       if (target === "whatsapp") {
-        if (await shareFiles(chosen, "Shared files")) return;
         const urls = await createDirectShareLinks(chosen);
         whatsappTextShare(`${chosen.length} file${chosen.length === 1 ? "" : "s"} shared with you:\n${urls.join("\n")}`);
       } else if (target === "email") {
@@ -67,7 +66,7 @@ export function MultiFileShare({ files }: { files: ShareFile[] }) {
       {open ? (
         <div className="space-y-2 p-3">
           <div className="flex items-center justify-between">
-            <div className="text-xs text-slate-500">WhatsApp opens the share sheet with the selected files attached.</div>
+            <div className="text-xs text-slate-500">WhatsApp opens directly with secure download links for the selected files.</div>
             <button type="button" className="text-xs font-medium text-navy-700 hover:text-navy-900" onClick={selectAll}>
               {selected.size === files.length ? "Clear all" : "Select all"}
             </button>

@@ -8,14 +8,21 @@ export type ShareableFile = { id: string; fileName: string; mimeType?: string };
 // platform share sheet. This works in supported browsers and in both Capacitor mobile shells.
 export async function shareFiles(files: ShareableFile[], title = "Shared files"): Promise<boolean> {
   if (!files.length) return false;
-  if (isNative()) return shareNativeFiles(files, title);
+  try {
+    if (isNative()) return await shareNativeFiles(files, title);
 
-  const attachments = await downloadFiles(files);
-  if (navigator.canShare?.({ files: attachments })) {
-    await navigator.share({ title, files: attachments });
-    return true;
+    const attachments = await downloadFiles(files);
+    if (navigator.canShare?.({ files: attachments })) {
+      await navigator.share({ title, files: attachments });
+      return true;
+    }
+    return false;
+  } catch (error) {
+    // Closing a system share sheet, or tapping Share twice while it is open, is normal user
+    // behaviour. Treat it as handled instead of surfacing misleading "failed" alerts.
+    if (isShareCancellation(error)) return true;
+    throw error;
   }
-  return false;
 }
 
 export async function createDirectShareLinks(files: ShareableFile[]): Promise<string[]> {
@@ -66,6 +73,11 @@ async function shareNativeFiles(files: ShareableFile[], title: string): Promise<
 
 function safeFileName(fileName: string) {
   return fileName.replace(/[^a-zA-Z0-9._-]/g, "_") || "attachment";
+}
+
+function isShareCancellation(error: unknown) {
+  if (!(error instanceof Error)) return false;
+  return error.name === "AbortError" || error.name === "InvalidStateError" || /cancel|abort|share.*in progress/i.test(error.message);
 }
 
 async function toBase64(file: Blob) {
