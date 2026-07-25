@@ -14,6 +14,40 @@ export type SessionUser = {
   permissions?: Permission[];
 };
 
+export function hasPortfolioFirmAccess(role: Role) {
+  return role === Role.SUPER_ADMIN || role === Role.BUILDER_OWNER;
+}
+
+export async function resolveSessionTenantId(input: {
+  selectedTenantId: string;
+  userId: string;
+  userTenantId: string | null;
+  role: Role;
+}) {
+  if (input.selectedTenantId === "__unselected__") return "__unselected__";
+
+  if (hasPortfolioFirmAccess(input.role)) {
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: input.selectedTenantId },
+      select: { id: true },
+    });
+    return tenant ? tenant.id : "__unselected__";
+  }
+
+  if (input.userTenantId === input.selectedTenantId) return input.selectedTenantId;
+
+  const membership = await prisma.userFirmMembership.findUnique({
+    where: {
+      userId_tenantId: {
+        userId: input.userId,
+        tenantId: input.selectedTenantId,
+      },
+    },
+    select: { id: true },
+  });
+  return membership ? input.selectedTenantId : "__unselected__";
+}
+
 export async function verifySessionToken(token?: string): Promise<SessionUser | null> {
   if (!token) return null;
 
@@ -46,9 +80,15 @@ export async function getSessionUser() {
     },
   });
   if (!user || user.status !== "ACTIVE") return null;
+  const tenantId = await resolveSessionTenantId({
+    selectedTenantId: tokenUser.tenantId,
+    userId: user.id,
+    userTenantId: user.tenantId,
+    role: user.role,
+  });
   return {
     id: user.id,
-    tenantId: user.tenantId ?? "__unselected__",
+    tenantId,
     role: user.role,
     email: user.email,
     permissions: normalizePermissions(user.customRole?.permissions),

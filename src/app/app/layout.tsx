@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSessionUser } from "@/server/session";
 import { prisma } from "@/server/db";
 import { hasPermission } from "@/server/rbac";
+import { firmsForUser } from "@/server/services/firms";
 import { AppShell } from "./app-shell";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -9,7 +10,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!session) redirect("/login");
   if (session.tenantId === "__unselected__") redirect("/firms");
 
-  const [user, tenant, projects, memberships] = await Promise.all([
+  const [user, tenant, projects, firms] = await Promise.all([
     prisma.user.findUnique({
       where: { id: session.id },
       select: { name: true, email: true },
@@ -20,11 +21,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       orderBy: { updatedAt: "desc" },
       select: { id: true, name: true, city: true },
     }),
-    prisma.userFirmMembership.findMany({
-      where: { userId: session.id },
-      include: { tenant: { select: { id: true, name: true, logoDataUrl: true } } },
-      orderBy: { createdAt: "asc" },
-    }),
+    firmsForUser(session),
   ]);
 
   return (
@@ -39,7 +36,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       canManageUsers={hasPermission(session.role, "users.manage", session.permissions)}
       canViewLiaison={hasPermission(session.role, "liaison.view", session.permissions)}
       projects={projects}
-      firms={memberships.map((membership) => membership.tenant)}
+      firms={firms.map((firm) => ({ id: firm.id, name: firm.name, logoDataUrl: firm.logoDataUrl }))}
       activeFirmId={session.tenantId}
     >
       {children}

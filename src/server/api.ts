@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma, Role } from "@prisma/client";
 import { z } from "zod";
 import { assertPermission, normalizePermissions, Permission } from "./rbac";
-import { verifySessionToken } from "./session";
+import { resolveSessionTenantId, verifySessionToken } from "./session";
 import { formatValidationError, logServerError, namedErrorStatus, normalizeZodIssues, prismaStatus } from "./logger";
 import { prisma } from "./db";
 
@@ -52,9 +52,17 @@ export async function getRequestContext(request: NextRequest, permission?: Permi
         },
       })
     : null;
-  const context = tokenContext?.status === "ACTIVE"
+  const selectedTenantId = tokenContext?.status === "ACTIVE" && session
+    ? await resolveSessionTenantId({
+        selectedTenantId: session.tenantId,
+        userId: tokenContext.id,
+        userTenantId: tokenContext.tenantId,
+        role: tokenContext.role,
+      })
+    : null;
+  const context = tokenContext?.status === "ACTIVE" && selectedTenantId
     ? {
-        tenantId: tokenContext.tenantId ?? "__unselected__",
+        tenantId: selectedTenantId,
         userId: tokenContext.id,
         role: tokenContext.role,
         permissions: normalizePermissions(tokenContext.customRole?.permissions),

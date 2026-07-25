@@ -15,7 +15,15 @@ export default async function MarketingPage() {
     include: { media: true, comments: true, project: true },
     orderBy: { updatedAt: "desc" },
   });
-  const mediaCount = tasks.reduce((sum, task) => sum + task.media.length, 0);
+  const mediaFileIds = tasks.flatMap((task) => task.media.map((media) => media.fileAssetId));
+  const activeMediaFiles = mediaFileIds.length
+    ? await prisma.fileAsset.findMany({
+        where: { tenantId: session.tenantId, id: { in: mediaFileIds }, deletedAt: null },
+        select: { id: true },
+      })
+    : [];
+  const activeMediaIds = new Set(activeMediaFiles.map((file) => file.id));
+  const mediaCount = activeMediaIds.size;
   const approvedIdeas = tasks.filter((task) => task.status === "APPROVED");
   const teamIdeas = tasks.filter((task) => task.status !== "APPROVED");
 
@@ -93,6 +101,7 @@ export default async function MarketingPage() {
                   <tr>
                     <th className="px-4 py-3">Project</th>
                     <th className="px-4 py-3">Deadline</th>
+                    <th className="px-4 py-3">Media</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -105,6 +114,9 @@ export default async function MarketingPage() {
                     </td>
                     <td className="px-4 py-3 text-slate-600">
                       {task.dueAt ? new Date(task.dueAt).toLocaleDateString("en-IN") : "-"}
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">
+                      {task.media.filter((media) => activeMediaIds.has(media.fileAssetId)).length}
                     </td>
                   </tr>
               ))}

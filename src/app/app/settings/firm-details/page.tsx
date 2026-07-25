@@ -15,7 +15,7 @@ export default async function FirmDetailsPage() {
   if (!session) redirect("/login");
 
   const [firms, fields, selectedFirm] = await Promise.all([
-    firmsForUser(session.id),
+    firmsForUser(session),
     firmFieldsForUser(session.id),
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { maxTransfersPerPlot: true } }),
   ]);

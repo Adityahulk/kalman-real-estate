@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import { Prisma, Role } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../db";
-import { createSessionToken, SessionUser } from "../session";
+import { createSessionToken, hasPortfolioFirmAccess, SessionUser } from "../session";
 import { defaultProjectFileFields, defaultProjectMapFields } from "./project-file-fields";
 import { ensureDefaultLetterFields } from "./letter-field-settings";
 import { ensureProjectLetterTemplates } from "./document-templates";
@@ -37,13 +37,22 @@ export const ownershipSettingsSchema = z.object({
   maxTransfersPerPlot: z.number().int().min(0).max(50),
 });
 
-export async function firmsForUser(userId: string) {
+export async function firmsForUser(user: SessionUser) {
+  if (hasPortfolioFirmAccess(user.role)) {
+    const tenants = await prisma.tenant.findMany({ orderBy: { createdAt: "asc" } });
+    return tenants.map((tenant) => ({ ...tenant, membershipRole: user.role }));
+  }
+
   const memberships = await prisma.userFirmMembership.findMany({
-    where: { userId },
+    where: { userId: user.id },
     include: { tenant: true },
     orderBy: { createdAt: "asc" },
   });
-  return memberships.map(({ tenant, role }) => ({ ...tenant, membershipRole: role }));
+  const firms = memberships.map(({ tenant, role }) => ({ ...tenant, membershipRole: role }));
+  if (user.tenantId === "__unselected__" || firms.some((firm) => firm.id === user.tenantId)) return firms;
+
+  const directTenant = await prisma.tenant.findUnique({ where: { id: user.tenantId } });
+  return directTenant ? [{ ...directTenant, membershipRole: user.role }, ...firms] : firms;
 }
 
 export async function firmFieldsForUser(userId: string) {
@@ -128,6 +137,11 @@ export async function updateOwnershipSettings(user: SessionUser, input: z.infer<
 }
 
 export async function firmForUser(user: SessionUser, tenantId: string) {
+  if (hasPortfolioFirmAccess(user.role)) {
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (tenant) return tenant;
+  }
+
   const membership = await prisma.userFirmMembership.findUnique({
     where: { userId_tenantId: { userId: user.id, tenantId } },
     include: { tenant: true },
@@ -179,7 +193,12 @@ export async function selectFirm(user: SessionUser, tenantId: string) {
     where: { userId_tenantId: { userId: user.id, tenantId } },
     include: { tenant: true },
   });
-  if (!membership) {
+  const directAccess = user.tenantId === tenantId;
+  const portfolioAccess = hasPortfolioFirmAccess(user.role);
+  const selectedTenant = membership?.tenant ?? (portfolioAccess || directAccess
+    ? await prisma.tenant.findUnique({ where: { id: tenantId } })
+    : null);
+  if (!selectedTenant) {
     const error = new Error("You do not have access to this firm");
     error.name = "ForbiddenError";
     throw error;
@@ -189,10 +208,10 @@ export async function selectFirm(user: SessionUser, tenantId: string) {
   const token = await createSessionToken({
     id: user.id,
     tenantId,
-    role: membership.role,
+    role: user.role,
     email: user.email,
   });
-  return { token, firm: firm ?? membership.tenant };
+  return { token, firm: firm ?? selectedTenant };
 }
 
 async function ensureFirmBaselineData(tenantId: string) {

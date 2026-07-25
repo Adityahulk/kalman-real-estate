@@ -13,7 +13,7 @@ export default async function FirmsPage() {
 
   const [user, firms, customFields] = await Promise.all([
     prisma.user.findUnique({ where: { id: session.id }, select: { name: true, email: true } }),
-    firmsForUser(session.id),
+    firmsForUser(session),
     firmFieldsForUser(session.id),
   ]);
 

@@ -102,6 +102,7 @@ export function MarketingTaskForm() {
 }
 
 export function MarketingMediaPanel({ tasks }: { tasks: { id: string; title: string }[] }) {
+  const router = useRouter();
   const [taskId, setTaskId] = useState(tasks[0]?.id ?? "");
   const [kind, setKind] = useState("RAW");
   const [message, setMessage] = useState("");
@@ -114,6 +115,7 @@ export function MarketingMediaPanel({ tasks }: { tasks: { id: string; title: str
     });
     const body = await response.json();
     setMessage(response.ok ? `${kind} media attached: ${file.fileName}` : body.error ?? "Media attach failed");
+    if (response.ok) router.refresh();
   }
 
   return (
