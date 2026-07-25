@@ -56,10 +56,10 @@ export function ProjectMapFieldEditor({ id, label, logoFileId, allowLogo = true 
   }
 
   return (
-    <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
-      <span className="flex min-w-0 items-center gap-2 truncate font-medium">{logoFileId ? <img className="size-7 rounded border border-slate-200 object-contain" src={`/api/v1/files/${logoFileId}/download?disposition=inline&proxy=1`} alt="" /> : null}{label}</span>
-      <div className="flex shrink-0 gap-1">
-        {allowLogo ? <div className="w-36"><FileUploader label={logoFileId ? "Change logo" : "Add logo"} accept="image/png,image/jpeg,image/webp,image/svg+xml" visibility="TEAM" onUploaded={(file) => void setLogo(file.id)} compact /></div> : null}
+    <div className="flex min-w-0 flex-1 flex-col gap-2">
+      <span className="flex min-w-0 items-center gap-2 font-medium">{logoFileId ? <img className="size-8 shrink-0 rounded-lg border border-slate-200 bg-white object-contain" src={`/api/v1/files/${logoFileId}/download?disposition=inline&proxy=1`} alt="" /> : allowLogo ? <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs text-slate-400">Map</span> : null}<span className="min-w-0 break-words">{label}</span></span>
+      <div className="flex flex-wrap items-center gap-1">
+        {allowLogo ? <div className="w-32"><FileUploader label={logoFileId ? "Change icon" : "Add icon"} accept="image/png,image/jpeg,image/webp,image/svg+xml" visibility="TEAM" onUploaded={(file) => void setLogo(file.id)} compact /></div> : null}
         {allowLogo && logoFileId ? <button className="btn-ghost h-8 px-2 text-xs" type="button" onClick={() => void setLogo(null)}>Remove logo</button> : null}
         <button className="btn-ghost h-8 px-2" type="button" aria-label={`Edit ${label}`} onClick={() => setEditing(true)}><Pencil size={14} /></button>
         <button className="btn-ghost h-8 px-2 text-rose-700" type="button" aria-label={`Delete ${label}`} onClick={() => void remove()} disabled={loading}><Trash2 size={14} /></button>

@@ -4,8 +4,6 @@ import { requirePagePermission } from "@/server/page-auth";
 import { firmFieldsForUser, firmsForUser } from "@/server/services/firms";
 import { prisma } from "@/server/db";
 import { AddFirmFieldForm, OwnershipSettingsForm } from "./settings-actions";
-import { BackButton } from "@/components/back-button";
-import { SettingsTabs } from "../settings-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -19,9 +17,11 @@ export default async function FirmDetailsPage() {
   ]);
 
   return (
-    <main className="min-h-[calc(100vh-4rem)] px-4 py-6 lg:px-8">
-      <BackButton fallbackHref="/app" />
-      <SettingsTabs active="firm" />
+    <div>
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold">Firm details</h2>
+        <p className="mt-1 text-sm text-slate-500">Open a firm to review or edit its identity, authorised persons, logo, and additional information.</p>
+      </div>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <section className="self-start overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
           <div className="flex items-center gap-2 border-b border-slate-200 px-5 py-4">
@@ -67,6 +67,6 @@ export default async function FirmDetailsPage() {
           </div>
         </aside>
       </div>
-    </main>
+    </div>
   );
 }

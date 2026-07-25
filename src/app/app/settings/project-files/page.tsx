@@ -1,13 +1,37 @@
 import { prisma } from "@/server/db";
 import { requirePagePermission } from "@/server/page-auth";
 import { ProjectFileFieldForm } from "./project-file-field-form";
-import { BackButton } from "@/components/back-button";
-import { SettingsTabs } from "../settings-tabs";
 import { ProjectMapFieldEditor } from "../project-maps/project-map-field-editor";
+import { FileStack } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export default async function ProjectFilesSettingsPage() {
   const session = await requirePagePermission("projects.manage");
   const fields = await prisma.projectFileField.findMany({ where: { tenantId: session.tenantId, section: "PROJECT_FILES", parentId: null }, include: { children: { orderBy: { createdAt: "asc" } } }, orderBy: { createdAt: "asc" } });
-  return <main className="min-h-[calc(100vh-4rem)] px-4 py-6 lg:px-8"><BackButton fallbackHref="/app" /><SettingsTabs active="files" /><div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]"><section className="self-start rounded-lg border border-slate-200 bg-white"><div className="border-b border-slate-200 px-5 py-4"><h1 className="font-semibold">Project file fields</h1><p className="mt-1 text-sm text-slate-500">These fields appear in every project under Upload files. Add sub-categories when one field needs multiple file groups.</p></div><div className="divide-y divide-slate-100">{fields.map((field) => <div className="px-5 py-4" key={field.id}><ProjectMapFieldEditor id={field.id} label={field.label} allowLogo={false} /><div className="ml-4 mt-3 border-l border-slate-200 pl-4"><div className="space-y-2">{field.children.map((child) => <ProjectMapFieldEditor id={child.id} label={child.label} allowLogo={false} key={child.id} />)}{!field.children.length ? <div className="text-xs text-slate-500">No sub-categories. Files will be uploaded directly under this field.</div> : null}</div><div className="mt-3 max-w-sm"><ProjectFileFieldForm section="PROJECT_FILES" parentId={field.id} /></div></div></div>)}{!fields.length ? <div className="p-8 text-center text-sm text-slate-500">No project file fields yet.</div> : null}</div></section><aside><ProjectFileFieldForm /></aside></div></main>;
+  return <div>
+    <div className="mb-4">
+      <div className="flex items-center gap-2"><FileStack size={18} className="text-navy-700" /><h2 className="text-lg font-semibold">Project file structure</h2></div>
+      <p className="mt-1 text-sm text-slate-500">Organize approvals and project records into clear categories and optional sub-categories.</p>
+    </div>
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <section className="self-start overflow-hidden rounded-lg border border-slate-200 bg-white">
+        <div className="border-b border-slate-200 bg-slate-50 px-5 py-4">
+          <h3 className="font-semibold">Configured file categories</h3>
+          <p className="mt-1 text-sm text-slate-500">{fields.length} main categor{fields.length === 1 ? "y" : "ies"}</p>
+        </div>
+        <div className="space-y-3 p-4">
+          {fields.map((field) => <div className="rounded-lg border border-slate-200 p-4" key={field.id}>
+            <ProjectMapFieldEditor id={field.id} label={field.label} allowLogo={false} />
+            <div className="ml-3 mt-3 border-l-2 border-slate-100 pl-4">
+              <div className="space-y-2">{field.children.map((child) => <div className="rounded-lg bg-slate-50 px-3 py-2" key={child.id}><ProjectMapFieldEditor id={child.id} label={child.label} allowLogo={false} /></div>)}</div>
+              {!field.children.length ? <div className="mb-3 text-xs text-slate-500">Files upload directly to this category.</div> : null}
+              <ProjectFileFieldForm section="PROJECT_FILES" parentId={field.id} compact />
+            </div>
+          </div>)}
+          {!fields.length ? <div className="p-8 text-center text-sm text-slate-500">No project file categories yet.</div> : null}
+        </div>
+      </section>
+      <aside className="xl:sticky xl:top-20 xl:self-start"><ProjectFileFieldForm /></aside>
+    </div>
+  </div>;
 }

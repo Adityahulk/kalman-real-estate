@@ -1,7 +1,5 @@
-import { BackButton } from "@/components/back-button";
 import { requirePagePermission } from "@/server/page-auth";
 import { listLetterFieldSettings } from "@/server/services/letter-field-settings";
-import { SettingsTabs } from "../settings-tabs";
 import { LetterFieldSettingsEditor } from "./letter-field-settings-editor";
 
 export const dynamic = "force-dynamic";
@@ -9,9 +7,11 @@ export const dynamic = "force-dynamic";
 export default async function LetterFieldsSettingsPage() {
   const session = await requirePagePermission("projects.manage");
   const categories = await listLetterFieldSettings(session.tenantId);
-  return <main className="min-h-[calc(100vh-4rem)] px-4 py-6 lg:px-8">
-    <BackButton fallbackHref="/app" />
-    <SettingsTabs active="letters" />
+  return <div>
+    <div className="mb-4">
+      <h2 className="text-lg font-semibold">Letter fields</h2>
+      <p className="mt-1 text-sm text-slate-500">Create reusable field groups for allotment and transfer letter templates.</p>
+    </div>
     <LetterFieldSettingsEditor categories={categories} />
-  </main>;
+  </div>;
 }

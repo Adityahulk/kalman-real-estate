@@ -2,7 +2,6 @@ import { notFound } from "next/navigation";
 import { requirePagePermission } from "@/server/page-auth";
 import { firmFieldsForUser, firmForUser } from "@/server/services/firms";
 import { FirmDetailsEditor } from "./firm-details-editor";
-import { BackButton } from "@/components/back-button";
 
 export const dynamic = "force-dynamic";
 
@@ -17,8 +16,7 @@ export default async function FirmDetailPage(props: { params: Promise<{ firmId: 
   if (!firm) notFound();
 
   return (
-    <main className="min-h-[calc(100vh-4rem)] px-4 py-6 lg:px-8">
-      <BackButton fallbackHref="/app/settings/firm-details" />
+    <div>
       <FirmDetailsEditor
         firm={{
           id: firm.id,
@@ -34,6 +32,6 @@ export default async function FirmDetailPage(props: { params: Promise<{ firmId: 
         }}
         customFields={fields.map((field) => ({ id: field.id, key: field.key, label: field.label }))}
       />
-    </main>
+    </div>
   );
 }

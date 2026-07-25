@@ -6,6 +6,7 @@ import { hasPermission } from "@/server/rbac";
 import { ProjectFileWorkspace } from "../../project-file-workspace";
 import { BackButton } from "@/components/back-button";
 import { CategoryLinks } from "../../category-links";
+import { ProjectWorkspaceNav } from "../../project-workspace-nav";
 
 export const dynamic = "force-dynamic";
 type FileField = {
@@ -83,10 +84,16 @@ export default async function ProjectFilesPage(
   });
 
   return <main className="flex min-h-[calc(100vh-4rem)] flex-col px-4 py-6 lg:px-8">
-    <header className="border-b border-slate-200 pb-4">
+    <header>
       <BackButton fallbackHref={`/app/projects/${project.id}`} />
-      <div className="mt-2 text-sm text-slate-500">{project.state ?? project.city}</div>
-      <h1 className="mt-1 text-2xl font-semibold">{project.name} · Upload files</h1>
+      <div className="mt-3 text-sm text-slate-500">{[project.city, project.state].filter(Boolean).join(", ")}</div>
+      <h1 className="mt-1 text-2xl font-semibold">{project.name}</h1>
+      <ProjectWorkspaceNav projectId={project.id} active="files" />
+      <div className="mt-5 rounded-lg border border-slate-200 bg-white p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div><h2 className="font-semibold">Project files</h2><p className="mt-1 text-sm text-slate-500">Search every category, sub-category, and uploaded filename from one place.</p></div>
+          {canManageFields ? <Link className="btn-outline h-9" href="/app/settings/project-files"><FileStack size={15} /> Manage structure</Link> : null}
+        </div>
       <form className="mt-4 flex max-w-xl flex-col gap-2 sm:flex-row" action={`/app/projects/${project.id}/files`}>
         <label className="relative block flex-1">
           <Search className="pointer-events-none absolute left-3 top-2.5 text-slate-400" size={16} />
@@ -95,9 +102,9 @@ export default async function ProjectFilesPage(
         <button className="btn-outline h-9 px-4" type="submit">Search</button>
         {query ? <Link className="btn-ghost h-9 px-4" href={`/app/projects/${project.id}/files`}>Clear</Link> : null}
       </form>
-      {!query ? <CategoryLinks fields={fields} selectedId={selected?.id} hrefPrefix={`/app/projects/${project.id}/files?category=`} /> : null}
-      {!query && selected?.children.length ? <div className="border-t border-slate-100 pt-3"><CategoryLinks fields={selected.children} selectedId={selectedChild?.id} hrefPrefix={`/app/projects/${project.id}/files?category=${selected.key}&sub=`} /></div> : null}
-      {canManageFields ? <Link className="btn-ghost mt-2" href="/app/settings/project-files"><FileStack size={15} /> Manage fields</Link> : null}
+      {!query ? <CategoryLinks fields={fields} selectedId={selected?.id} hrefPrefix={`/app/projects/${project.id}/files?category=`} searchable={false} label="File categories" /> : null}
+      {!query && selected?.children.length ? <div className="mt-4 border-t border-slate-100 pt-1"><CategoryLinks fields={selected.children} selectedId={selectedChild?.id} hrefPrefix={`/app/projects/${project.id}/files?category=${selected.key}&sub=`} searchable={false} label={`${selected.label} sub-categories`} /></div> : null}
+      </div>
     </header>
     <div className="mt-5 flex flex-1">
       {query ? <ProjectFileWorkspace projectId={project.id} label={`Search results for "${query}"`} files={filesWithContext} canUpload={false} /> : activeField ? <ProjectFileWorkspace projectId={project.id} label={activeField.label} categoryKey={activeField.key} files={filesWithContext} canUpload={canUpload} /> : selected?.children.length ? <div className="flex min-h-[360px] flex-1 items-center justify-center rounded-lg border border-dashed border-slate-300 text-sm text-slate-500">Select a {selected.label} sub-category.</div> : <div className="flex min-h-[360px] flex-1 items-center justify-center rounded-lg border border-dashed border-slate-300 text-sm text-slate-500">{fields.length ? "Select a file field or search all files." : "Add project file fields in Settings first."}</div>}

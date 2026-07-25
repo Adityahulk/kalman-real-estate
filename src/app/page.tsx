@@ -22,6 +22,7 @@ export default function Home() {
     <LandingPage
       whatsappNumber={process.env.NEXT_PUBLIC_SALES_WHATSAPP ?? "918292098293"}
       salesEmail={process.env.NEXT_PUBLIC_SALES_EMAIL ?? "company@kalman-labs.com"}
+      currentYear={new Date().getUTCFullYear()}
     />
   );
 }

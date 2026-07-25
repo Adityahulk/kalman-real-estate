@@ -152,9 +152,10 @@ const faqs = [
 type LandingPageProps = {
   whatsappNumber: string;
   salesEmail: string;
+  currentYear: number;
 };
 
-export function LandingPage({ whatsappNumber, salesEmail }: LandingPageProps) {
+export function LandingPage({ whatsappNumber, salesEmail, currentYear }: LandingPageProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const phoneNumber = whatsappNumber.replace(/\D/g, "") || "918292098293";
   const phoneHref = `tel:+${phoneNumber}`;
@@ -355,7 +356,7 @@ export function LandingPage({ whatsappNumber, salesEmail }: LandingPageProps) {
       <footer className="border-t border-slate-800 bg-navy-950 pb-20 text-slate-400 sm:pb-0">
         <div className="mx-auto flex max-w-7xl flex-col justify-between gap-5 px-4 py-8 sm:flex-row sm:items-center sm:px-6 lg:px-8">
           <div className="flex items-center gap-3"><span className="flex h-8 w-8 items-center justify-center rounded-md bg-white/10 text-white"><Building2 size={17} /></span><div><div className="text-sm font-semibold text-white">WIDESTATE OS</div><div className="text-xs">Real estate technology by Kalman Labs</div></div></div>
-          <div className="flex flex-wrap items-center gap-5 text-xs"><a href={phoneHref} className="hover:text-white">{phoneDisplay}</a><a href={`mailto:${salesEmail}`} className="hover:text-white">{salesEmail}</a><Link href="/login" className="hover:text-white">Client sign in</Link><span>© {new Date().getFullYear()} Kalman Labs</span></div>
+          <div className="flex flex-wrap items-center gap-5 text-xs"><a href={phoneHref} className="hover:text-white">{phoneDisplay}</a><a href={`mailto:${salesEmail}`} className="hover:text-white">{salesEmail}</a><Link href="/login" className="hover:text-white">Client sign in</Link><span>© {currentYear} Kalman Labs</span></div>
         </div>
       </footer>
 

@@ -5,6 +5,7 @@ import { requirePagePermission } from "@/server/page-auth";
 import { listLetterFieldSettings } from "@/server/services/letter-field-settings";
 import { ensureProjectLetterTemplates } from "@/server/services/document-templates";
 import { HtmlTemplateEditor } from "../../html-template-editor";
+import { ProjectWorkspaceNav } from "../../project-workspace-nav";
 
 export const dynamic = "force-dynamic";
 
@@ -25,9 +26,11 @@ export default async function ProjectLettersPage(props: { params: Promise<{ proj
   return (
     <main className="min-h-[calc(100vh-4rem)] px-4 py-6 lg:px-8">
       <BackButton fallbackHref={`/app/projects/${project.id}`} />
-      <div className="mb-5">
-        <div className="text-sm text-slate-500">{project.name}</div>
-        <h1 className="mt-1 text-2xl font-semibold">Set your letters</h1>
+      <div className="mb-5 mt-3">
+        <div className="text-sm text-slate-500">{[project.city, project.state].filter(Boolean).join(", ")}</div>
+        <h1 className="mt-1 text-2xl font-semibold">{project.name}</h1>
+        <ProjectWorkspaceNav projectId={project.id} active="letters" />
+        <h2 className="mt-5 text-lg font-semibold">Letter templates</h2>
         <p className="mt-1 text-sm text-slate-500">
           Create and edit letter templates with dynamic fields. Insert variables that auto-fill with project and plot data during generation.
         </p>

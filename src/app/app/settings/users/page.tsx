@@ -4,7 +4,6 @@ import { Role } from "@prisma/client";
 import { Users } from "lucide-react";
 import { getSessionUser } from "@/server/session";
 import { listUserRoleSettings } from "@/server/services/user-role-settings";
-import { SettingsTabs } from "../settings-tabs";
 import { RoleSettingsManager } from "./role-settings-manager";
 
 export const dynamic = "force-dynamic";
@@ -21,10 +20,9 @@ export default async function UserRoleSettingsPage() {
   const settings = await listUserRoleSettings(context);
 
   return (
-    <main className="px-4 py-6 lg:px-8">
-      <h1 className="text-2xl font-semibold">User &amp; role settings</h1>
+    <div>
+      <h2 className="text-lg font-semibold">User &amp; role settings</h2>
       <p className="mt-1 text-sm text-slate-500">Configure departments, designations, roles, permissions, and profile fields.</p>
-      <SettingsTabs active="users" showUsers />
       <div className="mb-6 grid gap-3 sm:grid-cols-2">
         <Link href="/app/users" className="card flex items-center gap-3 p-4 hover:border-navy-300 hover:bg-navy-50">
           <Users size={20} className="text-navy-700" />
@@ -36,6 +34,6 @@ export default async function UserRoleSettingsPage() {
         </div>
       </div>
       <RoleSettingsManager initial={settings} />
-    </main>
+    </div>
   );
 }
