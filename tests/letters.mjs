@@ -335,6 +335,73 @@ await exerciseLetterType("registry_status_letter");
 }
 
 // ---------------------------------------------------------------------------
+// Approved transfer letters use the same physical-signature workflow as allotment letters.
+// The signed upload must belong to the same plot, mark the document SIGNED, and remain replaceable.
+{
+  console.log("\n■ transfer letter signed-copy workflow");
+  const document = await prisma.generatedDocument.create({
+    data: {
+      tenantId: plot.tenantId,
+      type: "transfer_letter",
+      status: "APPROVED",
+      recordType: "Plot",
+      recordId: plot.id,
+      data: {},
+      number: `SIGNED-TRANSFER-${stamp}`,
+    },
+  });
+  const createSignedFile = (suffix, ownerId = plot.id) => prisma.fileAsset.create({
+    data: {
+      tenantId: plot.tenantId,
+      storageKey: `test/${stamp}/signed-transfer-${suffix}.pdf`,
+      storageProvider: "LOCAL",
+      fileName: `signed-transfer-${suffix}.pdf`,
+      mimeType: "application/pdf",
+      sizeBytes: 1024,
+      visibility: "OWNER_VISIBLE",
+      documentType: "TRANSFER_LETTER",
+      documentNo: document.number,
+      ownerType: "Plot",
+      ownerId,
+      categoryKey: "signed-transfer-letter",
+    },
+  });
+  const wrongPlotFile = await createSignedFile("wrong-plot", "another-plot");
+  const firstSignedFile = await createSignedFile("first");
+  const replacementSignedFile = await createSignedFile("replacement");
+  try {
+    const invalid = await request(`/api/v1/documents/${document.id}/sign`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ signedFileAssetId: wrongPlotFile.id }),
+    });
+    assert(invalid.response.status === 400, "transfer signed copy: accepted a file belonging to another plot");
+
+    const signed = await request(`/api/v1/documents/${document.id}/sign`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ signedFileAssetId: firstSignedFile.id }),
+    });
+    assert(signed.response.status === 200, `transfer signed copy: upload failed (${signed.json.error ?? signed.response.status})`);
+    assert(signed.json.data.status === "SIGNED", "transfer signed copy: document was not marked SIGNED");
+    assert(signed.json.data.signedFileAssetId === firstSignedFile.id, "transfer signed copy: uploaded file was not linked");
+
+    const replaced = await request(`/api/v1/documents/${document.id}/sign`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ signedFileAssetId: replacementSignedFile.id }),
+    });
+    assert(replaced.response.status === 200, `transfer signed copy: replacement failed (${replaced.json.error ?? replaced.response.status})`);
+    assert(replaced.json.data.signedFileAssetId === replacementSignedFile.id, "transfer signed copy: replacement file was not linked");
+    console.log("  ✓ approved transfer becomes signed and its signed copy can be replaced safely");
+  } finally {
+    await prisma.auditEvent.deleteMany({ where: { entityType: "GeneratedDocument", entityId: document.id } });
+    await prisma.generatedDocument.delete({ where: { id: document.id } });
+    await prisma.fileAsset.deleteMany({ where: { id: { in: [wrongPlotFile.id, firstSignedFile.id, replacementSignedFile.id] } } });
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Returning from Letter Studio and submitting revised transfer details must update the same
 // pending ownership record and refresh the same draft document. It must never create a second
 // transfer event merely because the user pressed Back to correct the form.

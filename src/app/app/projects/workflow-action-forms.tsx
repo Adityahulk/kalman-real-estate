@@ -1320,7 +1320,9 @@ export function LetterStudioEditor({
   const showApprovalDecision = permissions.approve && status === "SUBMITTED";
   const awaitingSignature = status === "SENT_FOR_SIGNATURE" || status === "APPROVED";
   const showSignControls = permissions.sign && awaitingSignature;
-  const canUploadSignedLetter = Boolean(signedUploadPlotId && fileAssetId && letter.type.includes("allotment") && showSignControls);
+  const isTransferOwnershipLetter = letter.type.toLowerCase().includes("transfer");
+  const isOwnershipLetter = letter.type.toLowerCase().includes("allotment") || isTransferOwnershipLetter;
+  const canUploadSignedLetter = Boolean(signedUploadPlotId && fileAssetId && isOwnershipLetter && showSignControls);
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-100">
@@ -1452,10 +1454,10 @@ export function LetterStudioEditor({
                     visibility="OWNER_VISIBLE"
                     accept="application/pdf,image/*"
                     metadata={{
-                      categoryKey: "signed-allotment-letter",
-                      documentType: "ALLOTMENT_LETTER",
+                      categoryKey: isTransferOwnershipLetter ? "signed-transfer-letter" : "signed-allotment-letter",
+                      documentType: isTransferOwnershipLetter ? "TRANSFER_LETTER" : "ALLOTMENT_LETTER",
                       documentNo: letter.number ?? undefined,
-                      notes: "Signed version of allotment letter",
+                      notes: `Signed version of ${isTransferOwnershipLetter ? "transfer" : "allotment"} letter`,
                     }}
                     onUploaded={(file) => void signLetter(file.id)}
                   />

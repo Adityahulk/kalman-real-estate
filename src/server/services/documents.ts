@@ -39,6 +39,13 @@ function assertDocumentEditable(status: DocumentStatus) {
   }
 }
 
+function ownershipLetterLabel(type: string) {
+  const normalized = type.toLowerCase();
+  if (normalized.includes("transfer")) return "Transfer";
+  if (normalized.includes("allotment")) return "Allotment";
+  return "Document";
+}
+
 export const generateDocumentSchema = z.object({
   templateId: z.string().optional(),
   type: z.string().min(2),
@@ -387,7 +394,7 @@ export async function submitDocument(context: RequestContext, id: string, input:
     after: { ...document, notes: input.notes } as unknown as Prisma.InputJsonValue,
   });
   await notifyRoleWithPermission(context, "documents.approve", {
-    title: "New allotment awaiting approval",
+    title: `New ${ownershipLetterLabel(document.type).toLowerCase()} awaiting approval`,
     body: `${document.number ?? document.type} has been submitted and is awaiting your approval.`,
     data: { documentId: id, status: document.status },
     excludeUserId: context.userId,
@@ -446,8 +453,9 @@ export async function approveDocument(context: RequestContext, id: string, input
     after: { ...document, notes: input.notes } as unknown as Prisma.InputJsonValue,
   });
   if (input.status === "APPROVED") {
+    const letterLabel = ownershipLetterLabel(document.type);
     await notifyRoleWithPermission(context, "documents.sign", {
-      title: "Allotment approved — ready for signature",
+      title: `${letterLabel} approved — ready for signature`,
       body: `${document.number ?? document.type} has been approved and is ready for signature.`,
       data: { documentId: id, status: document.status },
       excludeUserId: context.userId,
@@ -455,31 +463,33 @@ export async function approveDocument(context: RequestContext, id: string, input
     if (document.submittedById) {
       await createNotification(context, {
         userId: document.submittedById,
-        title: "Allotment approved",
+        title: `${letterLabel} approved`,
         body: `${document.number ?? document.type} was approved and sent for signature.`,
         data: { documentId: id, status: document.status },
       });
     }
   } else if (input.status === "CHANGES_REQUESTED") {
+    const letterLabel = ownershipLetterLabel(document.type);
     if (document.submittedById) {
       await createNotification(context, {
         userId: document.submittedById,
-        title: "Allotment returned for correction",
+        title: `${letterLabel} returned for correction`,
         body: `${document.number ?? document.type} was returned${input.notes ? `: ${input.notes}` : "."}`,
         data: { documentId: id, status: document.status },
       });
     }
     await notifyRoleWithPermission(context, "documents.submit", {
-      title: "Allotment returned for correction",
+      title: `${letterLabel} returned for correction`,
       body: `${document.number ?? document.type} was returned for correction.`,
       data: { documentId: id, status: document.status },
       excludeUserId: context.userId,
     });
   } else if (input.status === "REJECTED") {
+    const letterLabel = ownershipLetterLabel(document.type);
     if (document.submittedById) {
       await createNotification(context, {
         userId: document.submittedById,
-        title: "Allotment rejected",
+        title: `${letterLabel} rejected`,
         body: `${document.number ?? document.type} was rejected${input.notes ? `: ${input.notes}` : "."}`,
         data: { documentId: id, status: document.status },
       });
@@ -503,13 +513,23 @@ export const signDocumentSchema = z.object({
 
 export async function signDocument(context: RequestContext, id: string, input: z.infer<typeof signDocumentSchema>) {
   const current = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId, archivedAt: null } });
-  if (current.status !== DocumentStatus.SENT_FOR_SIGNATURE && current.status !== DocumentStatus.APPROVED) {
-    const error = new Error("Only approved letters awaiting signature can be signed.");
+  if (
+    current.status !== DocumentStatus.SENT_FOR_SIGNATURE
+    && current.status !== DocumentStatus.APPROVED
+    && current.status !== DocumentStatus.SIGNED
+  ) {
+    const error = new Error("Only approved letters awaiting signature, or an existing signed letter, can receive a signed copy.");
     error.name = "BadRequestError";
     throw error;
   }
   const signedFile = await prisma.fileAsset.findFirst({
-    where: { id: input.signedFileAssetId, tenantId: context.tenantId, deletedAt: null },
+    where: {
+      id: input.signedFileAssetId,
+      tenantId: context.tenantId,
+      deletedAt: null,
+      ownerType: current.recordType,
+      ownerId: current.recordId,
+    },
     select: { id: true },
   });
   if (!signedFile) {

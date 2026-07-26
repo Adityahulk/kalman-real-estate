@@ -3,6 +3,7 @@ import { Landmark, Plus, Search, Users } from "lucide-react";
 import { PlotStatus } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { requirePagePermission } from "@/server/page-auth";
+import { hasPermission } from "@/server/rbac";
 import { BackButton } from "@/components/back-button";
 import { sortByPlotCode } from "@/lib/plot-code-sort";
 import { OwnershipPlotRow } from "./ownership-plot-row";
@@ -18,6 +19,8 @@ export default async function ProjectOwnershipPage(
   const searchParams = await props.searchParams;
   const params = await props.params;
   const session = await requirePagePermission("ownership.view");
+  const canApproveDocuments = hasPermission(session.role, "documents.approve", session.permissions);
+  const canSignDocuments = hasPermission(session.role, "documents.sign", session.permissions);
   const [project, firm] = await Promise.all([
     prisma.project.findFirstOrThrow({ where: { id: params.projectId, tenantId: session.tenantId } }),
     prisma.tenant.findUniqueOrThrow({ where: { id: session.tenantId }, select: { name: true } }),
@@ -80,7 +83,16 @@ export default async function ProjectOwnershipPage(
     return counts;
   }, {});
   const generatedLetters = await prisma.generatedDocument.findMany({
-    where: { tenantId: session.tenantId, recordType: "Plot", recordId: { in: plots.map((plot) => plot.id) }, type: { contains: "allotment", mode: "insensitive" }, archivedAt: null },
+    where: {
+      tenantId: session.tenantId,
+      recordType: "Plot",
+      recordId: { in: plots.map((plot) => plot.id) },
+      archivedAt: null,
+      OR: [
+        { type: { contains: "allotment", mode: "insensitive" } },
+        { type: { contains: "transfer", mode: "insensitive" } },
+      ],
+    },
     orderBy: { createdAt: "desc" },
   });
   const signedLetters = await prisma.fileAsset.findMany({
@@ -88,7 +100,7 @@ export default async function ProjectOwnershipPage(
       tenantId: session.tenantId,
       ownerType: "Plot",
       ownerId: { in: plots.map((plot) => plot.id) },
-      categoryKey: "signed-allotment-letter",
+      categoryKey: { in: ["signed-allotment-letter", "signed-transfer-letter"] },
       deletedAt: null,
     },
     orderBy: { createdAt: "desc" },
@@ -98,6 +110,7 @@ export default async function ProjectOwnershipPage(
     if (!letterByPlot.has(letter.recordId)) letterByPlot.set(letter.recordId, letter);
   }
   const signedLetterByPlotAndDocument = new Map<string, typeof signedLetters[number]>();
+  const availableSignedFileIds = new Set(signedLetters.map((file) => file.id));
   for (const file of signedLetters) {
     if (!file.ownerId || !file.documentNo) continue;
     const key = `${file.ownerId}:${file.documentNo}`;
@@ -180,6 +193,9 @@ export default async function ProjectOwnershipPage(
                   ? Math.round(plot.checklistItems.reduce((total, item) => total + item.progressPct, 0) / plot.checklistItems.length)
                   : null;
                 const signedLetter = letter?.number ? signedLetterByPlotAndDocument.get(`${plot.id}:${letter.number}`) : null;
+                const signedFileAssetId = letter?.signedFileAssetId && availableSignedFileIds.has(letter.signedFileAssetId)
+                  ? letter.signedFileAssetId
+                  : signedLetter?.id ?? null;
                 return (
                   <OwnershipPlotRow
                     key={plot.id}
@@ -194,11 +210,14 @@ export default async function ProjectOwnershipPage(
                       id: letter.id,
                       status: letter.status,
                       fileAssetId: letter.fileAssetId,
-                      viewFileAssetId: signedLetter?.id ?? letter.fileAssetId,
+                      signedFileAssetId,
+                      viewFileAssetId: signedFileAssetId ?? letter.fileAssetId,
                       type: letter.type,
                       number: letter.number,
                       createdAt: letter.createdAt.toISOString(),
                     } : null}
+                    canApprove={canApproveDocuments}
+                    canSign={canSignDocuments}
                     cadSource={cadLinkByPlot.get(plot.id)?.entity.scene.cadFile ?? null}
                   />
                 );
