@@ -155,6 +155,7 @@ export async function updateLatestAllotment(context: RequestContext, plotId: str
 }
 
 export const transferPlotSchema = z.object({
+  recordId: z.string().optional(),
   buyerOwnerId: z.string(),
   amountInr: z.number().nonnegative().optional(),
   sharePct: z.number().min(0).max(100).optional(),
@@ -193,21 +194,52 @@ export async function transferPlot(context: RequestContext, plotId: string, inpu
     }
     await tx.owner.findFirstOrThrow({ where: { id: input.buyerOwnerId, tenantId: context.tenantId } });
     const plot = before;
-    const record = await tx.ownershipRecord.create({
-      data: {
-        tenantId: context.tenantId,
-        plotId,
-        ownerId: input.buyerOwnerId,
-        kind: OwnershipKind.TRANSFER,
-        amountInr: input.amountInr,
-        sharePct: input.sharePct,
-        documentId: input.documentId,
-        notes: input.notes,
-        extraDetails: input.extraDetails as Prisma.InputJsonValue | undefined,
-        effectiveAt: input.effectiveAt ? new Date(input.effectiveAt) : undefined,
-        createdById: context.userId,
-      },
-    });
+    const recordData = {
+      ownerId: input.buyerOwnerId,
+      amountInr: input.amountInr,
+      sharePct: input.sharePct,
+      documentId: input.documentId,
+      notes: input.notes,
+      extraDetails: input.extraDetails as Prisma.InputJsonValue | undefined,
+      effectiveAt: input.effectiveAt ? new Date(input.effectiveAt) : undefined,
+    };
+    const pendingRecord = input.recordId
+      ? await tx.ownershipRecord.findFirst({
+          where: {
+            id: input.recordId,
+            tenantId: context.tenantId,
+            plotId,
+            kind: OwnershipKind.TRANSFER,
+            cancelledAt: null,
+          },
+        })
+      : null;
+    if (input.recordId && !pendingRecord) {
+      throwBadRequest("This saved transfer could not be found. Erase the saved form and record it again.");
+    }
+    if (pendingRecord?.documentId) {
+      const linkedDocument = await tx.generatedDocument.findFirst({
+        where: { id: pendingRecord.documentId, tenantId: context.tenantId, archivedAt: null },
+        select: { status: true },
+      });
+      if (!linkedDocument || !["DRAFT", "GENERATED", "CHANGES_REQUESTED"].includes(linkedDocument.status)) {
+        throwBadRequest("This transfer letter is already submitted or finalized and can no longer be changed.");
+      }
+    }
+    const record = pendingRecord
+      ? await tx.ownershipRecord.update({
+          where: { id: pendingRecord.id },
+          data: recordData,
+        })
+      : await tx.ownershipRecord.create({
+          data: {
+            tenantId: context.tenantId,
+            plotId,
+            kind: OwnershipKind.TRANSFER,
+            createdById: context.userId,
+            ...recordData,
+          },
+        });
     return { before, plot, record };
   });
   await writeAuditEvent(context, { action: AuditAction.TRANSFER, entityType: "Plot", entityId: plotId, before: result.before as unknown as Prisma.InputJsonValue, after: result.plot as unknown as Prisma.InputJsonValue });

@@ -58,11 +58,11 @@ export function ambeyAllotmentTemplate() {
 <h1><u>CONSENT IN FAVOUR OF {{firm.nameUpper}}, {{project.city}}</u></h1>
 <p class="consent-subject">Subject : Consent for change / Revision / Addition in layout plan of {{project.name}} space having Hadbast No. 55, vide Jamabandi for the year 2019-20, of Village Barnala-A, B, C &amp; D, Tehsil &amp; Distt. Barnala.</p>
 <p class="salutation">Dear Sir/Madam</p>
-<p class="consent-indent">We, the undersigned allottee(s) of <span class="red-text">Plot No.</span> {{plot.code}} in the project “<strong>{{project.name}}</strong>”, which is registered with Punjab RERA vide Registration No. <strong>{{rera.number}}</strong>, hereby state that the project was earlier approved as per Layout Plan No. <strong>TB/BARNALA/SA/24/01 Dated 09/12/2024</strong>. And License to Develop Colony No. <strong>BNL-UD-LDC-2025/344 Dated 13/03/2025</strong>.</p>
+<p class="consent-indent">We, the undersigned allottee(s) of Plot No. {{plot.code}} in the project “<strong>{{project.name}}</strong>”, which is registered with Punjab RERA vide Registration No. <strong>{{rera.number}}</strong>, hereby state that the project was earlier approved as per Layout Plan No. <strong>TB/BARNALA/SA/24/01 Dated 09/12/2024</strong>. And License to Develop Colony No. <strong>BNL-UD-LDC-2025/344 Dated 13/03/2025</strong>.</p>
 <p class="consent-indent">We have been informed by the promoter that the layout plan has been revised and approved vide Revised Layout Plan No. <strong>TB/BARNALA/SA/25/01</strong> <strong>Dated 11/11/2025</strong> and License to Develop Colony No. <strong>235/B</strong> <strong>Dated. 22/04/2026.</strong></p>
 <p class="consent-layout-label">As per the revised layout:</p>
 <p class="consent-plot-lines">* Old Plot Number: {{plot.oldCode}}<br>* New Plot Number: {{plot.newCode}}</p>
-<p class="consent-block">At the time of booking of <span class="red-text">Plot No.{{plot.code}}</span> We were shown all documents of above-mentioned Residential Colony like Layout plan, etc. As we are aware that said layout plan is always subject to certain practical changes on site, which are required to be amended or revised for the exact measurements of the plots and for the betterment of the colony. As such by virtue of this letter, I/We do hereby accord and grant our unconditional consent for changes/revision or amendment in the layout plan of the Residential colony. Moreover, if the developer extends the expansion of existing Colony, the same shall be deemed to have been done with my/our consent. Hence, I/We shall not dispute the said changes/revision /amendment/addition of the layout plan of the Residential colony at any stage and grant unconditional consent regarding for any changes/revision /amendment/addition of the commercial colony.</p>
+<p class="consent-block">At the time of booking of Plot No.{{plot.code}} We were shown all documents of above-mentioned Residential Colony like Layout plan, etc. As we are aware that said layout plan is always subject to certain practical changes on site, which are required to be amended or revised for the exact measurements of the plots and for the betterment of the colony. As such by virtue of this letter, I/We do hereby accord and grant our unconditional consent for changes/revision or amendment in the layout plan of the Residential colony. Moreover, if the developer extends the expansion of existing Colony, the same shall be deemed to have been done with my/our consent. Hence, I/We shall not dispute the said changes/revision /amendment/addition of the layout plan of the Residential colony at any stage and grant unconditional consent regarding for any changes/revision /amendment/addition of the commercial colony.</p>
 <p>Thanking you and assuring you all the assistance.</p>
 <p class="right consent-signoff"><strong>(Allottee/ Allottees)</strong></p>
 </section>
@@ -276,15 +276,66 @@ export function ambeyAllotmentJointTemplate() {
   return joint.replace('<div data-template="ambey-allotment">', '<div data-template="ambey-allotment" data-template-variant="joint">');
 }
 
+function transferRecipientTable(alignmentClass: "transfer-recipient-table-centered" | "transfer-recipient-table-left") {
+  return `<table class="transfer-recipient-table ${alignmentClass}">
+<tbody>
+<tr><th scope="row">Name</th><td><strong>{{owner.nameWithRelation}}</strong></td></tr>
+<tr><th scope="row">Address</th><td class="transfer-recipient-address">{{owner.addressTwoLineHtml}}</td></tr>
+<tr><th scope="row">PAN No.</th><td>{{owner.panNo}}</td></tr>
+<tr><th scope="row">Aadhaar No.</th><td>{{owner.aadhaarNo}}</td></tr>
+</tbody>
+</table>`;
+}
+
+// Upgrade only the known legacy recipient blocks. This keeps user-written wording and page
+// changes intact while making older saved transfer templates use the same structured details
+// table as the current default.
+export function upgradeTransferTemplateBody(body: string) {
+  let upgraded = body;
+  const legacyRecipientBlock = (
+    className: "transfer-recipient-block" | "transfer-recipient-block transfer-recipient-block-left",
+    alignmentClass: "transfer-recipient-table-centered" | "transfer-recipient-table-left",
+  ) => {
+    const pattern = new RegExp(
+      `<p class="${className}"><u><strong>\\{\\{owner\\.nameWithRelation\\}\\}</strong></u><br>\\{\\{owner\\.address(?:MultilineHtml|TwoLineHtml)\\}\\}<br>PAN No\\. \\{\\{owner\\.panNo\\}\\}<br>Aadhaar No\\. \\{\\{owner\\.aadhaarNo\\}\\}</p>`,
+    );
+    upgraded = upgraded.replace(pattern, transferRecipientTable(alignmentClass));
+  };
+  legacyRecipientBlock("transfer-recipient-block", "transfer-recipient-table-centered");
+  legacyRecipientBlock("transfer-recipient-block transfer-recipient-block-left", "transfer-recipient-table-left");
+
+  const legacyParty = /<p class="center transfer-party"><u><strong>\{\{owner\.nameWithRelation\}\}<\/strong><\/u><br>\{\{owner\.address(?:MultilineHtml|TwoLineHtml)\}\}<br>PAN No\. \{\{owner\.panNo\}\}<br>Aadhaar No\. \{\{owner\.aadhaarNo\}\}<\/p>/;
+  upgraded = upgraded.replace(legacyParty, transferRecipientTable("transfer-recipient-table-centered"));
+  upgraded = upgraded.replace(legacyParty, transferRecipientTable("transfer-recipient-table-left"));
+
+  const legacySingleCell = (alignmentClass: "transfer-recipient-table-centered" | "transfer-recipient-table-left") =>
+    new RegExp(
+      `<table class="transfer-recipient-table ${alignmentClass}"><tr><td><u><strong>\\{\\{owner\\.nameWithRelation\\}\\}</strong></u><br>\\{\\{owner\\.address(?:MultilineHtml|TwoLineHtml)\\}\\}<br>PAN No\\. \\{\\{owner\\.panNo\\}\\}<br>Aadhaar No\\. \\{\\{owner\\.aadhaarNo\\}\\}</td></tr></table>`,
+    );
+  upgraded = upgraded.replace(
+    legacySingleCell("transfer-recipient-table-centered"),
+    transferRecipientTable("transfer-recipient-table-centered"),
+  );
+  upgraded = upgraded.replace(
+    legacySingleCell("transfer-recipient-table-left"),
+    transferRecipientTable("transfer-recipient-table-left"),
+  );
+  return upgraded
+    .replaceAll(' class="red-text"', "")
+    .replaceAll("TRANSRFER OF RESIDENTIAL PLOT", "TRANSFER OF RESIDENTIAL PLOT");
+}
+
 export function transferLetterTemplate() {
+  const centeredRecipient = transferRecipientTable("transfer-recipient-table-centered");
+  const leftRecipient = transferRecipientTable("transfer-recipient-table-left");
   return `<div data-letter-template="transfer-letter">
 <section data-letter-page="1" data-top="760">
-<p>Date: {{document.dateDots}}</p>
+<p class="transfer-date">Date: {{document.dateDots}}</p>
 <p class="transfer-to-block">To,<br><span class="transfer-to-firm"><strong>M/S. {{firm.nameUpper}},</strong></span><br><span class="transfer-to-firm"><strong>{{project.name}}, {{project.fullAddress}}</strong></span></p>
 <p class="transfer-subject"><span>Subject&nbsp;&nbsp;&nbsp;:</span><span>Transfer of Residential Plot No. <strong>{{plot.code}}</strong> situated in <strong>{{project.name}}</strong> situated at <strong>{{project.fullAddress}}</strong>.</span></p>
 <p>Respected Sir,</p>
 <p>I, <strong>{{seller.nameWithRelation}}</strong> has been allotted residential Plot No. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqyd}}</strong> Square Yards at <strong>{{project.name}}</strong> of <strong>M/s. {{firm.name}}, {{firm.address}}</strong> vide allotment letter No. <strong>{{original.allotmentNumber}}</strong> dated <strong>{{original.allotmentDate}}</strong>. I/we seek your permission to transfer the above stated plot in favor of:</p>
-<table class="transfer-recipient-table transfer-recipient-table-centered"><tr><td><u><strong>{{owner.nameWithRelation}}</strong></u><br>{{owner.addressTwoLineHtml}}<br>PAN No. {{owner.panNo}}<br>Aadhaar No. {{owner.aadhaarNo}}</td></tr></table>
+${centeredRecipient}
 <p>The conveyance deed in respect of the plot has been / not yet been executed. The said plot is free from all encumbrances like mortgages, gift or transfer in any manner to any person(s)/body.</p>
 <p>I/we hereby declare that nothing has been concealed in the above information and the residential plot is vacant. If in future, it is found that the transfer has been affected on the basis of false/wrong information provided in the application the transfer shall be deemed to be null and void and all consequent losses i.e. legal or financial shall be born by us. In case company suffers any loss on account of this transfer or as a consequence of this transfer myself/ourselves, legal heirs and successors of myself/ourselves shall be liable to make good all the losses or expenses sustained/suffered by the company or its employees. In case any legal heirs or successor or other person makes any claim regarding this residential plot, the litigation of the same shall be defended by me/us and the loss/expenses sustained/suffered by the company will also be made good by myself/ourselves.</p>
 </section>
@@ -327,7 +378,7 @@ export function transferLetterTemplate() {
 <p class="num-item"><span>2.</span><span>That I accept the allotment of residential plot no. <strong>{{plot.code}}</strong> measuring <strong>{{plot.areaSqyd}}</strong> Sq. Yds. situated at <strong>{{project.nameUpper}}</strong> of the firm.</span></p>
 <p class="num-item"><span>3.</span><span>That I further undertake to make payment of all the outstanding dues i.e. taxes/cess if any in respect of the above plot.</span></p>
 <p class="num-item"><span>4.</span><span>That I accept all the terms and condition relating to the allotment of residential plot, of the company as provided in the allotment letter no. <strong>{{original.allotmentNumber}}</strong> dated <strong>{{original.allotmentDate}}</strong>.</span></p>
-<p class="num-item"><span>5.</span><span>That I undertake to abide all the terms and conditions of RERA / PUDA / <span class="red-text">Municipal Corporation, {{project.city}}</span>.</span></p>
+<p class="num-item"><span>5.</span><span>That I undertake to abide all the terms and conditions of RERA / PUDA / Municipal Corporation, {{project.city}}.</span></p>
 </div>
 <p class="deponent">Deponent</p>
 <p class="transfer-heading">VERIFICATION</p>
@@ -337,10 +388,10 @@ export function transferLetterTemplate() {
 
 <section data-letter-page="5" data-top="760">
 <p class="transfer-title">TRANSFER LETTER</p>
-<p class="transfer-refline"><span><strong>No. <span class="red-text">{{document.number}}</span></strong></span><span class="red-text"><strong>DATED: {{document.dateSlashes}}</strong></span></p>
+<p class="transfer-refline"><span><strong>No. {{document.number}}</strong></span><span><strong>DATED: {{document.dateSlashes}}</strong></span></p>
 <p>To,</p>
-<table class="transfer-recipient-table transfer-recipient-table-left"><tr><td><u><strong>{{owner.nameWithRelation}}</strong></u><br>{{owner.addressTwoLineHtml}}<br>PAN No. {{owner.panNo}}<br>Aadhaar No. {{owner.aadhaarNo}}</td></tr></table>
-<p class="transfer-subject"><span><strong>SUBJECT:</strong></span><span><strong>TRANSRFER OF RESIDENTIAL PLOT NO. {{plot.code}} MEASURING {{plot.areaSqyd}} SQ. YDS. SITUATED AT {{project.nameUpper}}.</strong></span></p>
+${leftRecipient}
+<p class="transfer-subject"><span><strong>SUBJECT:</strong></span><span><strong>TRANSFER OF RESIDENTIAL PLOT NO. {{plot.code}} MEASURING {{plot.areaSqyd}} SQ. YDS. SITUATED AT {{project.nameUpper}}.</strong></span></p>
 <p>Respected Sir/Madam,</p>
 <p>Reference to your application dated <strong>{{document.dateSlashes}}</strong> on the subject cited above.</p>
 <p>We are pleased to transfer in your favour plot no. <strong>{{plot.code}}</strong> at {{project.nameUpper}} measuring {{plot.areaSqyd}} Sq. Yds. The details of which are mentioned below:</p>
