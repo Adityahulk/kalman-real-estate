@@ -336,6 +336,85 @@ export function OwnershipDocumentUpload({
   );
 }
 
+export function HistoricalOwnershipDocumentUpload({
+  projectId,
+  plotId,
+  hasCurrentOwner,
+  transferCount,
+}: {
+  projectId: string;
+  plotId: string;
+  hasCurrentOwner: boolean;
+  transferCount: number;
+}) {
+  const router = useRouter();
+  const [kind, setKind] = useState<"ALLOTMENT_LETTER" | "TRANSFER_LETTER">(
+    hasCurrentOwner ? "TRANSFER_LETTER" : "ALLOTMENT_LETTER",
+  );
+  const [documentNo, setDocumentNo] = useState("");
+  const [documentDate, setDocumentDate] = useState("");
+
+  function continueSetup(file: { id: string }) {
+    const common = `historical=1&historicalFileId=${encodeURIComponent(file.id)}`;
+    if (kind === "TRANSFER_LETTER") {
+      router.push(`/app/projects/${projectId}/plots/${plotId}/transfer?${common}`);
+      return;
+    }
+    router.push(`/app/projects/${projectId}/ownership/new-allotment?plotId=${encodeURIComponent(plotId)}&${common}`);
+  }
+
+  return (
+    <div className="rounded-lg border border-blue-200 bg-blue-50/40 p-4 lg:col-span-2">
+      <div className="mb-1 flex items-center gap-2">
+        <FileUp size={17} />
+        <h3 className="text-sm font-semibold">Import old signed allotment / transfer letter</h3>
+      </div>
+      <p className="mb-4 text-xs leading-5 text-slate-600">
+        Upload the signed file, then complete the same details used by a letter created in WIDESTATE OS. The plot owner, status, history, and next letter workflow update only after setup is saved.
+      </p>
+      <div className="grid gap-3 md:grid-cols-3">
+        <label>
+          <span className="label">Ownership event</span>
+          <select className="input" value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}>
+            <option value="ALLOTMENT_LETTER" disabled={hasCurrentOwner}>Original allotment</option>
+            <option value="TRANSFER_LETTER" disabled={!hasCurrentOwner}>Transfer {transferCount + 1}</option>
+          </select>
+        </label>
+        <label>
+          <span className="label">Letter number / reference</span>
+          <input className="input" value={documentNo} onChange={(event) => setDocumentNo(event.target.value)} />
+        </label>
+        <label>
+          <span className="label">Letter date</span>
+          <input className="input" type="date" value={documentDate} onChange={(event) => setDocumentDate(event.target.value)} />
+        </label>
+      </div>
+      <div className="mt-3">
+        <FileUploader
+          label={`Upload signed ${kind === "TRANSFER_LETTER" ? `transfer ${transferCount + 1}` : "allotment"} letter and continue`}
+          visibility="OWNER_VISIBLE"
+          ownerType="Plot"
+          ownerId={plotId}
+          accept="application/pdf,image/*"
+          metadata={{
+            documentType: kind,
+            documentNo: documentNo || undefined,
+            documentDate: documentDate ? new Date(`${documentDate}T12:00:00`).toISOString() : undefined,
+            notes: kind === "TRANSFER_LETTER" ? `Old signed transfer ${transferCount + 1}` : "Old signed allotment letter",
+            categoryKey: kind === "TRANSFER_LETTER"
+              ? "signed-transfer-letter"
+              : "signed-allotment-letter",
+          }}
+          onUploaded={continueSetup}
+        />
+      </div>
+      {!hasCurrentOwner ? (
+        <p className="mt-3 text-xs text-slate-500">Import the original allotment first. Transfer import becomes available after the previous owner is recorded.</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function PlotAllotmentForm({ plotId, owners }: { plotId: string; owners: OwnerDetailOption[] }) {
   const router = useRouter();
   const [mode, setMode] = useState<"new" | "existing">("new");
@@ -531,6 +610,7 @@ export function PlotTransferForm({
   currentOwner,
   originalAllotment = { number: "", date: "" },
   manualLetterFields = [],
+  historicalImport,
 }: {
   plotId: string;
   projectId?: string;
@@ -538,6 +618,7 @@ export function PlotTransferForm({
   currentOwner?: OwnerDetailOption;
   originalAllotment?: OriginalAllotmentReference;
   manualLetterFields?: ManualLetterField[];
+  historicalImport?: { fileAssetId: string; documentNumber: string; documentDate: string };
 }) {
   const router = useRouter();
   const today = new Date().toISOString().slice(0, 10);
@@ -563,7 +644,7 @@ export function PlotTransferForm({
   );
   const [originalAllotmentNumber, setOriginalAllotmentNumber] = useState(originalAllotment.number);
   const [originalAllotmentDate, setOriginalAllotmentDate] = useState(originalAllotment.date);
-  const [effectiveAt, setEffectiveAt] = useState(today);
+  const [effectiveAt, setEffectiveAt] = useState(historicalImport?.documentDate || today);
   const [amountInr, setAmountInr] = useState("");
   const [sharePct, setSharePct] = useState("100");
   const [stamps, setStamps] = useState<TransferStamp[]>([
@@ -581,7 +662,7 @@ export function PlotTransferForm({
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const restoredDraft = useRef(false);
-  const storageKey = `widestate:transfer-draft:${plotId}:${currentOwner?.id ?? "company"}`;
+  const storageKey = `widestate:transfer-draft:${plotId}:${currentOwner?.id ?? "company"}${historicalImport ? `:historical-${historicalImport.fileAssetId}` : ""}`;
 
   function draftPayload(overrides: Partial<TransferFormDraft> = {}): TransferFormDraft {
     return {
@@ -878,52 +959,59 @@ export function PlotTransferForm({
           .filter(([, files]) => (files as StoredFileRef[]).length),
       );
 
-      const response = await fetch(`/api/v1/ownership/plots/${plotId}/transfer`, {
+      const transferPayload = {
+        recordId: savedRecordId || undefined,
+        buyerOwnerId: resolvedBuyerId,
+        amountInr: amountInr ? Number(amountInr) : undefined,
+        sharePct: sharePct ? Number(sharePct) : undefined,
+        effectiveAt: effectiveAt ? new Date(effectiveAt).toISOString() : undefined,
+        notes: notes || undefined,
+        extraDetails: {
+          transfer: {
+            seller: {
+              name: currentOwner?.name ?? "",
+              relationPrefix: sellerRelationPrefix || undefined,
+              fatherName: sellerRelationName || undefined,
+              email: currentOwner?.email || undefined,
+              phone: currentOwner?.phone || undefined,
+              address: currentOwner?.address || undefined,
+              aadhaarNo: ownerKycValue(currentOwner, ["aadhaarNo", "aadharNo", "aadhaar", "aadhar"]) || undefined,
+              panNo: ownerKycValue(currentOwner, ["panNo", "pan"]) || undefined,
+            },
+            sellerRelationPrefix: sellerRelationPrefix || undefined,
+            sellerFatherName: sellerRelationName || undefined,
+            originalAllotmentNumber: originalAllotmentNumber || undefined,
+            originalAllotmentDate: originalAllotmentDate || undefined,
+            notes: notes || undefined,
+          },
+          allottee: {
+            name,
+            relationPrefix: relationPrefix || undefined,
+            fatherName: relationName || undefined,
+            address: address || undefined,
+            phone: phone || undefined,
+            documents: mergedIdentityDocuments,
+          },
+          eStampNumber: stamps.find((entry) => entry.number)?.number || undefined,
+          eStampDate: stamps.find((entry) => entry.number)?.dated || undefined,
+          stamps: stamps.filter((entry) => entry.number || entry.dated),
+          customLetterFields: letterFields,
+          customLetterFiles: uploadedManualFieldFiles,
+        },
+      };
+      const response = await fetch(
+        historicalImport
+          ? `/api/v1/ownership/plots/${plotId}/historical-transfer`
+          : `/api/v1/ownership/plots/${plotId}/transfer`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          recordId: savedRecordId || undefined,
-          buyerOwnerId: resolvedBuyerId,
-          amountInr: amountInr ? Number(amountInr) : undefined,
-          sharePct: sharePct ? Number(sharePct) : undefined,
-          effectiveAt: effectiveAt ? new Date(effectiveAt).toISOString() : undefined,
-          notes: notes || undefined,
-          extraDetails: {
-            transfer: {
-              // A transfer letter is a historical document. Persist the transferor snapshot at
-              // the moment this transfer is recorded instead of relying on whichever owner is
-              // currently selected when the document is later opened or regenerated.
-              seller: {
-                name: currentOwner?.name ?? "",
-                relationPrefix: sellerRelationPrefix || undefined,
-                fatherName: sellerRelationName || undefined,
-                email: currentOwner?.email || undefined,
-                phone: currentOwner?.phone || undefined,
-                address: currentOwner?.address || undefined,
-                aadhaarNo: ownerKycValue(currentOwner, ["aadhaarNo", "aadharNo", "aadhaar", "aadhar"]) || undefined,
-                panNo: ownerKycValue(currentOwner, ["panNo", "pan"]) || undefined,
-              },
-              sellerRelationPrefix: sellerRelationPrefix || undefined,
-              sellerFatherName: sellerRelationName || undefined,
-              originalAllotmentNumber: originalAllotmentNumber || undefined,
-              originalAllotmentDate: originalAllotmentDate || undefined,
-              notes: notes || undefined,
-            },
-            allottee: {
-              name,
-              relationPrefix: relationPrefix || undefined,
-              fatherName: relationName || undefined,
-              address: address || undefined,
-              phone: phone || undefined,
-              documents: mergedIdentityDocuments,
-            },
-            eStampNumber: stamps.find((entry) => entry.number)?.number || undefined,
-            eStampDate: stamps.find((entry) => entry.number)?.dated || undefined,
-            stamps: stamps.filter((entry) => entry.number || entry.dated),
-            customLetterFields: letterFields,
-            customLetterFiles: uploadedManualFieldFiles,
-          },
-        }),
+        body: JSON.stringify(historicalImport
+          ? {
+              ...transferPayload,
+              fileAssetId: historicalImport.fileAssetId,
+              documentNumber: historicalImport.documentNumber || undefined,
+            }
+          : transferPayload),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Transfer failed");
@@ -938,6 +1026,13 @@ export function PlotTransferForm({
         savedIdentityFiles: nextSavedIdentityFiles,
         savedManualFiles: uploadedManualFieldFiles,
       });
+
+      if (historicalImport) {
+        window.localStorage.removeItem(storageKey);
+        router.push(`/app/projects/${projectId}/plots/${plotId}?tab=documents`);
+        router.refresh();
+        return;
+      }
 
       const draftData = {
         transferAmountInr: amountInr ? Number(amountInr) : undefined,
@@ -992,8 +1087,8 @@ export function PlotTransferForm({
     <form onSubmit={submit} className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3">
         <div>
-          <div className="text-sm font-semibold text-slate-900">Transfer form draft</div>
-          <div className="text-xs text-slate-500">Changes are saved automatically on this device.</div>
+          <div className="text-sm font-semibold text-slate-900">{historicalImport ? "Import completed transfer" : "Transfer form draft"}</div>
+          <div className="text-xs text-slate-500">{historicalImport ? "Complete the historical transferee and letter details before saving." : "Changes are saved automatically on this device."}</div>
         </div>
         <button type="button" className="btn-outline h-9 px-3 text-sm" onClick={eraseSavedForm}>
           <X size={15} />
@@ -1126,7 +1221,7 @@ export function PlotTransferForm({
       {message ? <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
       <button className="btn-primary w-full" disabled={loading || (mode === "existing" ? !buyerOwnerId || !name : !name)}>
         {loading ? <Loader2 className="animate-spin" size={17} /> : <Send size={17} />}
-        Record transfer and open letter
+        {historicalImport ? "Save imported transfer" : "Record transfer and open letter"}
       </button>
     </form>
   );

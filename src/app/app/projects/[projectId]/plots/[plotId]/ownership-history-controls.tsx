@@ -1,7 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { ArrowRight, CalendarDays, Loader2, RotateCcw, UserRound, X } from "lucide-react";
-import { FormEvent, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type OwnershipEvent = {
@@ -112,14 +113,20 @@ export function OwnershipEventHistory({
 }
 
 export function HistoricalAllotmentToggle({
+  projectId,
   plotId,
   sourceFileCount,
+  sourceFiles,
+  hasCurrentOwner,
   active,
   historicalRecordId,
   latestRecordId,
 }: {
+  projectId: string;
   plotId: string;
   sourceFileCount: number;
+  sourceFiles: Array<{ id: string; fileName: string; documentType: string | null; documentNo: string | null; documentDate: string | null }>;
+  hasCurrentOwner: boolean;
   active: boolean;
   historicalRecordId: string | null;
   latestRecordId: string | null;
@@ -128,12 +135,6 @@ export function HistoricalAllotmentToggle({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [type, setType] = useState<"INDIVIDUAL" | "COMPANY" | "SHARED">("INDIVIDUAL");
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
-  const [email, setEmail] = useState("");
-  const [address, setAddress] = useState("");
-  const [effectiveAt, setEffectiveAt] = useState("");
   const canTurnOff = active && historicalRecordId === latestRecordId;
 
   async function toggle() {
@@ -158,34 +159,6 @@ export function HistoricalAllotmentToggle({
       router.refresh();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The historical allotment could not be cancelled.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setLoading(true);
-    setError("");
-    try {
-      const response = await fetch(`/api/v1/ownership/plots/${plotId}/historical-allotment`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          type,
-          name,
-          phone: phone || undefined,
-          email: email || undefined,
-          address: address || undefined,
-          effectiveAt: effectiveAt ? new Date(`${effectiveAt}T12:00:00`).toISOString() : undefined,
-        }),
-      });
-      const payload = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(payload?.error ?? "The historical allotment could not be recorded.");
-      setOpen(false);
-      router.refresh();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "The historical allotment could not be recorded.");
     } finally {
       setLoading(false);
     }
@@ -217,60 +190,56 @@ export function HistoricalAllotmentToggle({
             <span className={`absolute top-1 h-5 w-5 rounded-full bg-white shadow transition ${active ? "left-6" : "left-1"}`} />
           </button>
         </div>
+        {active && sourceFiles.length ? (
+          <button type="button" className="btn-outline mt-3 h-9 px-3 text-sm" onClick={() => setOpen(true)}>
+            Complete next old document setup
+          </button>
+        ) : null}
         {error ? <div className="mt-3 text-sm text-rose-700">{error}</div> : null}
       </div>
 
       {open ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4" onMouseDown={() => !loading && setOpen(false)}>
-          <form className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-lg bg-white p-5 shadow-xl" onSubmit={submit} onMouseDown={(event) => event.stopPropagation()}>
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white p-5 shadow-xl" onMouseDown={(event) => event.stopPropagation()}>
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h3 className="text-lg font-semibold">Record previous owner</h3>
-                <p className="mt-1 text-sm text-slate-500">These details establish the old allotment so future transfers start from the correct owner.</p>
+                <h3 className="text-lg font-semibold">Complete old letter setup</h3>
+                <p className="mt-1 text-sm text-slate-500">Choose an uploaded letter and complete its full native allotment or transfer form. Import events in chronological order.</p>
               </div>
               <button type="button" className="rounded p-1 text-slate-500 hover:bg-slate-100" onClick={() => setOpen(false)} aria-label="Close">
                 <X size={18} />
               </button>
             </div>
-            <div className="mt-5 grid gap-4 sm:grid-cols-2">
-              <label>
-                <span className="label">Owner type</span>
-                <select className="input" value={type} onChange={(event) => setType(event.target.value as typeof type)}>
-                  <option value="INDIVIDUAL">Individual</option>
-                  <option value="COMPANY">Company</option>
-                  <option value="SHARED">Shared ownership</option>
-                </select>
-              </label>
-              <label>
-                <span className="label">Allotment date</span>
-                <input className="input" type="date" value={effectiveAt} onChange={(event) => setEffectiveAt(event.target.value)} />
-              </label>
-              <label className="sm:col-span-2">
-                <span className="label">Previous owner name</span>
-                <input className="input" value={name} onChange={(event) => setName(event.target.value)} required />
-              </label>
-              <label>
-                <span className="label">Phone</span>
-                <input className="input" value={phone} onChange={(event) => setPhone(event.target.value)} />
-              </label>
-              <label>
-                <span className="label">Email</span>
-                <input className="input" type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
-              </label>
-              <label className="sm:col-span-2">
-                <span className="label">Address</span>
-                <textarea className="input min-h-24" value={address} onChange={(event) => setAddress(event.target.value)} />
-              </label>
+            <div className="mt-5 space-y-3">
+              {sourceFiles.map((file) => {
+                const isTransfer = file.documentType === "TRANSFER_LETTER";
+                const disabled = isTransfer && !hasCurrentOwner;
+                const href = isTransfer
+                  ? `/app/projects/${projectId}/plots/${plotId}/transfer?historical=1&historicalFileId=${encodeURIComponent(file.id)}`
+                  : `/app/projects/${projectId}/ownership/new-allotment?plotId=${encodeURIComponent(plotId)}&historical=1&historicalFileId=${encodeURIComponent(file.id)}`;
+                return (
+                  <div key={file.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 p-4">
+                    <div>
+                      <div className="font-medium">{file.documentNo || file.fileName}</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        {isTransfer ? "Transfer letter" : "Allotment letter"}{file.documentDate ? ` · ${file.documentDate}` : ""}
+                      </div>
+                    </div>
+                    {disabled ? (
+                      <span className="text-xs text-amber-700">Set up the original allotment first</span>
+                    ) : (
+                      <Link className="btn-primary h-9 px-3 text-sm" href={href}>Complete setup</Link>
+                    )}
+                  </div>
+                );
+              })}
+              {!sourceFiles.length ? <div className="rounded-lg border border-dashed border-slate-200 p-4 text-sm text-slate-500">No old signed letters are available.</div> : null}
             </div>
             {error ? <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</div> : null}
             <div className="mt-5 flex justify-end gap-2">
               <button type="button" className="btn-outline" onClick={() => setOpen(false)} disabled={loading}>Cancel</button>
-              <button type="submit" className="btn-primary" disabled={loading || name.trim().length < 2}>
-                {loading ? <Loader2 className="animate-spin" size={16} /> : null}
-                Save previous owner
-              </button>
             </div>
-          </form>
+          </div>
         </div>
       ) : null}
     </>

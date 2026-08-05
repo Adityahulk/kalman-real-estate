@@ -9,11 +9,15 @@ import { listLetterFieldSettings } from "@/server/services/letter-field-settings
 
 export const dynamic = "force-dynamic";
 
-export default async function TransferPlotPage(props: { params: Promise<{ projectId: string; plotId: string }> }) {
+export default async function TransferPlotPage(props: {
+  params: Promise<{ projectId: string; plotId: string }>;
+  searchParams: Promise<{ historical?: string; historicalFileId?: string }>;
+}) {
   const params = await props.params;
+  const searchParams = await props.searchParams;
   const session = await requirePagePermission("ownership.manage");
   await ensureProjectLetterTemplates(session.tenantId, params.projectId);
-  const [plot, firm, letterTemplate, letterCategories, originalAllotment] = await Promise.all([
+  const [plot, firm, letterTemplate, letterCategories, originalAllotment, historicalFile] = await Promise.all([
     prisma.plot.findFirst({
       where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId, archivedAt: null },
       include: { project: true, currentOwner: true },
@@ -33,8 +37,22 @@ export default async function TransferPlotPage(props: { params: Promise<{ projec
       orderBy: { createdAt: "desc" },
       select: { number: true, finalizedAt: true, createdAt: true },
     }),
+    searchParams.historical === "1" && searchParams.historicalFileId
+      ? prisma.fileAsset.findFirst({
+          where: {
+            id: searchParams.historicalFileId,
+            tenantId: session.tenantId,
+            ownerType: "Plot",
+            ownerId: params.plotId,
+            categoryKey: { in: ["old-documents", "signed-transfer-letter"] },
+            documentType: "TRANSFER_LETTER",
+            deletedAt: null,
+          },
+        })
+      : null,
   ]);
   if (!plot) notFound();
+  if (searchParams.historical === "1" && !historicalFile) notFound();
   const [owners, acceptedTransfers] = await Promise.all([
     prisma.owner.findMany({ where: { tenantId: session.tenantId }, orderBy: { name: "asc" } }),
     acceptedTransferCount(session.tenantId, plot.id),
@@ -75,6 +93,11 @@ export default async function TransferPlotPage(props: { params: Promise<{ projec
         manualLetterFields={resolvedTemplateFields
           .filter((field) => !field.mapping || field.mapping.startsWith("manual."))
           .map((field) => ({ key: field.key, label: field.label, inputType: field.inputType }))}
+        historicalImport={historicalFile ? {
+          fileAssetId: historicalFile.id,
+          documentNumber: historicalFile.documentNo ?? "",
+          documentDate: dateInput(historicalFile.documentDate),
+        } : undefined}
       />}
     </ActionPageShell>
   );

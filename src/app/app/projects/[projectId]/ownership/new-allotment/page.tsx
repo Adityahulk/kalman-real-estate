@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export default async function NewAllotmentPage(
   props: {
     params: Promise<{ projectId: string }>;
-    searchParams: Promise<{ plotId?: string; edit?: string }>;
+    searchParams: Promise<{ plotId?: string; edit?: string; historical?: string; historicalFileId?: string }>;
   }
 ) {
   const searchParams = await props.searchParams;
@@ -21,8 +21,9 @@ export default async function NewAllotmentPage(
   const session = await requirePagePermission("documents.generate");
   const project = await prisma.project.findFirst({ where: { id: params.projectId, tenantId: session.tenantId } });
   if (!project) notFound();
+  const isHistoricalImport = searchParams.historical === "1";
   await ensureProjectLetterTemplates(session.tenantId, project.id);
-  const [plots, firm, letterTemplate, letterCategories, existingAllotment] = await Promise.all([
+  const [plots, firm, letterTemplate, letterCategories, existingAllotment, historicalFile] = await Promise.all([
     prisma.plot.findMany({
       where: {
         tenantId: session.tenantId,
@@ -41,14 +42,28 @@ export default async function NewAllotmentPage(
     }),
     prisma.documentTemplate.findFirst({ where: { tenantId: session.tenantId, projectId: project.id, type: "allotment_letter", active: true }, orderBy: { createdAt: "desc" } }),
     listLetterFieldSettings(session.tenantId),
-    searchParams.edit && searchParams.plotId
+    (searchParams.edit || isHistoricalImport) && searchParams.plotId
       ? prisma.ownershipRecord.findFirst({
           where: { tenantId: session.tenantId, plotId: searchParams.plotId, kind: "ALLOTMENT", cancelledAt: null },
           include: { owner: true },
           orderBy: { createdAt: "desc" },
         })
       : null,
+    isHistoricalImport && searchParams.historicalFileId && searchParams.plotId
+      ? prisma.fileAsset.findFirst({
+          where: {
+            id: searchParams.historicalFileId,
+            tenantId: session.tenantId,
+            ownerType: "Plot",
+            ownerId: searchParams.plotId,
+            categoryKey: { in: ["old-documents", "signed-allotment-letter"] },
+            OR: [{ documentType: "ALLOTMENT_LETTER" }, { documentType: null }],
+            deletedAt: null,
+          },
+        })
+      : null,
   ]);
+  if (isHistoricalImport && !historicalFile) notFound();
   const authorizedPersons = Array.isArray(firm.authorizedPersons)
     ? firm.authorizedPersons.map((person) => {
         if (typeof person === "string") return person;
@@ -60,7 +75,24 @@ export default async function NewAllotmentPage(
   const existingExtra = existingAllotment?.extraDetails && typeof existingAllotment.extraDetails === "object" && !Array.isArray(existingAllotment.extraDetails)
     ? existingAllotment.extraDetails as Record<string, unknown>
     : {};
-  const existingInitialData = existingAllotment?.owner ? buildInitialAllotmentData(existingAllotment.owner, existingExtra, firm) : undefined;
+  const mayPrefillExisting = Boolean(
+    existingAllotment?.owner
+    && (searchParams.edit || (isHistoricalImport && existingExtra.historicalImport === true)),
+  );
+  const savedAllotmentData = mayPrefillExisting && existingAllotment?.owner
+    ? buildInitialAllotmentData(existingAllotment.owner, existingExtra, firm)
+    : undefined;
+  const existingInitialData = savedAllotmentData
+    ? {
+        ...savedAllotmentData,
+        allotmentNumber: typeof existingExtra.historicalDocumentNumber === "string" && existingExtra.historicalDocumentNumber
+          ? existingExtra.historicalDocumentNumber
+          : historicalFile?.documentNo ?? historicalFile?.fileName.replace(/\.[^.]+$/, "") ?? "",
+        effectiveAt: isHistoricalImport && existingAllotment
+          ? dateInput(existingAllotment.effectiveAt)
+          : savedAllotmentData.effectiveAt,
+      }
+    : undefined;
 
   const availableLetterFields = letterCategories.flatMap((category) => category.fields.map((field) => ({
     id: field.id,
@@ -74,8 +106,10 @@ export default async function NewAllotmentPage(
   return (
     <ActionPageShell
       eyebrow={project.name}
-      title="New allotment"
-      description="Select a plot and record the allottee, firm, payment, and supporting details."
+      title={isHistoricalImport ? "Complete imported allotment" : "New allotment"}
+      description={isHistoricalImport
+        ? "Existing owner information is filled below. Add the remaining details from the old signed allotment."
+        : "Select a plot and record the allottee, firm, payment, and supporting details."}
       backHref={`/app/projects/${project.id}/ownership`}
       backLabel="Back to ownership ledger"
       aside={<ActionHint title="After saving">The plot moves out of company inventory and its ownership history is updated.</ActionHint>}
@@ -111,6 +145,11 @@ export default async function NewAllotmentPage(
         })}
         firm={{ ...firm, authorizedPersons }}
         initialData={existingInitialData}
+        historicalImport={historicalFile ? {
+          fileAssetId: historicalFile.id,
+          documentNumber: historicalFile.documentNo ?? "",
+          documentDate: dateInput(historicalFile.documentDate),
+        } : undefined}
         manualLetterFields={resolvedTemplateFields
           .filter((field) => !field.mapping || field.mapping.startsWith("manual."))
           .map((field) => ({ key: field.key, label: field.label, inputType: field.inputType }))}
@@ -119,12 +158,18 @@ export default async function NewAllotmentPage(
   );
 }
 
+function dateInput(value: Date | null | undefined) {
+  if (!value) return "";
+  return value.toISOString().slice(0, 10);
+}
+
 function buildInitialAllotmentData(
   owner: { id: string; name: string; phone: string | null; address: string | null },
   extra: Record<string, unknown>,
   firm: { authorizedPersons: unknown },
 ) {
   const allottee = recordOf(extra.allottee);
+  const secondAllottee = recordOf(extra.secondAllottee);
   const pricing = recordOf(extra.pricing);
   const plotExtra = recordOf(extra.plot);
   const payments = Array.isArray(extra.payments) ? extra.payments.map(recordOf) : [];
@@ -143,6 +188,16 @@ function buildInitialAllotmentData(
     name: String(allottee.name ?? owner.name ?? ""),
     address: String(allottee.address ?? owner.address ?? ""),
     phone: String(allottee.phone ?? owner.phone ?? ""),
+    jointAllottee: {
+      name: typeof secondAllottee.name === "string" ? secondAllottee.name : "",
+      fatherName: typeof secondAllottee.fatherName === "string" ? secondAllottee.fatherName : "",
+      address: typeof secondAllottee.address === "string" ? secondAllottee.address : "",
+      aadhaarNo: typeof secondAllottee.aadhaarNo === "string" ? secondAllottee.aadhaarNo : "",
+      panNo: typeof secondAllottee.panNo === "string" ? secondAllottee.panNo : "",
+      mobileNo: typeof secondAllottee.mobileNo === "string" ? secondAllottee.mobileNo : "",
+      share: typeof secondAllottee.share === "string" ? secondAllottee.share : "",
+    },
+    allotmentNumber: typeof extra.historicalDocumentNumber === "string" ? extra.historicalDocumentNumber : "",
     selectedAuthorizedPerson: typeof firmData.authorizedPerson === "string" && firmData.authorizedPerson
       ? firmData.authorizedPerson
       : typeof authorizedPersons[0] === "string"

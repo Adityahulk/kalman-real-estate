@@ -180,7 +180,19 @@ export function OwnershipPlotRow({
             <Map size={14} />
           </button>
           {document ? (
-            <button className="btn-outline h-8 w-8 px-0 text-slate-600" type="button" title="Open letter" aria-label="Open letter" onClick={() => router.push(`${href}/letters/${document.id}`)}>
+            <button
+              className="btn-outline h-8 w-8 px-0 text-slate-600"
+              type="button"
+              title={viewFileAssetId ? "View latest letter" : "Open letter draft"}
+              aria-label={viewFileAssetId ? "View latest letter" : "Open letter draft"}
+              onClick={() => {
+                if (viewFileAssetId) {
+                  globalThis.window.open(`/api/v1/files/${viewFileAssetId}/download?disposition=inline&proxy=1`, "_blank", "noopener,noreferrer");
+                  return;
+                }
+                router.push(`${href}/letters/${document.id}`);
+              }}
+            >
               <FileText size={14} />
             </button>
           ) : null}
