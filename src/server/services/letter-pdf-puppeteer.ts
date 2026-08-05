@@ -20,11 +20,15 @@ const LETTER_PRINT_CSS = `
   .letter-paper-editor section[data-ambey-page],
   .letter-paper-editor section[data-letter-page] {
     width: 860px !important;
+    height: 1216px !important;
+    min-height: 1216px !important;
     max-width: none !important;
     margin: 0 !important;
-    border: 0 !important;
+    /* Keep the editor's one-pixel box model without printing its grey outline. This makes the
+       printable content boundary byte-for-byte equivalent to both visual editors. */
+    border: 1px solid transparent !important;
     box-shadow: none !important;
-    overflow: visible;
+    overflow: hidden;
     break-after: page;
     page-break-after: always;
   }
@@ -125,8 +129,12 @@ function launchOptions(): LaunchOptions {
 // leaves renderOnce hanging forever — and because renders are serialized, the whole queue deadlocks.
 const RENDER_DEADLINE_MS = 60_000;
 const EDITOR_PAGE_WIDTH_PX = 860;
+const EDITOR_PAGE_HEIGHT_PX = 1216;
 const A4_WIDTH_MM = 210;
 const A4_HEIGHT_MM = 297;
+const POINTS_PER_MM = 72 / 25.4;
+const A4_WIDTH_PT = A4_WIDTH_MM * POINTS_PER_MM;
+const A4_HEIGHT_PT = A4_HEIGHT_MM * POINTS_PER_MM;
 const CSS_PX_TO_MM = 25.4 / 96;
 const A4_RENDER_SCALE = A4_WIDTH_MM / (EDITOR_PAGE_WIDTH_PX * CSS_PX_TO_MM);
 
@@ -199,23 +207,60 @@ async function renderWithBrowser(browser: Browser, bodyHtml: string): Promise<Bu
         })),
     ));
 
-    // Repaginate the agreement exactly like the on-screen editor: re-pack the agreement block
-    // stream into full A4 pages so no sheet is left sparse. Injecting the editor's own reflow
-    // function guarantees the PDF breaks at the same points as the draft the user approved.
-    await page.evaluate(
-      `${reflowPagesBrowserSource}(document.querySelector(".letter-paper-editor"), { pageHeight: 1216 })`,
-    );
-
-    // Each <section> is one editor sheet. Measure the final reflowed section set, then render each
-    // on fixed physical A4 paper; Chromium adds another A4 sheet if a user-created block still
-    // exceeds one canvas instead of silently creating a non-standard oversized PDF page.
-    const heights = await page.evaluate(() => {
+    // Each <section> is one editor sheet. The editor already repaginates while the user works, so
+    // rendering must preserve those saved sheets exactly. Repacking here can make the PDF drift from
+    // the approved draft, for example showing 13 downloaded pages for a 16-page editor draft.
+    const measureSections = () => page.evaluate(() => {
       const sections = Array.from(document.querySelectorAll<HTMLElement>("section[data-ambey-page], section[data-letter-page]"));
-      return sections.map((el) => Math.ceil(el.getBoundingClientRect().height));
+      return sections.map((el, index) => {
+        const pageRect = el.getBoundingClientRect();
+        const paddingBottom = Number.parseFloat(getComputedStyle(el).paddingBottom) || 0;
+        const children = Array.from(el.children).map((child) => {
+          const rect = child.getBoundingClientRect();
+          const position = getComputedStyle(child).position;
+          return {
+            tag: child.tagName,
+            className: child.className,
+            outOfFlow: position === "absolute" || position === "fixed",
+            top: Math.round(rect.top - pageRect.top),
+            bottom: Math.round(rect.bottom - pageRect.top),
+          };
+        });
+        const contentBottom = children.reduce((bottom, child) => child.outOfFlow ? bottom : Math.max(bottom, child.bottom), 0);
+        return {
+          index,
+          height: Math.ceil(pageRect.height),
+          clientHeight: el.clientHeight,
+          scrollHeight: el.scrollHeight,
+          contentBottom,
+          contentLimit: Math.floor(el.clientHeight - paddingBottom),
+          children,
+        };
+      });
     });
+    let sections = await measureSections();
+    const sectionOverflows = (section: (typeof sections)[number]) => section.contentBottom > section.contentLimit + 1;
+
+    // Preserve every valid saved sheet exactly. Only legacy/stale drafts with real overflow are
+    // normalized, using the same paginator as both browser editors. This repairs direct API saves and
+    // old drafts without re-packing intentional blank/manual pages that already fit on A4.
+    if (sections.some(sectionOverflows)) {
+      // The visual editors reflow once immediately and again after the browser's next layout frame
+      // (fonts/images and moved blocks can alter wrapping). Mirror that settle cycle here. A single
+      // synchronous pass could move the final controls to page 6, then measure page 5 before its
+      // paragraph geometry had settled, producing a false extra-page/overflow result.
+      for (let attempt = 0; attempt < 4; attempt += 1) {
+        await page.evaluate(
+          `${reflowPagesBrowserSource}(document.querySelector(".letter-paper-editor"), { pageHeight: 1216 })`,
+        );
+        await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        sections = await measureSections();
+        if (sections.every((section) => !sectionOverflows(section))) break;
+      }
+    }
 
     // Fallback for letters that aren't section-based: let Chromium paginate the body on A4.
-    if (!heights.length) {
+    if (!sections.length) {
       const pdf = await page.pdf({
         width: `${A4_WIDTH_MM}mm`,
         height: `${A4_HEIGHT_MM}mm`,
@@ -227,32 +272,59 @@ async function renderWithBrowser(browser: Browser, bodyHtml: string): Promise<Bu
       return Buffer.from(pdf);
     }
 
-    // Render each section independently on A4. These calls are sequential, so peak Chromium
-    // memory is ~one section, not the whole document. (Rendering
-    // the full stacked document in one giant page.pdf() call actually uses MORE peak memory and is
-    // what OOM-crashed on the small server.)
-    const pages: Buffer[] = [];
-    for (let i = 0; i < heights.length; i++) {
+    const overflowing = sections.find(sectionOverflows);
+    if (overflowing) {
+      console.error("[letter-pdf] A4 layout overflow", JSON.stringify({
+        page: overflowing.index + 1,
+        pageCount: sections.length,
+        clientHeight: overflowing.clientHeight,
+        scrollHeight: overflowing.scrollHeight,
+        contentBottom: overflowing.contentBottom,
+        contentLimit: overflowing.contentLimit,
+        children: overflowing.children,
+      }));
+      throw new Error(
+        `A4 layout overflow on editor page ${overflowing.index + 1} `
+          + `(content reaches ${overflowing.contentBottom}px; printable limit ${overflowing.contentLimit}px). `
+          + "Return to Edit Draft, let the pages finish arranging, and generate the PDF again.",
+      );
+    }
+
+    // Render each editor section at its native 860x1216 CSS-pixel canvas. Chromium calculates print
+    // pagination before applying page.pdf's scale option; asking it to print directly on 210x297mm
+    // could therefore split one otherwise valid editor sheet into two pages. We keep the native
+    // vector page here, then scale that vector page to physical A4 with pdf-lib below.
+    const merged = await PDFDocument.create();
+    for (let i = 0; i < sections.length; i++) {
       await page.evaluate((visibleIndex) => {
         const sections = Array.from(document.querySelectorAll<HTMLElement>("section[data-ambey-page], section[data-letter-page]"));
-        sections.forEach((el, index) => { el.style.display = index === visibleIndex ? "" : "none"; });
+        sections.forEach((el, index) => {
+          el.style.display = index === visibleIndex ? "" : "none";
+          if (index === visibleIndex) {
+            el.style.setProperty("break-after", "auto", "important");
+            el.style.setProperty("page-break-after", "auto", "important");
+          }
+        });
       }, i);
       const pdf = await page.pdf({
-        width: `${A4_WIDTH_MM}mm`,
-        height: `${A4_HEIGHT_MM}mm`,
-        scale: A4_RENDER_SCALE,
+        width: `${EDITOR_PAGE_WIDTH_PX}px`,
+        height: `${EDITOR_PAGE_HEIGHT_PX}px`,
+        scale: 1,
         printBackground: true,
         preferCSSPageSize: false,
         margin: { top: "0", right: "0", bottom: "0", left: "0" },
       });
-      pages.push(Buffer.from(pdf));
-    }
-
-    const merged = await PDFDocument.create();
-    for (const buffer of pages) {
-      const doc = await PDFDocument.load(buffer);
-      const copied = await merged.copyPages(doc, doc.getPageIndices());
-      for (const copiedPage of copied) merged.addPage(copiedPage);
+      const sectionPdf = Buffer.from(pdf);
+      const sectionDocument = await PDFDocument.load(sectionPdf);
+      if (sectionDocument.getPageCount() !== 1) {
+        throw new Error(
+          `A4 layout overflow on editor page ${i + 1}: Chromium produced `
+            + `${sectionDocument.getPageCount()} physical pages for one editor sheet.`,
+        );
+      }
+      const embedded = await merged.embedPage(sectionDocument.getPage(0));
+      const a4Page = merged.addPage([A4_WIDTH_PT, A4_HEIGHT_PT]);
+      a4Page.drawPage(embedded, { x: 0, y: 0, width: A4_WIDTH_PT, height: A4_HEIGHT_PT });
     }
     return Buffer.from(await merged.save());
 }

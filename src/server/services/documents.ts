@@ -1098,7 +1098,9 @@ async function buildSupportingDocumentPages(tenantId: string, plotId: string, ow
     orderBy: { createdAt: "asc" },
   });
 
-  // Build attachment blocks, then pack several per page instead of one image per page.
+  // A supporting image owns one physical A4 sheet. Packing multiple natural-size scans into a
+  // single editor section lets that section grow past A4 and makes Chromium add hidden pages that
+  // the editor never showed.
   const blocks: string[] = [];
   for (const file of files) {
     if (!file.mimeType.startsWith("image/")) continue;
@@ -1112,11 +1114,11 @@ async function buildSupportingDocumentPages(tenantId: string, plotId: string, ow
   }
   if (!blocks.length) return [];
 
-  const perPage = 3;
+  const perPage = 1;
   const pages: string[] = [];
   for (let i = 0; i < blocks.length; i += perPage) {
     const heading = i === 0 ? "<h2>Supporting documents</h2>" : "";
-    pages.push(`<section data-letter-page="0">${heading}${blocks.slice(i, i + perPage).join("")}</section>`);
+    pages.push(`<section data-letter-page="0" class="supporting-document-page">${heading}${blocks.slice(i, i + perPage).join("")}</section>`);
   }
   return pages;
 }
@@ -1162,11 +1164,11 @@ async function buildSupportingDocumentPagesLight(
     }
   }
   if (!blocks.length) return [];
-  const perPage = 3;
+  const perPage = 1;
   const pages: string[] = [];
   for (let i = 0; i < blocks.length; i += perPage) {
     const heading = i === 0 ? "<h2>Supporting documents</h2>" : "";
-    pages.push(`<section data-letter-page="0">${heading}${blocks.slice(i, i + perPage).join("")}</section>`);
+    pages.push(`<section data-letter-page="0" class="supporting-document-page">${heading}${blocks.slice(i, i + perPage).join("")}</section>`);
   }
   return pages;
 }

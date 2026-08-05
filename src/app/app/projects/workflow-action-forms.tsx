@@ -1168,8 +1168,10 @@ export function LetterStudioEditor({
   }
 
   function format(command: "bold" | "italic" | "underline") {
-    editorRef.current?.focus();
+    const editor = editorRef.current;
+    editor?.focus();
     globalThis.document.execCommand(command);
+    if (editor) reflowPages(editor);
     setDirty(true);
   }
 
@@ -1197,6 +1199,7 @@ export function LetterStudioEditor({
       while (node.firstChild) span.appendChild(node.firstChild);
       node.replaceWith(span);
     });
+    reflowPages(editor);
     setDirty(true);
   }
 
@@ -1224,10 +1227,16 @@ export function LetterStudioEditor({
       while (node.firstChild) span.appendChild(node.firstChild);
       node.replaceWith(span);
     });
+    reflowPages(editor);
     setDirty(true);
   }
 
   function draftPayload() {
+    const editor = editorRef.current;
+    // Saving and rendering must capture the same, fully paginated DOM the user sees. This synchronous
+    // pass closes the 400ms typing debounce window, which previously allowed an overflowing 13-sheet
+    // draft to be saved and then printed by Chromium as 14 physical pages.
+    if (editor) reflowPages(editor);
     return { editableHtml: currentHtml() };
   }
 
@@ -1614,10 +1623,31 @@ function LetterDraftCanvas({
 
   useEffect(() => {
     if (!editorRef.current) return;
-    editorRef.current.innerHTML = draftHtml;
-    normalizeEditableTemplateFields(editorRef.current);
-    // Pack the agreement pages on load so the editor matches the generated PDF immediately.
-    reflowPages(editorRef.current);
+    const editor = editorRef.current;
+    editor.innerHTML = draftHtml;
+    normalizeEditableTemplateFields(editor);
+
+    const refreshLayout = () => {
+      if (editor.isConnected && editorRef.current === editor) reflowPages(editor);
+    };
+    // Pack immediately, then repeat once browser fonts and inline supporting images have their final
+    // dimensions. Without the asset passes, image-heavy drafts can become taller after pagination.
+    refreshLayout();
+    const frame = globalThis.requestAnimationFrame(refreshLayout);
+    const pendingImages = [...editor.querySelectorAll<HTMLImageElement>("img")].filter((image) => !image.complete);
+    pendingImages.forEach((image) => {
+      image.addEventListener("load", refreshLayout);
+      image.addEventListener("error", refreshLayout);
+    });
+    void globalThis.document.fonts?.ready.then(refreshLayout);
+
+    return () => {
+      globalThis.cancelAnimationFrame(frame);
+      pendingImages.forEach((image) => {
+        image.removeEventListener("load", refreshLayout);
+        image.removeEventListener("error", refreshLayout);
+      });
+    };
   }, [draftHtml, editorRef]);
 
   useEffect(() => () => {
@@ -1657,7 +1687,7 @@ function LetterDraftCanvas({
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-slate-200/70 p-3 shadow-inner md:p-6">
+    <section className="overflow-auto rounded-2xl border border-slate-200 bg-slate-200/70 p-3 shadow-inner md:p-6">
       <div
         ref={editorRef}
         contentEditable
