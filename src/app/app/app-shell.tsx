@@ -22,7 +22,7 @@ import {
   ShieldCheck,
   Users,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { requestJson } from "@/lib/api-client";
 import { clearSessionToken } from "@/lib/native";
@@ -152,6 +152,18 @@ export function AppShell({
     window.localStorage.setItem("kalman-selected-project-id", projectId);
     setFallbackProjectId(projectId);
     router.push(`/app/projects/${projectId}`);
+  }
+
+  async function signOut(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      await fetch("/api/v1/auth/logout", { method: "POST", credentials: "include" });
+    } finally {
+      await clearSessionToken();
+      // Replace the protected route explicitly. This is reliable in Electron as well as the
+      // browser and prevents the old app shell from being left on screen after logout.
+      window.location.replace("/login");
+    }
   }
 
   async function switchFirm(tenantId: string) {
@@ -344,7 +356,7 @@ export function AppShell({
             {collapsed ? <ChevronRight size={17} /> : <ChevronLeft size={17} />}
             {!collapsed ? "Collapse" : null}
           </button>
-          <form action="/api/v1/auth/logout" method="post" onSubmit={() => void clearSessionToken()}>
+          <form onSubmit={(event) => void signOut(event)}>
             <button className={`btn-ghost h-9 w-full px-2 ${collapsed ? "justify-center" : "justify-start"}`}>
               <LogOut size={17} />
               {!collapsed ? "Sign out" : null}
