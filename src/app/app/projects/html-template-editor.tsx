@@ -245,6 +245,7 @@ export function HtmlTemplateEditor({
   useEffect(() => {
     // Make Enter insert a clean <p> instead of a <div> so spacing stays consistent.
     try { globalThis.document.execCommand("defaultParagraphSeparator", false, "p"); } catch {}
+    void globalThis.document.fonts?.ready.then(() => prepareEditorSurface());
   }, []);
 
   useEffect(() => {

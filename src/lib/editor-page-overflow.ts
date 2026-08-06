@@ -91,7 +91,9 @@ export const reflowPagesBrowserSource = `(function (rootOrSelector, opts) {
       target.textContent = splitWords(fullText, mid).head;
       if (pageFits(page)) { best = mid; low = mid + 1; } else { high = mid - 1; }
     }
-    if (best < 6 || best >= all.count) { target.textContent = fullText; return null; }
+    // Do not carry only a few words onto a nearly blank sheet. Word keeps a useful paragraph tail
+    // together; matching that behavior also keeps browser and headless-PDF pagination consistent.
+    if (best < 6 || best >= all.count || all.count - best < 24) { target.textContent = fullText; return null; }
     var finalParts = splitWords(fullText, best);
     target.textContent = finalParts.head;
     return textRemainderElement(remainderClass, finalParts.tail);
@@ -156,8 +158,8 @@ export const reflowPagesBrowserSource = `(function (rootOrSelector, opts) {
       // that single sign-off on its intended first page instead of creating a nearly blank sheet.
       if (overflow.length === 1 && overflow[0].classList && overflow[0].classList.contains("first-page-signoff")) {
         overflow[0].style.position = "absolute";
-        overflow[0].style.right = "72px";
-        overflow[0].style.bottom = "60px";
+        overflow[0].style.right = "104px";
+        overflow[0].style.bottom = "112px";
         overflow[0].style.margin = "0";
         continue;
       }
@@ -206,6 +208,17 @@ export const reflowPagesBrowserSource = `(function (rootOrSelector, opts) {
     var current = first;
     for (var s = 0; s < stream.length; s++) {
       var block = stream[s];
+      // The signed Word reference contains a few intentional page transitions even when the
+      // preceding sheet has spare room. Preserve those legal-document boundaries; normal overflow
+      // still pushes dynamic content forward around them.
+      var referenceText = String(block.textContent || "").replace(/\\s+/g, " ").trim();
+      var isReferenceBreak = block.classList && block.classList.contains("reference-page-break")
+        || /^AND\\s*WHEREAS\\s*The\\s*Firm\\s*by\\s*virtue/i.test(referenceText)
+        || /^DETAILS\\s*OF\\s*PRICING\\s*:/i.test(referenceText)
+        || /^6\\s*\\.\\s*ESSENCE\\s*OF\\s*THE\\s*AGREEMENT/i.test(referenceText);
+      if (isReferenceBreak && contentKids(current).length) {
+        current = createAfter(current);
+      }
       // The signed joint-allotment reference dedicates its final sheet to execution/signatures.
       // Preserve that legal-document boundary instead of packing the closing block beneath the
       // last agreement clause merely because a shorter heading freed a few lines.

@@ -64,6 +64,7 @@ async function request(path, init = {}) {
     "border-collapse: collapse",
     "max-width: 100%",
     "font-size: 17.3px",
+    'font-family: "WideState Calibri"',
     "color: #111827 !important",
     ".letter-paper-editor .transfer-recipient-table",
   ]) {
