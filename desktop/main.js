@@ -87,9 +87,11 @@ function createWindow() {
 
   loadApp();
 
-  // Open target=_blank / window.open and any off-origin navigation in the user's real browser
-  // (WhatsApp share links, mailto, external docs) rather than trapping them in the app.
+  // Keep same-site popups (notably authenticated PDF previews) inside Electron. Sending those
+  // links to the system browser loses this window's httpOnly session cookie, so protected file
+  // endpoints would return "Unauthenticated". External destinations still use the real browser.
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (new URL(url).origin === appOrigin) return { action: "allow" };
     void shell.openExternal(url);
     return { action: "deny" };
   });
