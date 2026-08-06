@@ -95,6 +95,15 @@ type InitialAllotmentData = {
   name: string;
   address: string;
   phone: string;
+  jointAllottee?: {
+    name: string;
+    fatherName: string;
+    address: string;
+    aadhaarNo: string;
+    panNo: string;
+    mobileNo: string;
+    share: string;
+  };
   allotmentNumber?: string;
   selectedAuthorizedPerson: string;
   signatoryRelation?: string;
@@ -228,6 +237,7 @@ export function ProjectAllotmentFlow({
   defaultPlotId,
   manualLetterFields = [],
   initialData,
+  historicalImport,
 }: {
   projectId: string;
   plots: PlotOption[];
@@ -235,6 +245,7 @@ export function ProjectAllotmentFlow({
   defaultPlotId?: string;
   manualLetterFields?: ManualLetterField[];
   initialData?: InitialAllotmentData;
+  historicalImport?: { fileAssetId: string; documentNumber: string; documentDate: string };
 }) {
   const router = useRouter();
   const [plotId, setPlotId] = useState(defaultPlotId && plots.some((plot) => plot.id === defaultPlotId) ? defaultPlotId : "");
@@ -243,7 +254,7 @@ export function ProjectAllotmentFlow({
   const [phone, setPhone] = useState(initialData?.phone ?? "");
   // Joint (partnership) allotment: optional second allottee. When a name is entered the letter
   // draft switches to the two-allottee template and these values fill the owner2.* fields.
-  const [jointAllottee, setJointAllottee] = useState({
+  const [jointAllottee, setJointAllottee] = useState(initialData?.jointAllottee ?? {
     name: "",
     fatherName: "",
     address: "",
@@ -256,8 +267,8 @@ export function ProjectAllotmentFlow({
     initialData?.allotteeDocuments?.length ? initialData.allotteeDocuments : [{ kind: "Aadhaar", number: "", files: [], uploadedFiles: [] }],
   );
   const [selectedAuthorizedPerson, setSelectedAuthorizedPerson] = useState(initialData?.selectedAuthorizedPerson ?? firm.authorizedPersons[0] ?? "");
-  const [allotmentNumber, setAllotmentNumber] = useState(initialData?.allotmentNumber ?? "");
-  const [allotmentNumberEdited, setAllotmentNumberEdited] = useState(Boolean(initialData?.allotmentNumber));
+  const [allotmentNumber, setAllotmentNumber] = useState(initialData?.allotmentNumber ?? historicalImport?.documentNumber ?? "");
+  const [allotmentNumberEdited, setAllotmentNumberEdited] = useState(Boolean(initialData?.allotmentNumber || historicalImport?.documentNumber));
   const [signatoryRelation, setSignatoryRelation] = useState(initialData?.signatoryRelation ?? "");
   const [authorizationDate, setAuthorizationDate] = useState(initialData?.authorizationDate ?? "");
   const [totalAreaPrice, setTotalAreaPrice] = useState(initialData?.totalAreaPrice ?? "");
@@ -267,7 +278,7 @@ export function ProjectAllotmentFlow({
   const [paymentEntries, setPaymentEntries] = useState<PaymentEntry[]>(
     initialData?.paymentEntries?.length ? initialData.paymentEntries.map((entry) => ({ ...entry, mode: normalizePaymentMode(entry.mode) })) : [{ mode: "Cheque", amount: "", reference: "", files: [], uploadedFiles: [] }],
   );
-  const [effectiveAt, setEffectiveAt] = useState(initialData?.effectiveAt ?? new Date().toISOString().slice(0, 10));
+  const [effectiveAt, setEffectiveAt] = useState(initialData?.effectiveAt ?? historicalImport?.documentDate ?? new Date().toISOString().slice(0, 10));
   const [stamps, setStamps] = useState<StampEntry[]>(initialData?.stamps?.length ? initialData.stamps : [
     { number: "", dated: new Date().toISOString().slice(0, 10) },
     { number: "", dated: new Date().toISOString().slice(0, 10) },
@@ -309,7 +320,7 @@ export function ProjectAllotmentFlow({
     if (!new URLSearchParams(window.location.search).has("restore")) return;
     try {
       const saved = JSON.parse(window.sessionStorage.getItem(restoreKey) ?? "{}") as Partial<{
-        plotId: string; name: string; address: string; phone: string; allotmentNumber: string; selectedAuthorizedPerson: string; signatoryRelation: string; authorizationDate: string; totalAreaPrice: string; perUnitPrice: string;
+        plotId: string; name: string; address: string; phone: string; jointAllottee: InitialAllotmentData["jointAllottee"]; allotmentNumber: string; selectedAuthorizedPerson: string; signatoryRelation: string; authorizationDate: string; totalAreaPrice: string; perUnitPrice: string;
         paymentEntries: Array<Pick<PaymentEntry, "mode" | "amount" | "reference" | "date" | "bank" | "uploadedFiles">>;
         effectiveAt: string; stamps: StampEntry[]; witnesses: WitnessEntry[]; allotteeDocuments: Array<Pick<AllotteeDocumentEntry, "kind" | "number" | "uploadedFiles">>;
         extraFields: AdditionalFieldEntry[]; letterFields: Record<string, string>; letterFieldUploadedFiles: Record<string, StoredFileRef[]>;
@@ -318,6 +329,7 @@ export function ProjectAllotmentFlow({
       if (saved.name) setName(saved.name);
       if (saved.address) setAddress(saved.address);
       if (saved.phone) setPhone(saved.phone);
+      if (saved.jointAllottee) setJointAllottee(saved.jointAllottee);
       if (saved.allotmentNumber) { setAllotmentNumber(saved.allotmentNumber); setAllotmentNumberEdited(true); }
       if (saved.selectedAuthorizedPerson) setSelectedAuthorizedPerson(saved.selectedAuthorizedPerson);
       if (saved.signatoryRelation) setSignatoryRelation(saved.signatoryRelation);
@@ -353,6 +365,7 @@ export function ProjectAllotmentFlow({
       name,
       address,
       phone,
+      jointAllottee,
       allotmentNumber,
       selectedAuthorizedPerson,
       signatoryRelation,
@@ -491,81 +504,101 @@ export function ProjectAllotmentFlow({
           .filter(([, files]) => (files as Array<unknown>).length),
       );
 
-      const allotMethod = selectedPlot?.currentOwnerId ? "PATCH" : "POST";
-      const response = await fetch(`/api/v1/ownership/plots/${plotId}/allot`, {
-        method: allotMethod,
+      const extraDetails = {
+        plot: selectedPlot ? {
+          code: selectedPlot.code,
+          areaSqYards: selectedPlot.areaSqYards,
+          areaSqft: selectedPlot.areaSqft,
+          dimensions: selectedPlot.dimensions,
+          boundaries: selectedPlot.boundaries,
+          oldCode: oldPlotCode || undefined,
+          newCode: newPlotCode || undefined,
+        } : undefined,
+        allottee: {
+          name,
+          address: address || undefined,
+          phone: phone || undefined,
+          documents: mergedAllotteeDocuments,
+        },
+        secondAllottee: jointAllottee.name
+          ? {
+              name: jointAllottee.name,
+              fatherName: jointAllottee.fatherName || undefined,
+              address: jointAllottee.address || undefined,
+              aadhaarNo: jointAllottee.aadhaarNo || undefined,
+              panNo: jointAllottee.panNo || undefined,
+              mobileNo: jointAllottee.mobileNo || undefined,
+              share: jointAllottee.share || undefined,
+            }
+          : undefined,
+        firm: {
+          name: firm.name,
+          phone: firm.contactPhone || undefined,
+          address: firm.address || undefined,
+          authorizedPerson: selectedAuthorizedPerson || undefined,
+          signatoryRelation: signatoryRelation || undefined,
+          authorizationDate: authorizationDate || undefined,
+        },
+        pricing: {
+          type: "TOTAL_AND_PER_UNIT",
+          totalAreaPrice: totalAreaPrice ? Number(totalAreaPrice) : undefined,
+          perUnitPrice: perUnitPrice ? Number(perUnitPrice) : undefined,
+          unit: "square yard",
+          calculatedPrice,
+        },
+        payments: mergedPaymentEntries,
+        eStampNumber: stamps.find((entry) => entry.number)?.number || undefined,
+        eStampDate: stamps.find((entry) => entry.dated)?.dated || undefined,
+        witnessDetails: witnesses.filter((entry) => entry.name).map((entry) => entry.name).join(", ") || undefined,
+        stamps: stamps.filter((entry) => entry.number || entry.dated),
+        witnesses: witnesses.filter((entry) => entry.name || entry.phone || entry.address).map((entry) => ({
+          name: entry.name || undefined,
+          phone: entry.phone || undefined,
+          address: entry.address || undefined,
+        })),
+        customLetterFields: letterFields,
+        customLetterFiles: Object.fromEntries(Object.entries(mergedManualLetterFiles)),
+        additionalFields: mergedAdditionalFields,
+        customFields: Object.fromEntries(mergedAdditionalFields.filter((field) => field.inputType === "TEXT").map((field) => [field.label, field.value ?? ""])),
+      };
+      const commonOwnershipPayload = {
+        ownerId,
+        amountInr: calculatedPrice || undefined,
+        sharePct: 100,
+        paymentMode: paymentEntries.map((entry) => entry.mode).filter((mode, index, modes) => modes.indexOf(mode) === index).join(", ") || undefined,
+        effectiveAt: effectiveAt ? new Date(effectiveAt).toISOString() : undefined,
+        extraDetails,
+      };
+      const response = await fetch(
+        historicalImport
+          ? `/api/v1/ownership/plots/${plotId}/historical-allotment`
+          : `/api/v1/ownership/plots/${plotId}/allot`,
+        {
+        method: historicalImport ? "POST" : selectedPlot?.currentOwnerId ? "PATCH" : "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          ownerId,
-          amountInr: calculatedPrice || undefined,
-          sharePct: 100,
-          paymentMode: paymentEntries.map((entry) => entry.mode).filter((mode, index, modes) => modes.indexOf(mode) === index).join(", ") || undefined,
-          effectiveAt: effectiveAt ? new Date(effectiveAt).toISOString() : undefined,
-          extraDetails: {
-            plot: selectedPlot ? {
-              code: selectedPlot.code,
-              areaSqYards: selectedPlot.areaSqYards,
-              areaSqft: selectedPlot.areaSqft,
-              dimensions: selectedPlot.dimensions,
-              boundaries: selectedPlot.boundaries,
-              oldCode: oldPlotCode || undefined,
-              newCode: newPlotCode || undefined,
-            } : undefined,
-            allottee: {
+        body: JSON.stringify(historicalImport
+          ? {
+              ...commonOwnershipPayload,
+              type: "INDIVIDUAL",
               name,
-              address: address || undefined,
               phone: phone || undefined,
-              documents: mergedAllotteeDocuments,
-            },
-            secondAllottee: jointAllottee.name
-              ? {
-                  name: jointAllottee.name,
-                  fatherName: jointAllottee.fatherName || undefined,
-                  address: jointAllottee.address || undefined,
-                  aadhaarNo: jointAllottee.aadhaarNo || undefined,
-                  panNo: jointAllottee.panNo || undefined,
-                  mobileNo: jointAllottee.mobileNo || undefined,
-                  share: jointAllottee.share || undefined,
-                }
-              : undefined,
-            firm: {
-              name: firm.name,
-              phone: firm.contactPhone || undefined,
-              address: firm.address || undefined,
-              authorizedPerson: selectedAuthorizedPerson || undefined,
-              signatoryRelation: signatoryRelation || undefined,
-              authorizationDate: authorizationDate || undefined,
-            },
-            pricing: {
-              type: "TOTAL_AND_PER_UNIT",
-              totalAreaPrice: totalAreaPrice ? Number(totalAreaPrice) : undefined,
-              perUnitPrice: perUnitPrice ? Number(perUnitPrice) : undefined,
-              unit: "square yard",
-              calculatedPrice,
-            },
-            payments: mergedPaymentEntries,
-            eStampNumber: stamps.find((entry) => entry.number)?.number || undefined,
-            eStampDate: stamps.find((entry) => entry.dated)?.dated || undefined,
-            witnessDetails: witnesses.filter((entry) => entry.name).map((entry) => entry.name).join(", ") || undefined,
-            stamps: stamps.filter((entry) => entry.number || entry.dated),
-            witnesses: witnesses.filter((entry) => entry.name || entry.phone || entry.address).map((entry) => ({
-              name: entry.name || undefined,
-              phone: entry.phone || undefined,
-              address: entry.address || undefined,
-            })),
-            customLetterFields: letterFields,
-            customLetterFiles: Object.fromEntries(
-              Object.entries(mergedManualLetterFiles),
-            ),
-            additionalFields: mergedAdditionalFields,
-            customFields: Object.fromEntries(mergedAdditionalFields.filter((field) => field.inputType === "TEXT").map((field) => [field.label, field.value ?? ""])),
-          },
-        }),
+              address: address || undefined,
+              fileAssetId: historicalImport.fileAssetId,
+              documentNumber: allotmentNumber || historicalImport.documentNumber || undefined,
+            }
+          : commonOwnershipPayload),
       });
       const body = await response.json();
       if (!response.ok) {
         setLoading(false);
         setMessage(body.error ?? "Allotment failed");
+        return;
+      }
+      if (historicalImport) {
+        setLoading(false);
+        if (typeof window !== "undefined") window.sessionStorage.removeItem(restoreKey);
+        router.push(`/app/projects/${projectId}/plots/${plotId}?tab=documents`);
+        router.refresh();
         return;
       }
       const draftResponse = await fetch("/api/v1/documents/drafts", {
@@ -623,6 +656,16 @@ export function ProjectAllotmentFlow({
 
   return (
     <form onSubmit={submit} className="grid gap-4">
+      {historicalImport ? (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          <div className="font-semibold">Setting up an imported signed allotment</div>
+          <p className="mt-1 text-xs leading-5 text-blue-800">
+            {initialData
+              ? "The owner and previously saved details are already filled below. Add the missing details, then save to complete the allotment setup."
+              : "Complete every available detail below. Saving marks the uploaded letter as signed, moves this plot to allotted inventory, and enables the next transfer workflow."}
+          </p>
+        </div>
+      ) : null}
       <FormSection number="1" title="Plot details">
         <div className="flex items-end gap-3">
           <label className="flex-1">
@@ -864,7 +907,7 @@ export function ProjectAllotmentFlow({
       <div className="flex flex-wrap gap-2">
         <button className="btn-primary" disabled={loading || !plotId || !name}>
           {loading ? <Loader2 className="animate-spin" size={17} /> : <Send size={17} />}
-          {initialData ? "Update allotment and open letter" : "Record allotment"}
+          {historicalImport ? "Save imported allotment" : initialData ? "Update allotment and open letter" : "Record allotment"}
         </button>
       </div>
     </form>
@@ -1125,8 +1168,10 @@ export function LetterStudioEditor({
   }
 
   function format(command: "bold" | "italic" | "underline") {
-    editorRef.current?.focus();
+    const editor = editorRef.current;
+    editor?.focus();
     globalThis.document.execCommand(command);
+    if (editor) reflowPages(editor);
     setDirty(true);
   }
 
@@ -1154,6 +1199,7 @@ export function LetterStudioEditor({
       while (node.firstChild) span.appendChild(node.firstChild);
       node.replaceWith(span);
     });
+    reflowPages(editor);
     setDirty(true);
   }
 
@@ -1181,10 +1227,16 @@ export function LetterStudioEditor({
       while (node.firstChild) span.appendChild(node.firstChild);
       node.replaceWith(span);
     });
+    reflowPages(editor);
     setDirty(true);
   }
 
   function draftPayload() {
+    const editor = editorRef.current;
+    // Saving and rendering must capture the same, fully paginated DOM the user sees. This synchronous
+    // pass closes the 400ms typing debounce window, which previously allowed an overflowing 13-sheet
+    // draft to be saved and then printed by Chromium as 14 physical pages.
+    if (editor) reflowPages(editor);
     return { editableHtml: currentHtml() };
   }
 
@@ -1320,7 +1372,9 @@ export function LetterStudioEditor({
   const showApprovalDecision = permissions.approve && status === "SUBMITTED";
   const awaitingSignature = status === "SENT_FOR_SIGNATURE" || status === "APPROVED";
   const showSignControls = permissions.sign && awaitingSignature;
-  const canUploadSignedLetter = Boolean(signedUploadPlotId && fileAssetId && letter.type.includes("allotment") && showSignControls);
+  const isTransferOwnershipLetter = letter.type.toLowerCase().includes("transfer");
+  const isOwnershipLetter = letter.type.toLowerCase().includes("allotment") || isTransferOwnershipLetter;
+  const canUploadSignedLetter = Boolean(signedUploadPlotId && fileAssetId && isOwnershipLetter && showSignControls);
 
   return (
     <div className="min-h-[calc(100vh-4rem)] bg-slate-100">
@@ -1452,10 +1506,10 @@ export function LetterStudioEditor({
                     visibility="OWNER_VISIBLE"
                     accept="application/pdf,image/*"
                     metadata={{
-                      categoryKey: "signed-allotment-letter",
-                      documentType: "ALLOTMENT_LETTER",
+                      categoryKey: isTransferOwnershipLetter ? "signed-transfer-letter" : "signed-allotment-letter",
+                      documentType: isTransferOwnershipLetter ? "TRANSFER_LETTER" : "ALLOTMENT_LETTER",
                       documentNo: letter.number ?? undefined,
-                      notes: "Signed version of allotment letter",
+                      notes: `Signed version of ${isTransferOwnershipLetter ? "transfer" : "allotment"} letter`,
                     }}
                     onUploaded={(file) => void signLetter(file.id)}
                   />
@@ -1569,10 +1623,31 @@ function LetterDraftCanvas({
 
   useEffect(() => {
     if (!editorRef.current) return;
-    editorRef.current.innerHTML = draftHtml;
-    normalizeEditableTemplateFields(editorRef.current);
-    // Pack the agreement pages on load so the editor matches the generated PDF immediately.
-    reflowPages(editorRef.current);
+    const editor = editorRef.current;
+    editor.innerHTML = draftHtml;
+    normalizeEditableTemplateFields(editor);
+
+    const refreshLayout = () => {
+      if (editor.isConnected && editorRef.current === editor) reflowPages(editor);
+    };
+    // Pack immediately, then repeat once browser fonts and inline supporting images have their final
+    // dimensions. Without the asset passes, image-heavy drafts can become taller after pagination.
+    refreshLayout();
+    const frame = globalThis.requestAnimationFrame(refreshLayout);
+    const pendingImages = [...editor.querySelectorAll<HTMLImageElement>("img")].filter((image) => !image.complete);
+    pendingImages.forEach((image) => {
+      image.addEventListener("load", refreshLayout);
+      image.addEventListener("error", refreshLayout);
+    });
+    void globalThis.document.fonts?.ready.then(refreshLayout);
+
+    return () => {
+      globalThis.cancelAnimationFrame(frame);
+      pendingImages.forEach((image) => {
+        image.removeEventListener("load", refreshLayout);
+        image.removeEventListener("error", refreshLayout);
+      });
+    };
   }, [draftHtml, editorRef]);
 
   useEffect(() => () => {
@@ -1612,7 +1687,7 @@ function LetterDraftCanvas({
   }
 
   return (
-    <section className="rounded-2xl border border-slate-200 bg-slate-200/70 p-3 shadow-inner md:p-6">
+    <section className="overflow-auto rounded-2xl border border-slate-200 bg-slate-200/70 p-3 shadow-inner md:p-6">
       <div
         ref={editorRef}
         contentEditable

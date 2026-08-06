@@ -64,6 +64,8 @@ async function request(path, init = {}) {
     "border-collapse: collapse",
     "max-width: 100%",
     "font-size: 17.3px",
+    "color: #111827 !important",
+    ".letter-paper-editor .transfer-recipient-table",
   ]) {
     assert(slice.includes(needle), `print CSS slice lost parity rule: ${needle}`);
   }
@@ -314,7 +316,9 @@ await exerciseLetterType("registry_status_letter");
 
     const render = await request(`/api/v1/documents/${doc.id}/render`, { method: "POST", headers: { cookie } });
     assert(render.response.status === 200, `joint: render failed (${render.json.error ?? render.response.status})`);
-    const pdf = await pdfText(await downloadPdf(render.json.data.document.fileAssetId));
+    const jointPdfBuffer = await downloadPdf(render.json.data.document.fileAssetId);
+    await assertA4Pages(jointPdfBuffer, "joint allotment initial PDF");
+    const pdf = await pdfText(jointPdfBuffer);
     assert(pdf.pageTexts[0]?.includes("Warm Regards"), "joint: first-page sign-off spilled onto another page");
     for (const needle of [jointName, "Share", "50%", plot.code]) {
       assert(pdf.has(needle), `joint: "${needle}" missing from rendered PDF`);
@@ -331,12 +335,164 @@ await exerciseLetterType("registry_status_letter");
 }
 
 // ---------------------------------------------------------------------------
+// Approved transfer letters use the same physical-signature workflow as allotment letters.
+// The signed upload must belong to the same plot, mark the document SIGNED, and remain replaceable.
+{
+  console.log("\n■ transfer letter signed-copy workflow");
+  const document = await prisma.generatedDocument.create({
+    data: {
+      tenantId: plot.tenantId,
+      type: "transfer_letter",
+      status: "APPROVED",
+      recordType: "Plot",
+      recordId: plot.id,
+      data: {},
+      number: `SIGNED-TRANSFER-${stamp}`,
+    },
+  });
+  const createSignedFile = (suffix, ownerId = plot.id) => prisma.fileAsset.create({
+    data: {
+      tenantId: plot.tenantId,
+      storageKey: `test/${stamp}/signed-transfer-${suffix}.pdf`,
+      storageProvider: "LOCAL",
+      fileName: `signed-transfer-${suffix}.pdf`,
+      mimeType: "application/pdf",
+      sizeBytes: 1024,
+      visibility: "OWNER_VISIBLE",
+      documentType: "TRANSFER_LETTER",
+      documentNo: document.number,
+      ownerType: "Plot",
+      ownerId,
+      categoryKey: "signed-transfer-letter",
+    },
+  });
+  const wrongPlotFile = await createSignedFile("wrong-plot", "another-plot");
+  const firstSignedFile = await createSignedFile("first");
+  const replacementSignedFile = await createSignedFile("replacement");
+  try {
+    const invalid = await request(`/api/v1/documents/${document.id}/sign`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ signedFileAssetId: wrongPlotFile.id }),
+    });
+    assert(invalid.response.status === 400, "transfer signed copy: accepted a file belonging to another plot");
+
+    const signed = await request(`/api/v1/documents/${document.id}/sign`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ signedFileAssetId: firstSignedFile.id }),
+    });
+    assert(signed.response.status === 200, `transfer signed copy: upload failed (${signed.json.error ?? signed.response.status})`);
+    assert(signed.json.data.status === "SIGNED", "transfer signed copy: document was not marked SIGNED");
+    assert(signed.json.data.signedFileAssetId === firstSignedFile.id, "transfer signed copy: uploaded file was not linked");
+
+    const replaced = await request(`/api/v1/documents/${document.id}/sign`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ signedFileAssetId: replacementSignedFile.id }),
+    });
+    assert(replaced.response.status === 200, `transfer signed copy: replacement failed (${replaced.json.error ?? replaced.response.status})`);
+    assert(replaced.json.data.signedFileAssetId === replacementSignedFile.id, "transfer signed copy: replacement file was not linked");
+    console.log("  ✓ approved transfer becomes signed and its signed copy can be replaced safely");
+  } finally {
+    await prisma.auditEvent.deleteMany({ where: { entityType: "GeneratedDocument", entityId: document.id } });
+    await prisma.generatedDocument.delete({ where: { id: document.id } });
+    await prisma.fileAsset.deleteMany({ where: { id: { in: [wrongPlotFile.id, firstSignedFile.id, replacementSignedFile.id] } } });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Returning from Letter Studio and submitting revised transfer details must update the same
+// pending ownership record and refresh the same draft document. It must never create a second
+// transfer event merely because the user pressed Back to correct the form.
+{
+  console.log("\n■ transfer form draft update is idempotent");
+  const plotBefore = await prisma.plot.findUniqueOrThrow({ where: { id: plot.id } });
+  assert(plotBefore.currentOwnerId, "transfer draft update: test plot has no current owner");
+  const buyer = await request("/api/v1/ownership/owners", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify({
+      type: "INDIVIDUAL",
+      name: `Saved Transfer Buyer ${stamp}`,
+      phone: "9876501234",
+      address: "Draft House, Barnala",
+    }),
+  });
+  assert(buyer.response.status === 201, "transfer draft update: buyer creation failed");
+  const buyerId = buyer.json.data.id;
+  const countBefore = await prisma.ownershipRecord.count({
+    where: { plotId: plot.id, kind: "TRANSFER", cancelledAt: null },
+  });
+  let recordId;
+  let documentId;
+  try {
+    const recorded = await request(`/api/v1/ownership/plots/${plot.id}/transfer`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        buyerOwnerId: buyerId,
+        notes: "first saved value",
+        extraDetails: { transfer: { notes: "first saved value" } },
+      }),
+    });
+    assert(recorded.response.status === 200, `transfer draft update: initial record failed (${recorded.json.error ?? recorded.response.status})`);
+    recordId = recorded.json.data.record.id;
+
+    const drafted = await request("/api/v1/documents/drafts", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ type: "transfer_letter", recordType: "Plot", recordId: plot.id }),
+    });
+    assert(drafted.response.status === 201, "transfer draft update: initial letter failed");
+    documentId = drafted.json.data.document.id;
+
+    const updated = await request(`/api/v1/ownership/plots/${plot.id}/transfer`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        recordId,
+        buyerOwnerId: buyerId,
+        notes: "latest saved value",
+        extraDetails: { transfer: { notes: "latest saved value" } },
+      }),
+    });
+    assert(updated.response.status === 200, `transfer draft update: update failed (${updated.json.error ?? updated.response.status})`);
+    assert(updated.json.data.record.id === recordId, "transfer draft update: a second ownership record was created");
+    const countAfter = await prisma.ownershipRecord.count({
+      where: { plotId: plot.id, kind: "TRANSFER", cancelledAt: null },
+    });
+    assert(countAfter === countBefore + 1, `transfer draft update: expected one new record, found ${countAfter - countBefore}`);
+
+    const refreshed = await request(`/api/v1/documents/${documentId}/refresh`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({ data: { transferNotes: "latest saved value" } }),
+    });
+    assert(refreshed.response.status === 200, `transfer draft update: letter refresh failed (${refreshed.json.error ?? refreshed.response.status})`);
+    assert(refreshed.json.data.document.id === documentId, "transfer draft update: letter refresh created a new document");
+    assert(refreshed.json.data.document.status === "DRAFT", "transfer draft update: refreshed letter is not editable");
+    const stored = await prisma.ownershipRecord.findUniqueOrThrow({ where: { id: recordId } });
+    assert(stored.notes === "latest saved value", "transfer draft update: latest form value was not stored");
+    console.log("  ✓ revised form updates one pending transfer and one editable A4 letter");
+  } finally {
+    if (documentId) await request(`/api/v1/documents/${documentId}`, { method: "DELETE", headers: { cookie } });
+    if (recordId) await prisma.ownershipRecord.delete({ where: { id: recordId } }).catch(() => undefined);
+    await prisma.owner.delete({ where: { id: buyerId } }).catch(() => undefined);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Transfer letter seller/original-allotment wiring — the dashes in the reference .doc are now
 // auto-filled: the transferor comes from the previous ownership record and the original allotment
 // letter number/date from the plot's latest allotment document.
 {
   console.log("\n■ transfer_letter (seller + original allotment wiring)");
-  const sellerOwner = await prisma.owner.findFirstOrThrow({ where: { id: (await prisma.ownershipRecord.findFirstOrThrow({ where: { plotId: plot.id, kind: "ALLOTMENT" }, orderBy: [{ createdAt: "desc" }] })).ownerId ?? undefined } });
+  const sellerOwnership = await prisma.ownershipRecord.findFirstOrThrow({
+    where: { plotId: plot.id, kind: { in: ["TRANSFER", "ALLOTMENT"] }, ownerId: { not: null } },
+    orderBy: [{ createdAt: "desc" }, { effectiveAt: "desc" }],
+  });
+  const sellerOwner = await prisma.owner.findFirstOrThrow({ where: { id: sellerOwnership.ownerId ?? undefined } });
 
   // The "original allotment letter" reference: a live allotment draft with a number.
   const allotmentDoc = await request("/api/v1/documents/drafts", {
@@ -406,12 +562,15 @@ await exerciseLetterType("registry_status_letter");
     assert(html.includes(`Transfer Buyer TB${stamp}`), "transfer wiring: buyer name missing from draft");
     console.log("  ✓ seller, buyer, and original allotment number auto-filled");
 
-    // The signed transfer reference uses borderless recipient-detail tables on pages 1 and 5.
+    // The transferee details use the same compact labelled table on the request and issued letter.
     assert((html.match(/class="transfer-recipient-table/g) ?? []).length === 2, "transfer wiring: reference recipient tables missing");
     assert(html.includes("transfer-recipient-table-centered") && html.includes("transfer-recipient-table-left"), "transfer wiring: recipient table alignment missing");
-    assert(html.includes("PAN No.") && html.includes("Aadhaar No."), "transfer wiring: recipient table missing labelled fields");
+    for (const label of ["Name", "Address", "PAN No.", "Aadhaar No."]) {
+      assert(html.includes(`<th scope="row">${label}</th>`), `transfer wiring: recipient table missing ${label} row`);
+    }
     assert(html.includes("House 12, New Grain Market Road<br>Barnala, Punjab"), "transfer wiring: recipient/table address was not split into two lines");
-    console.log("  ✓ recipient tables match the signed reference layout");
+    assert(!html.includes("red-text"), "transfer wiring: legacy red text styling remains in the draft");
+    console.log("  ✓ recipient tables are structured and the transfer draft is monochrome");
 
     assert(html.includes("Supporting documents") && html.includes(transferKycFile.id), "transfer wiring: transfer-specific KYC attachment missing");
     console.log("  ✓ transfer-specific supporting document is appended");

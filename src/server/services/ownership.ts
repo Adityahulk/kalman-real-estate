@@ -155,6 +155,7 @@ export async function updateLatestAllotment(context: RequestContext, plotId: str
 }
 
 export const transferPlotSchema = z.object({
+  recordId: z.string().optional(),
   buyerOwnerId: z.string(),
   amountInr: z.number().nonnegative().optional(),
   sharePct: z.number().min(0).max(100).optional(),
@@ -193,21 +194,52 @@ export async function transferPlot(context: RequestContext, plotId: string, inpu
     }
     await tx.owner.findFirstOrThrow({ where: { id: input.buyerOwnerId, tenantId: context.tenantId } });
     const plot = before;
-    const record = await tx.ownershipRecord.create({
-      data: {
-        tenantId: context.tenantId,
-        plotId,
-        ownerId: input.buyerOwnerId,
-        kind: OwnershipKind.TRANSFER,
-        amountInr: input.amountInr,
-        sharePct: input.sharePct,
-        documentId: input.documentId,
-        notes: input.notes,
-        extraDetails: input.extraDetails as Prisma.InputJsonValue | undefined,
-        effectiveAt: input.effectiveAt ? new Date(input.effectiveAt) : undefined,
-        createdById: context.userId,
-      },
-    });
+    const recordData = {
+      ownerId: input.buyerOwnerId,
+      amountInr: input.amountInr,
+      sharePct: input.sharePct,
+      documentId: input.documentId,
+      notes: input.notes,
+      extraDetails: input.extraDetails as Prisma.InputJsonValue | undefined,
+      effectiveAt: input.effectiveAt ? new Date(input.effectiveAt) : undefined,
+    };
+    const pendingRecord = input.recordId
+      ? await tx.ownershipRecord.findFirst({
+          where: {
+            id: input.recordId,
+            tenantId: context.tenantId,
+            plotId,
+            kind: OwnershipKind.TRANSFER,
+            cancelledAt: null,
+          },
+        })
+      : null;
+    if (input.recordId && !pendingRecord) {
+      throwBadRequest("This saved transfer could not be found. Erase the saved form and record it again.");
+    }
+    if (pendingRecord?.documentId) {
+      const linkedDocument = await tx.generatedDocument.findFirst({
+        where: { id: pendingRecord.documentId, tenantId: context.tenantId, archivedAt: null },
+        select: { status: true },
+      });
+      if (!linkedDocument || !["DRAFT", "GENERATED", "CHANGES_REQUESTED"].includes(linkedDocument.status)) {
+        throwBadRequest("This transfer letter is already submitted or finalized and can no longer be changed.");
+      }
+    }
+    const record = pendingRecord
+      ? await tx.ownershipRecord.update({
+          where: { id: pendingRecord.id },
+          data: recordData,
+        })
+      : await tx.ownershipRecord.create({
+          data: {
+            tenantId: context.tenantId,
+            plotId,
+            kind: OwnershipKind.TRANSFER,
+            createdById: context.userId,
+            ...recordData,
+          },
+        });
     return { before, plot, record };
   });
   await writeAuditEvent(context, { action: AuditAction.TRANSFER, entityType: "Plot", entityId: plotId, before: result.before as unknown as Prisma.InputJsonValue, after: result.plot as unknown as Prisma.InputJsonValue });
@@ -220,6 +252,13 @@ export const historicalAllotmentSchema = z.object({
   email: z.string().trim().email().optional(),
   phone: z.string().trim().optional(),
   address: z.string().trim().optional(),
+  ownerId: z.string().optional(),
+  fileAssetId: z.string().optional(),
+  documentNumber: z.string().trim().optional(),
+  amountInr: z.number().nonnegative().optional(),
+  sharePct: z.number().min(0).max(100).default(100),
+  paymentMode: z.string().optional(),
+  extraDetails: z.record(z.unknown()).optional(),
   effectiveAt: z.string().datetime().optional(),
 });
 
@@ -233,8 +272,24 @@ export async function recordHistoricalAllotment(
     const before = await tx.plot.findFirstOrThrow({
       where: { id: plotId, tenantId: context.tenantId, archivedAt: null },
     });
-    if (before.currentOwnerId) {
-      throwBadRequest("This plot already has a current owner.");
+    const existingAllotment = await tx.ownershipRecord.findFirst({
+      where: {
+        tenantId: context.tenantId,
+        plotId,
+        kind: OwnershipKind.ALLOTMENT,
+        cancelledAt: null,
+      },
+      orderBy: [{ effectiveAt: "desc" }, { createdAt: "desc" }],
+    });
+    const existingDetails = jsonRecord(existingAllotment?.extraDetails);
+    const upgradesHistoricalAllotment = Boolean(
+      before.currentOwnerId
+      && existingAllotment
+      && existingAllotment.ownerId === before.currentOwnerId
+      && existingDetails.historicalImport === true,
+    );
+    if (before.currentOwnerId && !upgradesHistoricalAllotment) {
+      throwBadRequest("This plot already has a completed allotment. Import the uploaded letter as a transfer instead.");
     }
 
     const sourceFiles = await tx.fileAsset.findMany({
@@ -244,47 +299,248 @@ export async function recordHistoricalAllotment(
         ownerId: plotId,
         deletedAt: null,
         categoryKey: { in: ["old-documents", "signed-allotment-letter"] },
+        ...(input.fileAssetId ? { id: input.fileAssetId } : {}),
       },
-      select: { id: true, fileName: true, mimeType: true, categoryKey: true },
+      orderBy: [{ documentDate: "asc" }, { createdAt: "asc" }],
     });
     if (!sourceFiles.length) {
       throwBadRequest("Upload the old signed allotment or transfer letter before marking the allotment as completed.");
     }
 
-    const owner = await tx.owner.create({
+    const sourceFile = sourceFiles[0];
+    if (sourceFile.documentType && sourceFile.documentType !== "ALLOTMENT_LETTER") {
+      throwBadRequest("Select an uploaded allotment letter. Transfer letters must be imported after the previous owner is established.");
+    }
+    const existingOwnerId = upgradesHistoricalAllotment
+      ? existingAllotment?.ownerId ?? before.currentOwnerId
+      : undefined;
+    const owner = existingOwnerId || input.ownerId
+      ? await tx.owner.findFirstOrThrow({
+          where: { id: existingOwnerId ?? input.ownerId, tenantId: context.tenantId },
+        })
+      : await tx.owner.create({
+          data: {
+            tenantId: context.tenantId,
+            type: input.type,
+            name: input.name,
+            email: input.email || undefined,
+            phone: input.phone || undefined,
+            address: input.address || undefined,
+          },
+        });
+    const effectiveAt = input.effectiveAt
+      ? new Date(input.effectiveAt)
+      : sourceFile.documentDate ?? new Date();
+    const documentNumber = input.documentNumber || sourceFile.documentNo || sourceFile.fileName.replace(/\.[^.]+$/, "");
+    const signedSourceFile = await tx.fileAsset.update({
+      where: { id: sourceFile.id },
       data: {
-        tenantId: context.tenantId,
-        type: input.type,
-        name: input.name,
-        email: input.email || undefined,
-        phone: input.phone || undefined,
-        address: input.address || undefined,
+        categoryKey: "signed-allotment-letter",
+        documentType: "ALLOTMENT_LETTER",
+        documentNo: documentNumber,
+        documentDate: effectiveAt,
       },
     });
+    const documentData = {
+      type: "allotment_letter",
+      status: "SIGNED" as const,
+      recordType: "Plot",
+      recordId: plotId,
+      fileAssetId: signedSourceFile.id,
+      signedFileAssetId: signedSourceFile.id,
+      number: documentNumber,
+      data: { historicalImport: true },
+      signedById: context.userId,
+      signedAt: effectiveAt,
+      finalizedAt: effectiveAt,
+      archivedAt: null,
+      archivedById: null,
+      archiveReason: null,
+    };
+    const existingDocument = existingAllotment?.documentId
+      ? await tx.generatedDocument.findFirst({
+          where: { id: existingAllotment.documentId, tenantId: context.tenantId },
+        })
+      : null;
+    const importedDocument = existingDocument
+      ? await tx.generatedDocument.update({
+          where: { id: existingDocument.id },
+          data: documentData,
+        })
+      : await tx.generatedDocument.create({
+          data: {
+            tenantId: context.tenantId,
+            createdById: context.userId,
+            ...documentData,
+          },
+        });
     const plot = await tx.plot.update({
       where: { id: plotId },
       data: { currentOwnerId: owner.id, status: PlotStatus.ALLOTTED },
+    });
+    const preservedDetails = { ...existingDetails };
+    delete preservedDetails.sourceFiles;
+    const ownershipData = {
+      ownerId: owner.id,
+      amountInr: input.amountInr,
+      sharePct: new Prisma.Decimal(input.sharePct),
+      documentId: importedDocument.id,
+      paymentMode: input.paymentMode,
+      notes: "Historical allotment recorded from an uploaded signed letter.",
+      effectiveAt,
+      createdById: existingAllotment?.createdById ?? context.userId,
+      extraDetails: {
+        ...preservedDetails,
+        ...(input.extraDetails ?? {}),
+        historicalImport: true,
+        historicalDocumentNumber: documentNumber,
+      },
+    } satisfies Prisma.OwnershipRecordUncheckedUpdateInput;
+    const record = upgradesHistoricalAllotment && existingAllotment
+      ? await tx.ownershipRecord.update({
+          where: { id: existingAllotment.id },
+          data: ownershipData,
+        })
+      : await tx.ownershipRecord.create({
+          data: {
+            tenantId: context.tenantId,
+            plotId,
+            kind: OwnershipKind.ALLOTMENT,
+            ...ownershipData,
+          },
+        });
+    return { before, owner, plot, record, document: importedDocument, upgraded: upgradesHistoricalAllotment };
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.ALLOT,
+    entityType: "Plot",
+    entityId: plotId,
+    before: result.before as unknown as Prisma.InputJsonValue,
+    after: {
+      plot: result.plot,
+      ownershipRecordId: result.record.id,
+      historicalImport: true,
+      upgradedHistoricalRecord: result.upgraded,
+    } as unknown as Prisma.InputJsonValue,
+  });
+  return result;
+}
+
+export const historicalTransferSchema = z.object({
+  buyerOwnerId: z.string(),
+  fileAssetId: z.string(),
+  documentNumber: z.string().trim().optional(),
+  amountInr: z.number().nonnegative().optional(),
+  sharePct: z.number().min(0).max(100).default(100),
+  notes: z.string().optional(),
+  extraDetails: z.record(z.unknown()).optional(),
+  effectiveAt: z.string().datetime().optional(),
+});
+
+export async function recordHistoricalTransfer(
+  context: RequestContext,
+  plotId: string,
+  input: z.infer<typeof historicalTransferSchema>,
+) {
+  assertSuperAdmin(context, "Only a Super Admin can import an old completed transfer.");
+  const result = await prisma.$transaction(async (tx) => {
+    const before = await tx.plot.findFirstOrThrow({
+      where: { id: plotId, tenantId: context.tenantId, archivedAt: null },
+    });
+    if (!before.currentOwnerId) {
+      throwBadRequest("Import the original allotment first so the transferor is known.");
+    }
+    if (before.currentOwnerId === input.buyerOwnerId) {
+      throwBadRequest("The transferee is already the current owner.");
+    }
+    const [sourceFile, buyerOwner, transferCount] = await Promise.all([
+      tx.fileAsset.findFirst({
+        where: {
+          id: input.fileAssetId,
+          tenantId: context.tenantId,
+          ownerType: "Plot",
+          ownerId: plotId,
+          categoryKey: { in: ["old-documents", "signed-transfer-letter"] },
+          deletedAt: null,
+        },
+      }),
+      tx.owner.findFirst({ where: { id: input.buyerOwnerId, tenantId: context.tenantId } }),
+      tx.ownershipRecord.count({
+        where: { tenantId: context.tenantId, plotId, kind: OwnershipKind.TRANSFER, cancelledAt: null },
+      }),
+    ]);
+    if (!sourceFile) throwBadRequest("The selected old signed document could not be found for this plot.");
+    if (sourceFile.documentType && sourceFile.documentType !== "TRANSFER_LETTER") {
+      throwBadRequest("Select an uploaded transfer letter for this step.");
+    }
+    if (!buyerOwner) throwBadRequest("The transferee could not be found.");
+
+    const tenant = await tx.tenant.findUniqueOrThrow({
+      where: { id: context.tenantId },
+      select: { maxTransfersPerPlot: true },
+    });
+    if (transferCount >= tenant.maxTransfersPerPlot) {
+      throwBadRequest(`Transfer limit reached for this plot. Only registry is available now.`);
+    }
+
+    const effectiveAt = input.effectiveAt
+      ? new Date(input.effectiveAt)
+      : sourceFile.documentDate ?? new Date();
+    const documentNumber = input.documentNumber || sourceFile.documentNo || sourceFile.fileName.replace(/\.[^.]+$/, "");
+    const signedSourceFile = await tx.fileAsset.update({
+      where: { id: sourceFile.id },
+      data: {
+        categoryKey: "signed-transfer-letter",
+        documentType: "TRANSFER_LETTER",
+        documentNo: documentNumber,
+        documentDate: effectiveAt,
+      },
+    });
+    const importedDocument = await tx.generatedDocument.create({
+      data: {
+        tenantId: context.tenantId,
+        type: "transfer_letter",
+        status: "SIGNED",
+        recordType: "Plot",
+        recordId: plotId,
+        fileAssetId: signedSourceFile.id,
+        signedFileAssetId: signedSourceFile.id,
+        number: documentNumber,
+        data: { historicalImport: true, transferSequence: transferCount + 1 },
+        createdById: context.userId,
+        signedById: context.userId,
+        signedAt: effectiveAt,
+        finalizedAt: effectiveAt,
+      },
     });
     const record = await tx.ownershipRecord.create({
       data: {
         tenantId: context.tenantId,
         plotId,
-        ownerId: owner.id,
-        kind: OwnershipKind.ALLOTMENT,
-        sharePct: new Prisma.Decimal(100),
-        notes: "Historical allotment recorded from an uploaded signed letter.",
-        effectiveAt: input.effectiveAt ? new Date(input.effectiveAt) : undefined,
+        ownerId: buyerOwner.id,
+        kind: OwnershipKind.TRANSFER,
+        amountInr: input.amountInr,
+        sharePct: new Prisma.Decimal(input.sharePct),
+        documentId: importedDocument.id,
+        notes: input.notes || `Historical transfer ${transferCount + 1} recorded from an uploaded signed letter.`,
+        effectiveAt,
         createdById: context.userId,
         extraDetails: {
+          ...(input.extraDetails ?? {}),
           historicalImport: true,
-          sourceFiles,
+          historicalTransferSequence: transferCount + 1,
+          historicalDocumentNumber: documentNumber,
         },
       },
     });
-    return { before, owner, plot, record };
+    const plot = await tx.plot.update({
+      where: { id: plotId },
+      data: { currentOwnerId: buyerOwner.id, status: PlotStatus.TRANSFERRED },
+    });
+    return { before, owner: buyerOwner, plot, record, document: importedDocument };
   });
   await writeAuditEvent(context, {
-    action: AuditAction.ALLOT,
+    action: AuditAction.TRANSFER,
     entityType: "Plot",
     entityId: plotId,
     before: result.before as unknown as Prisma.InputJsonValue,
@@ -365,7 +621,9 @@ export async function cancelLatestOwnershipRecord(context: RequestContext, plotI
             ? [{
                 ownerType: "Plot",
                 ownerId: plotId,
-                categoryKey: "signed-allotment-letter",
+                categoryKey: latest.kind === OwnershipKind.TRANSFER
+                  ? "signed-transfer-letter"
+                  : "signed-allotment-letter",
                 documentNo: { in: documentNumbers },
               }]
             : []),
@@ -493,6 +751,12 @@ function throwBadRequest(message: string): never {
   const error = new Error(message);
   error.name = "BadRequestError";
   throw error;
+}
+
+function jsonRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
 function assertSuperAdmin(context: RequestContext, message: string) {

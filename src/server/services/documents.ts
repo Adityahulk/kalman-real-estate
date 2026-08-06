@@ -39,6 +39,13 @@ function assertDocumentEditable(status: DocumentStatus) {
   }
 }
 
+function ownershipLetterLabel(type: string) {
+  const normalized = type.toLowerCase();
+  if (normalized.includes("transfer")) return "Transfer";
+  if (normalized.includes("allotment")) return "Allotment";
+  return "Document";
+}
+
 export const generateDocumentSchema = z.object({
   templateId: z.string().optional(),
   type: z.string().min(2),
@@ -57,6 +64,10 @@ export const createDocumentDraftSchema = z.object({
 
 export const updateDocumentDraftSchema = z.object({
   editableHtml: z.string().min(20),
+});
+
+export const refreshDocumentDraftSchema = z.object({
+  data: z.record(z.unknown()).default({}),
 });
 
 export async function generateDocument(context: RequestContext, input: z.infer<typeof generateDocumentSchema>) {
@@ -122,6 +133,84 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
     : null;
   const documentNumber = providedNumber ?? fallbackNumber;
 
+  const documentDate = new Date();
+  const draft = await buildDocumentDraftContent(context, {
+    type: input.type,
+    recordId: input.recordId,
+    templateId: input.templateId,
+    data: input.data,
+    documentNumber,
+    documentDate,
+  });
+  const document = await prisma.generatedDocument.create({
+    data: {
+      tenantId: context.tenantId,
+      templateId: draft.templateId,
+      type: input.type,
+      recordType: input.recordType,
+      recordId: input.recordId,
+      data: draft.data,
+      editableHtml: draft.editableHtml,
+      status: DocumentStatus.DRAFT,
+      number: documentNumber,
+      createdById: context.userId,
+    },
+  });
+
+  await linkDocumentToLatestOwnershipRecord(context, document);
+  await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "GeneratedDocument", entityId: document.id, after: document as unknown as Prisma.InputJsonValue });
+  return { document, missingVariables: draft.missingVariables };
+}
+
+export async function refreshDocumentDraft(
+  context: RequestContext,
+  id: string,
+  input: z.infer<typeof refreshDocumentDraftSchema>,
+) {
+  const before = await prisma.generatedDocument.findFirstOrThrow({
+    where: { id, tenantId: context.tenantId, archivedAt: null },
+  });
+  assertDocumentEditable(before.status);
+  const parsedType = letterTemplateTypeSchema.parse(before.type);
+  const draft = await buildDocumentDraftContent(context, {
+    type: parsedType,
+    recordId: before.recordId,
+    templateId: before.templateId ?? undefined,
+    data: input.data,
+    documentNumber: before.number ?? `${before.type.toUpperCase()}-${new Date().getFullYear()}`,
+    documentDate: before.createdAt,
+  });
+  const document = await prisma.generatedDocument.update({
+    where: { id },
+    data: {
+      templateId: draft.templateId,
+      data: draft.data,
+      editableHtml: draft.editableHtml,
+      fileAssetId: null,
+      status: DocumentStatus.DRAFT,
+    },
+  });
+  await writeAuditEvent(context, {
+    action: AuditAction.UPDATE,
+    entityType: "GeneratedDocument",
+    entityId: id,
+    before: before as unknown as Prisma.InputJsonValue,
+    after: { refreshedFromForm: true, status: document.status } as Prisma.InputJsonValue,
+  });
+  return { document, missingVariables: draft.missingVariables };
+}
+
+async function buildDocumentDraftContent(
+  context: RequestContext,
+  input: {
+    type: z.infer<typeof letterTemplateTypeSchema>;
+    recordId: string;
+    templateId?: string;
+    data: Record<string, unknown>;
+    documentNumber: string;
+    documentDate: Date;
+  },
+) {
   const plot = await prisma.plot.findFirstOrThrow({
     where: { id: input.recordId, tenantId: context.tenantId, archivedAt: null },
     select: { projectId: true },
@@ -132,46 +221,39 @@ export async function createDocumentDraft(context: RequestContext, input: z.infe
     input.type,
     input.templateId,
   );
-  const earlyTemplateBody = isUsableLetterTemplateBody(template?.body)
+  const templateBody = isUsableLetterTemplateBody(template?.body)
     ? template.body
     : defaultLetterBody(input.type);
-  const templateNeedsFileMarkup = /\{\{\s*files\./i.test(earlyTemplateBody);
-
-  const snapshot = await buildPlotDocumentSnapshot(context, input.recordId, { documentType: input.type, includeFileMarkup: templateNeedsFileMarkup });
-  applyDraftOverrides(snapshot, input.data);
-  const documentDate = new Date();
-  snapshot.variables["document.number"] = documentNumber;
-  snapshot.variables["document.date"] = documentDate.toLocaleDateString("en-IN");
-  snapshot.variables["document.dateDots"] = formatDateDots(documentDate);
-  snapshot.variables["document.dateSlashes"] = formatDateSlashes(documentDate);
-  const templateBody = isUsableLetterTemplateBody(template?.body) ? template.body : defaultLetterBody(input.type);
-  const { html, missingVariables, usedFileVariables } = renderTemplate(templateBody, snapshot.variables, snapshot.fileVariables);
-  const reconciledHtml = reconcileStructuredBlocks(html, snapshot.variables);
-  const draftHtml = usedFileVariables ? reconciledHtml : appendSupportingDocumentPages(reconciledHtml, snapshot.supportingDocumentPages);
-
-  const { fileVariables: _fv, supportingDocumentPages: _sp, ...snapshotMeta } = snapshot;
-  const document = await prisma.generatedDocument.create({
-    data: {
-      tenantId: context.tenantId,
-      templateId: template?.id,
-      type: input.type,
-      recordType: input.recordType,
-      recordId: input.recordId,
-      data: {
-        ...snapshotMeta,
-        templateBody,
-        missingVariables,
-      } as Prisma.InputJsonValue,
-      editableHtml: draftHtml,
-      status: DocumentStatus.DRAFT,
-      number: documentNumber,
-      createdById: context.userId,
-    },
+  const templateNeedsFileMarkup = /\{\{\s*files\./i.test(templateBody);
+  const snapshot = await buildPlotDocumentSnapshot(context, input.recordId, {
+    documentType: input.type,
+    includeFileMarkup: templateNeedsFileMarkup,
   });
-
-  await linkDocumentToLatestOwnershipRecord(context, document);
-  await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "GeneratedDocument", entityId: document.id, after: document as unknown as Prisma.InputJsonValue });
-  return { document, missingVariables };
+  applyDraftOverrides(snapshot, input.data);
+  snapshot.variables["document.number"] = input.documentNumber;
+  snapshot.variables["document.date"] = input.documentDate.toLocaleDateString("en-IN");
+  snapshot.variables["document.dateDots"] = formatDateDots(input.documentDate);
+  snapshot.variables["document.dateSlashes"] = formatDateSlashes(input.documentDate);
+  const { html, missingVariables, usedFileVariables } = renderTemplate(
+    templateBody,
+    snapshot.variables,
+    snapshot.fileVariables,
+  );
+  const reconciledHtml = reconcileStructuredBlocks(html, snapshot.variables);
+  const editableHtml = usedFileVariables
+    ? reconciledHtml
+    : appendSupportingDocumentPages(reconciledHtml, snapshot.supportingDocumentPages);
+  const { fileVariables: _fileVariables, supportingDocumentPages: _supportingPages, ...snapshotMeta } = snapshot;
+  return {
+    templateId: template?.id,
+    editableHtml,
+    missingVariables,
+    data: {
+      ...snapshotMeta,
+      templateBody,
+      missingVariables,
+    } as Prisma.InputJsonValue,
+  };
 }
 
 function isUsableLetterTemplateBody(body: string | null | undefined): body is string {
@@ -312,7 +394,7 @@ export async function submitDocument(context: RequestContext, id: string, input:
     after: { ...document, notes: input.notes } as unknown as Prisma.InputJsonValue,
   });
   await notifyRoleWithPermission(context, "documents.approve", {
-    title: "New allotment awaiting approval",
+    title: `New ${ownershipLetterLabel(document.type).toLowerCase()} awaiting approval`,
     body: `${document.number ?? document.type} has been submitted and is awaiting your approval.`,
     data: { documentId: id, status: document.status },
     excludeUserId: context.userId,
@@ -371,8 +453,9 @@ export async function approveDocument(context: RequestContext, id: string, input
     after: { ...document, notes: input.notes } as unknown as Prisma.InputJsonValue,
   });
   if (input.status === "APPROVED") {
+    const letterLabel = ownershipLetterLabel(document.type);
     await notifyRoleWithPermission(context, "documents.sign", {
-      title: "Allotment approved — ready for signature",
+      title: `${letterLabel} approved — ready for signature`,
       body: `${document.number ?? document.type} has been approved and is ready for signature.`,
       data: { documentId: id, status: document.status },
       excludeUserId: context.userId,
@@ -380,31 +463,33 @@ export async function approveDocument(context: RequestContext, id: string, input
     if (document.submittedById) {
       await createNotification(context, {
         userId: document.submittedById,
-        title: "Allotment approved",
+        title: `${letterLabel} approved`,
         body: `${document.number ?? document.type} was approved and sent for signature.`,
         data: { documentId: id, status: document.status },
       });
     }
   } else if (input.status === "CHANGES_REQUESTED") {
+    const letterLabel = ownershipLetterLabel(document.type);
     if (document.submittedById) {
       await createNotification(context, {
         userId: document.submittedById,
-        title: "Allotment returned for correction",
+        title: `${letterLabel} returned for correction`,
         body: `${document.number ?? document.type} was returned${input.notes ? `: ${input.notes}` : "."}`,
         data: { documentId: id, status: document.status },
       });
     }
     await notifyRoleWithPermission(context, "documents.submit", {
-      title: "Allotment returned for correction",
+      title: `${letterLabel} returned for correction`,
       body: `${document.number ?? document.type} was returned for correction.`,
       data: { documentId: id, status: document.status },
       excludeUserId: context.userId,
     });
   } else if (input.status === "REJECTED") {
+    const letterLabel = ownershipLetterLabel(document.type);
     if (document.submittedById) {
       await createNotification(context, {
         userId: document.submittedById,
-        title: "Allotment rejected",
+        title: `${letterLabel} rejected`,
         body: `${document.number ?? document.type} was rejected${input.notes ? `: ${input.notes}` : "."}`,
         data: { documentId: id, status: document.status },
       });
@@ -428,13 +513,23 @@ export const signDocumentSchema = z.object({
 
 export async function signDocument(context: RequestContext, id: string, input: z.infer<typeof signDocumentSchema>) {
   const current = await prisma.generatedDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId, archivedAt: null } });
-  if (current.status !== DocumentStatus.SENT_FOR_SIGNATURE && current.status !== DocumentStatus.APPROVED) {
-    const error = new Error("Only approved letters awaiting signature can be signed.");
+  if (
+    current.status !== DocumentStatus.SENT_FOR_SIGNATURE
+    && current.status !== DocumentStatus.APPROVED
+    && current.status !== DocumentStatus.SIGNED
+  ) {
+    const error = new Error("Only approved letters awaiting signature, or an existing signed letter, can receive a signed copy.");
     error.name = "BadRequestError";
     throw error;
   }
   const signedFile = await prisma.fileAsset.findFirst({
-    where: { id: input.signedFileAssetId, tenantId: context.tenantId, deletedAt: null },
+    where: {
+      id: input.signedFileAssetId,
+      tenantId: context.tenantId,
+      deletedAt: null,
+      ownerType: current.recordType,
+      ownerId: current.recordId,
+    },
     select: { id: true },
   });
   if (!signedFile) {
@@ -1003,7 +1098,9 @@ async function buildSupportingDocumentPages(tenantId: string, plotId: string, ow
     orderBy: { createdAt: "asc" },
   });
 
-  // Build attachment blocks, then pack several per page instead of one image per page.
+  // A supporting image owns one physical A4 sheet. Packing multiple natural-size scans into a
+  // single editor section lets that section grow past A4 and makes Chromium add hidden pages that
+  // the editor never showed.
   const blocks: string[] = [];
   for (const file of files) {
     if (!file.mimeType.startsWith("image/")) continue;
@@ -1017,11 +1114,11 @@ async function buildSupportingDocumentPages(tenantId: string, plotId: string, ow
   }
   if (!blocks.length) return [];
 
-  const perPage = 3;
+  const perPage = 1;
   const pages: string[] = [];
   for (let i = 0; i < blocks.length; i += perPage) {
     const heading = i === 0 ? "<h2>Supporting documents</h2>" : "";
-    pages.push(`<section data-letter-page="0">${heading}${blocks.slice(i, i + perPage).join("")}</section>`);
+    pages.push(`<section data-letter-page="0" class="supporting-document-page">${heading}${blocks.slice(i, i + perPage).join("")}</section>`);
   }
   return pages;
 }
@@ -1067,11 +1164,11 @@ async function buildSupportingDocumentPagesLight(
     }
   }
   if (!blocks.length) return [];
-  const perPage = 3;
+  const perPage = 1;
   const pages: string[] = [];
   for (let i = 0; i < blocks.length; i += perPage) {
     const heading = i === 0 ? "<h2>Supporting documents</h2>" : "";
-    pages.push(`<section data-letter-page="0">${heading}${blocks.slice(i, i + perPage).join("")}</section>`);
+    pages.push(`<section data-letter-page="0" class="supporting-document-page">${heading}${blocks.slice(i, i + perPage).join("")}</section>`);
   }
   return pages;
 }

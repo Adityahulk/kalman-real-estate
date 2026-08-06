@@ -94,10 +94,11 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
   ]);
 
   const documentIds = generatedDocuments.map((document) => document.id);
+  const currentOwnershipRecord = plot.ownershipRecords.find(
+    (record) => record.ownerId === plot.currentOwnerId && (record.kind === "ALLOTMENT" || record.kind === "TRANSFER"),
+  );
   const allotmentSupportingFileIds = unique(
-    plot.ownershipRecords
-      .filter((record) => record.kind === "ALLOTMENT" || record.kind === "TRANSFER")
-      .flatMap((record) => collectFileIds(record.extraDetails)),
+    currentOwnershipRecord ? collectFileIds(currentOwnershipRecord.extraDetails) : [],
   );
   const historicalFiles = await prisma.fileAsset.findMany({
     where: {
@@ -129,7 +130,12 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
     : [];
   const allotmentSupportingFiles = allotmentSupportingFileIds.length
     ? await prisma.fileAsset.findMany({
-        where: { tenantId: context.tenantId, id: { in: allotmentSupportingFileIds }, deletedAt: null },
+        where: {
+          tenantId: context.tenantId,
+          id: { in: allotmentSupportingFileIds },
+          deletedAt: null,
+          OR: [{ categoryKey: null }, { categoryKey: { not: "old-documents" } }],
+        },
         orderBy: { createdAt: "desc" },
       })
     : [];

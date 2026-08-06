@@ -28,6 +28,7 @@ services:
         condition: service_completed_successfully
 
   migrate:
+    image: kalman-real-estate-worker:prod
     build:
       context: .
       dockerfile: Dockerfile.worker
@@ -40,6 +41,7 @@ services:
         condition: service_healthy
 
   document-worker:
+    image: kalman-real-estate-worker:prod
     build:
       context: .
       dockerfile: Dockerfile.worker
@@ -58,6 +60,7 @@ services:
       - storage_data:/app/storage
 
   ai-worker:
+    image: kalman-real-estate-worker:prod
     build:
       context: .
       dockerfile: Dockerfile.worker
@@ -70,6 +73,7 @@ services:
       - redis
 
   reminder-worker:
+    image: kalman-real-estate-worker:prod
     build:
       context: .
       dockerfile: Dockerfile.worker

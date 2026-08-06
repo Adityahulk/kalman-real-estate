@@ -64,8 +64,9 @@ export async function buildGeneratedDocumentPdfFromHtml(input: {
       // Distinguish: launch errors already say "Could not launch Chromium"; anything else
       // (e.g. "Target closed") is a runtime crash, usually OOM on a small server.
       const isLaunchError = message.includes("Could not launch Chromium");
+      const isLayoutError = message.includes("A4 layout overflow");
       const renderError = new Error(
-        isLaunchError
+        isLaunchError || isLayoutError
           ? message
           : `PDF render failed (Chromium crashed during rendering — usually low memory on the server). Detail: ${message}`,
       );

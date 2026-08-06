@@ -135,6 +135,7 @@ function renumberPages(root: HTMLElement) {
 function cleanEditorHtml(root: HTMLElement) {
   const clone = root.cloneNode(true) as HTMLElement;
   clone.querySelectorAll("[data-editor-page-controls]").forEach((node) => node.remove());
+  clone.querySelectorAll("[data-letter-reflow-pending]").forEach((node) => node.removeAttribute("data-letter-reflow-pending"));
   return clone.innerHTML;
 }
 
@@ -323,6 +324,7 @@ export function HtmlTemplateEditor({
   }
 
   async function save() {
+    prepareEditorSurface();
     const body = editorRef.current ? cleanEditorHtml(editorRef.current) : "";
     if (!body.trim()) {
       setMessage({ kind: "error", text: "Template body is empty." });
@@ -384,6 +386,7 @@ export function HtmlTemplateEditor({
   function format(command: "bold" | "italic" | "underline") {
     editorRef.current?.focus();
     globalThis.document.execCommand(command);
+    scheduleEditorSurface();
   }
 
   function insertField(value: string) {
@@ -413,6 +416,19 @@ export function HtmlTemplateEditor({
     ensurePagedDocument(root);
     reflowPages(root);
     injectPageControls(root);
+
+    // Images can change a template's height after their bytes decode. Reflow once more at that point
+    // so Set Your Letters stores the same A4 boundaries used by Edit Draft and PDF generation.
+    root.querySelectorAll<HTMLImageElement>('img:not([data-letter-reflow-pending])').forEach((image) => {
+      if (image.complete) return;
+      image.setAttribute("data-letter-reflow-pending", "true");
+      const refresh = () => {
+        image.removeAttribute("data-letter-reflow-pending");
+        prepareEditorSurface();
+      };
+      image.addEventListener("load", refresh, { once: true });
+      image.addEventListener("error", refresh, { once: true });
+    });
   }
 
   // Repaginate after the user pauses typing so moving paragraphs between pages never jumps the caret.

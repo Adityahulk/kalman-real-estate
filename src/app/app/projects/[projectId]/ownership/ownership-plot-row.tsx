@@ -3,11 +3,13 @@
 import { Check, Eye, FileText, Loader2, Map, Pencil, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { SignedLetterUpload } from "@/components/signed-letter-upload";
 
 type PlotDocument = {
   id: string;
   status: string;
   fileAssetId: string | null;
+  signedFileAssetId?: string | null;
   viewFileAssetId?: string | null;
   type?: string;
   number?: string | null;
@@ -23,6 +25,8 @@ export function OwnershipPlotRow({
   development,
   allotmentStatus,
   document,
+  canApprove,
+  canSign,
   cadSource,
 }: {
   href: string;
@@ -33,11 +37,14 @@ export function OwnershipPlotRow({
   development: number | null;
   allotmentStatus: string;
   document: PlotDocument | null;
+  canApprove: boolean;
+  canSign: boolean;
   cadSource: { id: string; originalName: string; version: number } | null;
 }) {
   const router = useRouter();
   const [status, setStatus] = useState(document?.status ?? "");
   const [loading, setLoading] = useState<"APPROVED" | "REJECTED" | "">("");
+  const [signedFileAssetId, setSignedFileAssetId] = useState(document?.signedFileAssetId ?? null);
   const [deleting, setDeleting] = useState(false);
 
   async function deletePlot() {
@@ -53,9 +60,12 @@ export function OwnershipPlotRow({
     }
   }
 
-  const waiting = Boolean(document && ["DRAFT", "GENERATED", "UNDER_REVIEW"].includes(status));
-  const approvalReady = Boolean(waiting && document?.fileAssetId);
-  const viewFileAssetId = document?.viewFileAssetId ?? document?.fileAssetId ?? null;
+  const waiting = status === "SUBMITTED";
+  const inProgress = Boolean(document && ["DRAFT", "GENERATED", "UNDER_REVIEW", "CHANGES_REQUESTED"].includes(status));
+  const approvalReady = Boolean(canApprove && waiting && document?.fileAssetId);
+  const viewFileAssetId = signedFileAssetId ?? document?.viewFileAssetId ?? document?.fileAssetId ?? null;
+  const awaitingSignature = Boolean(document && ["APPROVED", "SENT_FOR_SIGNATURE"].includes(status));
+  const letterKind = document?.type?.toLowerCase().includes("transfer") ? "Transfer" : "Allotment";
 
   async function decide(nextStatus: "APPROVED" | "REJECTED") {
     if (!document || loading) return;
@@ -106,16 +116,18 @@ export function OwnershipPlotRow({
         >
           <div className="flex flex-wrap items-center gap-2">
             {!document ? <span className="chip bg-slate-100 text-slate-700">{allotmentStatus}</span> : null}
-            {waiting && document?.fileAssetId ? <span className="chip bg-amber-100 text-amber-800">Waiting for approval</span> : null}
-            {waiting && !document?.fileAssetId ? <span className="chip bg-slate-100 text-slate-700">Letter in progress</span> : null}
-            {status === "APPROVED" || status === "ISSUED" ? <span className="chip bg-emerald-50 text-emerald-700">{status === "ISSUED" ? "Allotment issued" : "Allotment approved"}</span> : null}
-            {status === "REJECTED" ? <span className="chip bg-rose-50 text-rose-700">Allotment rejected</span> : null}
+            {waiting ? <span className="chip bg-amber-100 text-amber-800">Waiting for approval</span> : null}
+            {inProgress ? <span className="chip bg-slate-100 text-slate-700">{letterKind} letter in progress</span> : null}
+            {status === "APPROVED" || status === "SENT_FOR_SIGNATURE" ? <span className="chip bg-sky-50 text-sky-700">{letterKind} approved · awaiting signature</span> : null}
+            {status === "ISSUED" ? <span className="chip bg-emerald-50 text-emerald-700">{letterKind} issued</span> : null}
+            {status === "SIGNED" ? <span className="chip bg-emerald-50 text-emerald-700">{letterKind} signed</span> : null}
+            {status === "REJECTED" ? <span className="chip bg-rose-50 text-rose-700">{letterKind} rejected</span> : null}
           </div>
 
           {document ? (
             <div className="mt-2 text-xs text-slate-500">
               {document.number ?? "Letter draft"}{document.createdAt ? ` · ${new Date(document.createdAt).toLocaleDateString("en-IN")}` : ""}
-              {document.viewFileAssetId && document.viewFileAssetId !== document.fileAssetId ? <span className="ml-1 text-emerald-600">· Signed copy uploaded</span> : null}
+              {signedFileAssetId || (document.viewFileAssetId && document.viewFileAssetId !== document.fileAssetId) ? <span className="ml-1 text-emerald-600">· Signed copy uploaded</span> : null}
             </div>
           ) : (
             <div className="mt-2 text-xs text-slate-500">No allotment letter has been generated yet.</div>
@@ -141,6 +153,20 @@ export function OwnershipPlotRow({
                   </button>
                 </>
               ) : null}
+              {canSign && (awaitingSignature || status === "SIGNED") ? (
+                <SignedLetterUpload
+                  documentId={document!.id}
+                  plotId={plotId}
+                  documentType={document!.type ?? "allotment_letter"}
+                  documentNo={document!.number}
+                  documentDate={document!.createdAt}
+                  replacing={Boolean(signedFileAssetId)}
+                  onSigned={(fileAssetId) => {
+                    setSignedFileAssetId(fileAssetId);
+                    setStatus("SIGNED");
+                  }}
+                />
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -154,7 +180,19 @@ export function OwnershipPlotRow({
             <Map size={14} />
           </button>
           {document ? (
-            <button className="btn-outline h-8 w-8 px-0 text-slate-600" type="button" title="Open letter" aria-label="Open letter" onClick={() => router.push(`${href}/letters/${document.id}`)}>
+            <button
+              className="btn-outline h-8 w-8 px-0 text-slate-600"
+              type="button"
+              title={viewFileAssetId ? "View latest letter" : "Open letter draft"}
+              aria-label={viewFileAssetId ? "View latest letter" : "Open letter draft"}
+              onClick={() => {
+                if (viewFileAssetId) {
+                  globalThis.window.open(`/api/v1/files/${viewFileAssetId}/download?disposition=inline&proxy=1`, "_blank", "noopener,noreferrer");
+                  return;
+                }
+                router.push(`${href}/letters/${document.id}`);
+              }}
+            >
               <FileText size={14} />
             </button>
           ) : null}

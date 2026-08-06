@@ -4,13 +4,11 @@
 // pages — pulling content up to fill gaps and pushing overflow down. Generic templates (no reflow
 // group) fall back to legacy push-only overflow.
 //
-// The logic lives as a PLAIN-JS SOURCE STRING (`reflowPagesBrowserSource`) so the Puppeteer PDF
-// renderer can inject it verbatim with no transpiler helpers (esbuild/SWC inject `__name`, which is
-// undefined inside the page). The editor compiles it once via `new Function`. Both sides therefore
-// run byte-for-byte identical pagination, so the draft and the generated PDF break at the same spots.
+// The logic lives as a PLAIN-JS SOURCE STRING (`reflowPagesBrowserSource`) so it can also be used by
+// layout diagnostics without transpiler helpers. The editor compiles it once via `new Function`.
 
 export type ReflowOptions = {
-  // Full page height in px (section min-height incl. padding). Overflow = section.scrollHeight > this.
+  // Full fixed page height in px (including padding and border).
   pageHeight?: number;
 };
 
@@ -19,6 +17,32 @@ export const reflowPagesBrowserSource = `(function (rootOrSelector, opts) {
   if (!root) return;
   var PAGE_HEIGHT = (opts && opts.pageHeight) || 1216;
   var PAGE_SELECTOR = "section[data-ambey-page], section[data-letter-page]";
+  function pageLimit(page) {
+    // The printable boundary ends before the sheet's bottom padding. scrollHeight is unsuitable
+    // here: headless Chromium includes that padding after overflowing content while the interactive
+    // browser may clamp it, producing different page counts for the same DOM.
+    var style = page.ownerDocument && page.ownerDocument.defaultView
+      ? page.ownerDocument.defaultView.getComputedStyle(page)
+      : null;
+    var paddingBottom = style ? (parseFloat(style.paddingBottom) || 0) : 0;
+    return Math.min(PAGE_HEIGHT, page.clientHeight || PAGE_HEIGHT) - paddingBottom;
+  }
+  function blockBottom(page, block) {
+    return block.getBoundingClientRect().bottom - page.getBoundingClientRect().top;
+  }
+  function isOutOfFlow(page, block) {
+    var view = page.ownerDocument && page.ownerDocument.defaultView;
+    var position = view ? view.getComputedStyle(block).position : "static";
+    return position === "absolute" || position === "fixed";
+  }
+  function pageFits(page) {
+    var kids = contentKids(page);
+    var limit = pageLimit(page);
+    for (var i = 0; i < kids.length; i++) {
+      if (!isOutOfFlow(page, kids[i]) && blockBottom(page, kids[i]) > limit + 1) return false;
+    }
+    return true;
+  }
   function isControl(el) { return el.hasAttribute("data-editor-page-controls"); }
   function contentKids(page) {
     return Array.prototype.slice.call(page.children).filter(function (el) { return !isControl(el); });
@@ -65,7 +89,7 @@ export const reflowPagesBrowserSource = `(function (rootOrSelector, opts) {
     while (low <= high) {
       var mid = Math.floor((low + high) / 2);
       target.textContent = splitWords(fullText, mid).head;
-      if (page.scrollHeight <= PAGE_HEIGHT) { best = mid; low = mid + 1; } else { high = mid - 1; }
+      if (pageFits(page)) { best = mid; low = mid + 1; } else { high = mid - 1; }
     }
     if (best < 6 || best >= all.count) { target.textContent = fullText; return null; }
     var finalParts = splitWords(fullText, best);
@@ -88,14 +112,42 @@ export const reflowPagesBrowserSource = `(function (rootOrSelector, opts) {
   if (!agreementSections.length) {
     // No reflow group: legacy push-only overflow so an overgrown section still splits.
     var pg0 = Array.prototype.slice.call(root.querySelectorAll(PAGE_SELECTOR));
+    // Older drafts placed as many as three full-size supporting scans in one section. Normalize
+    // those attachment-only sheets before measuring overflow. Each scan gets one A4 page, while the
+    // heading remains with the first image. New drafts are emitted in this shape from the server.
+    for (var ap = 0; ap < pg0.length; ap++) {
+      var attachmentPage = pg0[ap];
+      var attachmentKids = contentKids(attachmentPage);
+      var attachmentBlocks = attachmentKids.filter(function (el) {
+        return el.classList && el.classList.contains("attachment-block");
+      });
+      var onlyAttachmentsAndHeading = attachmentKids.every(function (el) {
+        return (el.classList && el.classList.contains("attachment-block")) || /^H[1-3]$/.test(el.tagName);
+      });
+      if (!onlyAttachmentsAndHeading || attachmentBlocks.length <= 1) continue;
+      attachmentPage.classList.add("supporting-document-page");
+      var attachmentCursor = attachmentPage;
+      for (var ab = 1; ab < attachmentBlocks.length; ab++) {
+        var attachmentNext = createAfter(attachmentCursor);
+        attachmentNext.classList.add("supporting-document-page");
+        attachmentNext.appendChild(attachmentBlocks[ab]);
+        attachmentCursor = attachmentNext;
+      }
+    }
+    pg0 = Array.prototype.slice.call(root.querySelectorAll(PAGE_SELECTOR));
     for (var i = 0; i < pg0.length; i++) {
       var page = pg0[i];
-      if (page.scrollHeight <= PAGE_HEIGHT) continue;
+      if (pageFits(page)) continue;
       var children = Array.prototype.slice.call(page.children).filter(function (el) { return !isControl(el); });
       var splitIndex = -1;
+      var pageTop = page.getBoundingClientRect().top;
       for (var j = children.length - 1; j >= 0; j--) {
-        var bottom = children[j].offsetTop + children[j].offsetHeight - page.offsetTop;
-        if (bottom <= PAGE_HEIGHT) { splitIndex = j + 1; break; }
+        // offsetTop changes its coordinate space depending on the nearest positioned ancestor. On
+        // later stacked sheets, subtracting page.offsetTop could make an overflowing child look as
+        // if it ended above the page. Rectangles keep both values in the same viewport coordinate
+        // system and work identically in Set Your Letters, Edit Draft, and headless Chromium.
+        var bottom = children[j].getBoundingClientRect().bottom - pageTop;
+        if (bottom <= pageLimit(page)) { splitIndex = j + 1; break; }
       }
       if (splitIndex <= 0 || splitIndex >= children.length) continue;
       var overflow = children.slice(splitIndex);
@@ -164,7 +216,7 @@ export const reflowPagesBrowserSource = `(function (rootOrSelector, opts) {
       }
       current.appendChild(block);
       var kids = contentKids(current);
-      if (current.scrollHeight > PAGE_HEIGHT && kids.length > 1) {
+      if (!pageFits(current) && kids.length > 1) {
         // First try to split the overflowing block so its head fills this page to the bottom.
         var remainder = splitBlockToFit(current, block);
         if (remainder) {
@@ -180,7 +232,7 @@ export const reflowPagesBrowserSource = `(function (rootOrSelector, opts) {
           for (var mi = 0; mi < move.length; mi++) next.appendChild(move[mi]);
           current = next;
           // A lone block taller than a page still needs splitting so following content can flow.
-          if (current.scrollHeight > PAGE_HEIGHT) {
+          if (!pageFits(current)) {
             var rem2 = splitBlockToFit(current, block);
             if (rem2) stream.splice(s + 1, 0, rem2);
           }
@@ -216,7 +268,7 @@ type ReflowFn = (root: HTMLElement | string, opts?: ReflowOptions) => void;
 let compiled: ReflowFn | null = null;
 
 export function reflowPages(root: HTMLElement | string, opts?: ReflowOptions): void {
-  if (typeof window === "undefined") return; // editor-only; PDF path uses reflowPagesBrowserSource
+  if (typeof window === "undefined") return;
   if (!compiled) {
     // eslint-disable-next-line no-new-func
     compiled = new Function("return " + reflowPagesBrowserSource)() as ReflowFn;

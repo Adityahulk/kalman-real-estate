@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FileUp, Loader2, Plus, Save, Send, Wand2, X } from "lucide-react";
 import { FileUploader } from "@/components/file-uploader";
@@ -25,18 +25,35 @@ type TransferIdentityDocument = {
   files: File[];
 };
 
-function isTransferStamp(value: unknown): value is TransferStamp {
-  return Boolean(value && typeof value === "object" &&
-    typeof (value as TransferStamp).number === "string" &&
-    typeof (value as TransferStamp).dated === "string");
-}
-
-function isTransferIdentityDocument(value: unknown): value is Omit<TransferIdentityDocument, "files"> {
-  return Boolean(value && typeof value === "object" &&
-    ["Aadhaar", "PAN", "DL", "Other"].includes((value as TransferIdentityDocument).kind) &&
-    typeof (value as TransferIdentityDocument).number === "string");
-}
 type OriginalAllotmentReference = { number: string; date: string };
+type TransferFormDraft = {
+  version: 1;
+  recordId?: string;
+  documentId?: string;
+  savedBuyerOwnerId?: string;
+  mode: "new" | "existing";
+  buyerOwnerId: string;
+  ownerType: "INDIVIDUAL" | "COMPANY" | "SHARED";
+  name: string;
+  relationPrefix: string;
+  relationName: string;
+  email: string;
+  phone: string;
+  address: string;
+  identityDocuments: Array<Omit<TransferIdentityDocument, "files">>;
+  sellerRelationPrefix: string;
+  sellerRelationName: string;
+  originalAllotmentNumber: string;
+  originalAllotmentDate: string;
+  effectiveAt: string;
+  amountInr: string;
+  sharePct: string;
+  stamps: TransferStamp[];
+  notes: string;
+  letterFields: Record<string, string>;
+  savedIdentityFiles: Record<string, StoredFileRef[]>;
+  savedManualFiles: Record<string, StoredFileRef[]>;
+};
 type RealEstateDocumentType =
   | "ALLOTMENT_LETTER"
   | "TRANSFER_LETTER"
@@ -319,6 +336,85 @@ export function OwnershipDocumentUpload({
   );
 }
 
+export function HistoricalOwnershipDocumentUpload({
+  projectId,
+  plotId,
+  hasCurrentOwner,
+  transferCount,
+}: {
+  projectId: string;
+  plotId: string;
+  hasCurrentOwner: boolean;
+  transferCount: number;
+}) {
+  const router = useRouter();
+  const [kind, setKind] = useState<"ALLOTMENT_LETTER" | "TRANSFER_LETTER">(
+    hasCurrentOwner ? "TRANSFER_LETTER" : "ALLOTMENT_LETTER",
+  );
+  const [documentNo, setDocumentNo] = useState("");
+  const [documentDate, setDocumentDate] = useState("");
+
+  function continueSetup(file: { id: string }) {
+    const common = `historical=1&historicalFileId=${encodeURIComponent(file.id)}`;
+    if (kind === "TRANSFER_LETTER") {
+      router.push(`/app/projects/${projectId}/plots/${plotId}/transfer?${common}`);
+      return;
+    }
+    router.push(`/app/projects/${projectId}/ownership/new-allotment?plotId=${encodeURIComponent(plotId)}&${common}`);
+  }
+
+  return (
+    <div className="rounded-lg border border-blue-200 bg-blue-50/40 p-4 lg:col-span-2">
+      <div className="mb-1 flex items-center gap-2">
+        <FileUp size={17} />
+        <h3 className="text-sm font-semibold">Import old signed allotment / transfer letter</h3>
+      </div>
+      <p className="mb-4 text-xs leading-5 text-slate-600">
+        Upload the signed file, then complete the same details used by a letter created in WIDESTATE OS. The plot owner, status, history, and next letter workflow update only after setup is saved.
+      </p>
+      <div className="grid gap-3 md:grid-cols-3">
+        <label>
+          <span className="label">Ownership event</span>
+          <select className="input" value={kind} onChange={(event) => setKind(event.target.value as typeof kind)}>
+            <option value="ALLOTMENT_LETTER" disabled={hasCurrentOwner}>Original allotment</option>
+            <option value="TRANSFER_LETTER" disabled={!hasCurrentOwner}>Transfer {transferCount + 1}</option>
+          </select>
+        </label>
+        <label>
+          <span className="label">Letter number / reference</span>
+          <input className="input" value={documentNo} onChange={(event) => setDocumentNo(event.target.value)} />
+        </label>
+        <label>
+          <span className="label">Letter date</span>
+          <input className="input" type="date" value={documentDate} onChange={(event) => setDocumentDate(event.target.value)} />
+        </label>
+      </div>
+      <div className="mt-3">
+        <FileUploader
+          label={`Upload signed ${kind === "TRANSFER_LETTER" ? `transfer ${transferCount + 1}` : "allotment"} letter and continue`}
+          visibility="OWNER_VISIBLE"
+          ownerType="Plot"
+          ownerId={plotId}
+          accept="application/pdf,image/*"
+          metadata={{
+            documentType: kind,
+            documentNo: documentNo || undefined,
+            documentDate: documentDate ? new Date(`${documentDate}T12:00:00`).toISOString() : undefined,
+            notes: kind === "TRANSFER_LETTER" ? `Old signed transfer ${transferCount + 1}` : "Old signed allotment letter",
+            categoryKey: kind === "TRANSFER_LETTER"
+              ? "signed-transfer-letter"
+              : "signed-allotment-letter",
+          }}
+          onUploaded={continueSetup}
+        />
+      </div>
+      {!hasCurrentOwner ? (
+        <p className="mt-3 text-xs text-slate-500">Import the original allotment first. Transfer import becomes available after the previous owner is recorded.</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function PlotAllotmentForm({ plotId, owners }: { plotId: string; owners: OwnerDetailOption[] }) {
   const router = useRouter();
   const [mode, setMode] = useState<"new" | "existing">("new");
@@ -514,6 +610,7 @@ export function PlotTransferForm({
   currentOwner,
   originalAllotment = { number: "", date: "" },
   manualLetterFields = [],
+  historicalImport,
 }: {
   plotId: string;
   projectId?: string;
@@ -521,6 +618,7 @@ export function PlotTransferForm({
   currentOwner?: OwnerDetailOption;
   originalAllotment?: OriginalAllotmentReference;
   manualLetterFields?: ManualLetterField[];
+  historicalImport?: { fileAssetId: string; documentNumber: string; documentDate: string };
 }) {
   const router = useRouter();
   const today = new Date().toISOString().slice(0, 10);
@@ -546,7 +644,7 @@ export function PlotTransferForm({
   );
   const [originalAllotmentNumber, setOriginalAllotmentNumber] = useState(originalAllotment.number);
   const [originalAllotmentDate, setOriginalAllotmentDate] = useState(originalAllotment.date);
-  const [effectiveAt, setEffectiveAt] = useState(today);
+  const [effectiveAt, setEffectiveAt] = useState(historicalImport?.documentDate || today);
   const [amountInr, setAmountInr] = useState("");
   const [sharePct, setSharePct] = useState("100");
   const [stamps, setStamps] = useState<TransferStamp[]>([
@@ -556,51 +654,22 @@ export function PlotTransferForm({
   const [notes, setNotes] = useState("");
   const [letterFields, setLetterFields] = useState<Record<string, string>>({});
   const [letterFieldFiles, setLetterFieldFiles] = useState<Record<string, File[]>>({});
+  const [savedRecordId, setSavedRecordId] = useState("");
+  const [savedDocumentId, setSavedDocumentId] = useState("");
+  const [savedBuyerOwnerId, setSavedBuyerOwnerId] = useState("");
+  const [savedIdentityFiles, setSavedIdentityFiles] = useState<Record<string, StoredFileRef[]>>({});
+  const [savedManualFiles, setSavedManualFiles] = useState<Record<string, StoredFileRef[]>>({});
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
-  // Opening the letter studio navigates away from this page. Keep the completed transfer form
-  // locally so returning with the browser back button never makes an operator re-enter it.
-  // Files themselves cannot be restored by a browser, but they have already been uploaded to
-  // the transfer record before the redirect; all entered form values are retained.
-  const restoreKey = `widestate:transfer-form:${plotId}`;
+  const restoredDraft = useRef(false);
+  const storageKey = `widestate:transfer-draft:${plotId}:${currentOwner?.id ?? "company"}${historicalImport ? `:historical-${historicalImport.fileAssetId}` : ""}`;
 
-  useEffect(() => {
-    try {
-      const saved = JSON.parse(window.sessionStorage.getItem(restoreKey) ?? "{}") as Record<string, unknown>;
-      if (!saved || typeof saved !== "object") return;
-      if (saved.mode === "new" || saved.mode === "existing") setMode(saved.mode);
-      if (typeof saved.buyerOwnerId === "string") setBuyerOwnerId(saved.buyerOwnerId);
-      if (saved.ownerType === "INDIVIDUAL" || saved.ownerType === "COMPANY" || saved.ownerType === "SHARED") setOwnerType(saved.ownerType);
-      if (typeof saved.name === "string") setName(saved.name);
-      if (typeof saved.relationPrefix === "string") setRelationPrefix(saved.relationPrefix);
-      if (typeof saved.relationName === "string") setRelationName(saved.relationName);
-      if (typeof saved.email === "string") setEmail(saved.email);
-      if (typeof saved.phone === "string") setPhone(saved.phone);
-      if (typeof saved.address === "string") setAddress(saved.address);
-      if (typeof saved.sellerRelationPrefix === "string") setSellerRelationPrefix(saved.sellerRelationPrefix);
-      if (typeof saved.sellerRelationName === "string") setSellerRelationName(saved.sellerRelationName);
-      if (typeof saved.originalAllotmentNumber === "string") setOriginalAllotmentNumber(saved.originalAllotmentNumber);
-      if (typeof saved.originalAllotmentDate === "string") setOriginalAllotmentDate(saved.originalAllotmentDate);
-      if (typeof saved.effectiveAt === "string") setEffectiveAt(saved.effectiveAt);
-      if (typeof saved.amountInr === "string") setAmountInr(saved.amountInr);
-      if (typeof saved.sharePct === "string") setSharePct(saved.sharePct);
-      if (typeof saved.notes === "string") setNotes(saved.notes);
-      if (Array.isArray(saved.stamps)) setStamps(saved.stamps.filter(isTransferStamp));
-      if (Array.isArray(saved.identityDocuments)) {
-        const restored = saved.identityDocuments.filter(isTransferIdentityDocument);
-        if (restored.length) setIdentityDocuments(restored.map((document) => ({ ...document, files: [] })));
-      }
-      if (saved.letterFields && typeof saved.letterFields === "object" && !Array.isArray(saved.letterFields)) {
-        setLetterFields(saved.letterFields as Record<string, string>);
-      }
-    } catch {
-      // A malformed browser cache must never stop the transfer form from opening.
-    }
-  }, [restoreKey]);
-
-  function saveReturnState() {
-    if (typeof window === "undefined") return;
-    window.sessionStorage.setItem(restoreKey, JSON.stringify({
+  function draftPayload(overrides: Partial<TransferFormDraft> = {}): TransferFormDraft {
+    return {
+      version: 1,
+      recordId: savedRecordId || undefined,
+      documentId: savedDocumentId || undefined,
+      savedBuyerOwnerId: savedBuyerOwnerId || undefined,
       mode,
       buyerOwnerId,
       ownerType,
@@ -610,6 +679,7 @@ export function PlotTransferForm({
       email,
       phone,
       address,
+      identityDocuments: identityDocuments.map(({ kind, number }) => ({ kind, number })),
       sellerRelationPrefix,
       sellerRelationName,
       originalAllotmentNumber,
@@ -617,12 +687,76 @@ export function PlotTransferForm({
       effectiveAt,
       amountInr,
       sharePct,
-      notes,
       stamps,
-      identityDocuments: identityDocuments.map(({ kind, number }) => ({ kind, number })),
+      notes,
       letterFields,
-    }));
+      savedIdentityFiles,
+      savedManualFiles,
+      ...overrides,
+    };
   }
+
+  function saveDraft(overrides: Partial<TransferFormDraft> = {}) {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(storageKey, JSON.stringify(draftPayload(overrides)));
+  }
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.localStorage.getItem(storageKey);
+    if (saved) {
+      try {
+        const draft = JSON.parse(saved) as Partial<TransferFormDraft>;
+        if (draft.version === 1) {
+          setSavedRecordId(draft.recordId ?? "");
+          setSavedDocumentId(draft.documentId ?? "");
+          setSavedBuyerOwnerId(draft.savedBuyerOwnerId ?? "");
+          setMode(draft.mode === "existing" ? "existing" : "new");
+          setBuyerOwnerId(draft.buyerOwnerId ?? "");
+          setOwnerType(draft.ownerType ?? "INDIVIDUAL");
+          setName(draft.name ?? "");
+          setRelationPrefix(draft.relationPrefix ?? "s/o Sh.");
+          setRelationName(draft.relationName ?? "");
+          setEmail(draft.email ?? "");
+          setPhone(draft.phone ?? "");
+          setAddress(draft.address ?? "");
+          if (draft.identityDocuments?.length) {
+            setIdentityDocuments(draft.identityDocuments.map((entry) => ({ ...entry, files: [] })));
+          }
+          setSellerRelationPrefix(draft.sellerRelationPrefix ?? "s/o Sh.");
+          setSellerRelationName(draft.sellerRelationName ?? "");
+          setOriginalAllotmentNumber(draft.originalAllotmentNumber ?? originalAllotment.number);
+          setOriginalAllotmentDate(draft.originalAllotmentDate ?? originalAllotment.date);
+          setEffectiveAt(draft.effectiveAt ?? today);
+          setAmountInr(draft.amountInr ?? "");
+          setSharePct(draft.sharePct ?? "100");
+          if (draft.stamps?.length) setStamps(draft.stamps);
+          setNotes(draft.notes ?? "");
+          setLetterFields(draft.letterFields ?? {});
+          setSavedIdentityFiles(draft.savedIdentityFiles ?? {});
+          setSavedManualFiles(draft.savedManualFiles ?? {});
+          setMessage("Your latest saved transfer form has been restored.");
+        }
+      } catch {
+        window.localStorage.removeItem(storageKey);
+      }
+    }
+    restoredDraft.current = true;
+  // The plot-specific storage key is stable for the lifetime of this form.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (!restoredDraft.current) return;
+    saveDraft();
+  // File objects are intentionally excluded because browsers cannot restore file inputs.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    mode, buyerOwnerId, ownerType, name, relationPrefix, relationName, email, phone, address,
+    identityDocuments, sellerRelationPrefix, sellerRelationName, originalAllotmentNumber,
+    originalAllotmentDate, effectiveAt, amountInr, sharePct, stamps, notes, letterFields,
+    savedRecordId, savedDocumentId, savedBuyerOwnerId, savedIdentityFiles, savedManualFiles,
+  ]);
 
   function selectExistingBuyer(ownerId: string) {
     setBuyerOwnerId(ownerId);
@@ -645,6 +779,8 @@ export function PlotTransferForm({
   function startNewBuyer() {
     setMode("new");
     setBuyerOwnerId("");
+    setSavedBuyerOwnerId("");
+    setSavedIdentityFiles({});
     setOwnerType("INDIVIDUAL");
     setName("");
     setEmail("");
@@ -657,6 +793,57 @@ export function PlotTransferForm({
       { kind: "PAN", number: "", files: [] },
       { kind: "DL", number: "", files: [] },
     ]);
+  }
+
+  function eraseSavedForm() {
+    if (!window.confirm("Erase all entered transfer details and start with a blank form?")) return;
+    const recordId = savedRecordId;
+    const documentId = savedDocumentId;
+    startNewBuyer();
+    setSellerRelationPrefix(ownerKycValue(currentOwner, ["relationPrefix", "relation"]) || "s/o Sh.");
+    setSellerRelationName(ownerKycValue(currentOwner, ["fatherName", "father", "relationName"]));
+    setOriginalAllotmentNumber(originalAllotment.number);
+    setOriginalAllotmentDate(originalAllotment.date);
+    setEffectiveAt(today);
+    setAmountInr("");
+    setSharePct("100");
+    setStamps([{ number: "", dated: today }, { number: "", dated: today }]);
+    setNotes("");
+    setLetterFields({});
+    setLetterFieldFiles({});
+    setSavedIdentityFiles({});
+    setSavedManualFiles({});
+    setMessage("Saved form cleared. Enter the new transfer details.");
+    window.localStorage.setItem(storageKey, JSON.stringify({
+      ...draftPayload(),
+      recordId: recordId || undefined,
+      documentId: documentId || undefined,
+      savedBuyerOwnerId: undefined,
+      mode: "new",
+      buyerOwnerId: "",
+      ownerType: "INDIVIDUAL",
+      name: "",
+      relationPrefix: "s/o Sh.",
+      relationName: "",
+      email: "",
+      phone: "",
+      address: "",
+      identityDocuments: [
+        { kind: "Aadhaar", number: "" },
+        { kind: "PAN", number: "" },
+        { kind: "DL", number: "" },
+      ],
+      originalAllotmentNumber: originalAllotment.number,
+      originalAllotmentDate: originalAllotment.date,
+      effectiveAt: today,
+      amountInr: "",
+      sharePct: "100",
+      stamps: [{ number: "", dated: today }, { number: "", dated: today }],
+      notes: "",
+      letterFields: {},
+      savedIdentityFiles: {},
+      savedManualFiles: {},
+    } satisfies TransferFormDraft));
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -686,7 +873,8 @@ export function PlotTransferForm({
         if (!sellerResponse.ok) throw new Error(sellerBody.error ?? "Transferor details could not be saved.");
       }
 
-      const selectedExistingOwner = owners.find((owner) => owner.id === buyerOwnerId);
+      const editableBuyerOwnerId = mode === "existing" ? buyerOwnerId : savedBuyerOwnerId;
+      const selectedExistingOwner = owners.find((owner) => owner.id === editableBuyerOwnerId);
       const aadhaarNo = identityDocuments.find((entry) => entry.kind === "Aadhaar")?.number.trim() ?? "";
       const panNo = identityDocuments.find((entry) => entry.kind === "PAN")?.number.trim() ?? "";
       const dlNo = identityDocuments.find((entry) => entry.kind === "DL")?.number.trim() ?? "";
@@ -706,9 +894,9 @@ export function PlotTransferForm({
         },
       };
       const ownerResponse = await fetch(
-        mode === "existing" ? `/api/v1/ownership/owners/${buyerOwnerId}` : "/api/v1/ownership/owners",
+        editableBuyerOwnerId ? `/api/v1/ownership/owners/${editableBuyerOwnerId}` : "/api/v1/ownership/owners",
         {
-          method: mode === "existing" ? "PATCH" : "POST",
+          method: editableBuyerOwnerId ? "PATCH" : "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(ownerPayload),
         },
@@ -738,87 +926,133 @@ export function PlotTransferForm({
           })),
       ]);
       const mergedIdentityDocuments = identityDocuments
-        .map((entry, index) => ({
-          kind: entry.kind,
-          number: entry.number.trim() || undefined,
-          files: uploaded
+        .map((entry, index) => {
+          const newlyUploaded = uploaded
             .filter((file) => file.group === `identity-${entry.kind}-${index}`)
-            .map(({ group, ...file }) => file),
-        }))
+            .map(({ group, ...file }) => file);
+          return {
+            kind: entry.kind,
+            number: entry.number.trim() || undefined,
+            files: newlyUploaded.length ? newlyUploaded : (savedIdentityFiles[String(index)] ?? []),
+          };
+        })
         .filter((entry) => entry.number || entry.files.length);
       const uploadedManualFieldFiles: Record<string, StoredFileRef[]> = Object.fromEntries(
         manualLetterFields
           .filter((field) => field.inputType === "FILE")
-          .map((field) => [
-            field.key,
-            uploaded.filter((file) => file.group === `manual-${field.key}`).map(({ group, ...file }) => file),
-          ])
+          .map((field) => {
+            const newlyUploaded = uploaded
+              .filter((file) => file.group === `manual-${field.key}`)
+              .map(({ group, ...file }) => file);
+            return [field.key, newlyUploaded.length ? newlyUploaded : (savedManualFiles[field.key] ?? [])];
+          })
+          .filter(([, files]) => (files as StoredFileRef[]).length),
+      );
+      const nextSavedIdentityFiles = Object.fromEntries(
+        identityDocuments
+          .map((entry, index) => {
+            const newlyUploaded = uploaded
+              .filter((file) => file.group === `identity-${entry.kind}-${index}`)
+              .map(({ group, ...file }) => file);
+            return [String(index), newlyUploaded.length ? newlyUploaded : (savedIdentityFiles[String(index)] ?? [])];
+          })
           .filter(([, files]) => (files as StoredFileRef[]).length),
       );
 
-      const response = await fetch(`/api/v1/ownership/plots/${plotId}/transfer`, {
+      const transferPayload = {
+        recordId: savedRecordId || undefined,
+        buyerOwnerId: resolvedBuyerId,
+        amountInr: amountInr ? Number(amountInr) : undefined,
+        sharePct: sharePct ? Number(sharePct) : undefined,
+        effectiveAt: effectiveAt ? new Date(effectiveAt).toISOString() : undefined,
+        notes: notes || undefined,
+        extraDetails: {
+          transfer: {
+            seller: {
+              name: currentOwner?.name ?? "",
+              relationPrefix: sellerRelationPrefix || undefined,
+              fatherName: sellerRelationName || undefined,
+              email: currentOwner?.email || undefined,
+              phone: currentOwner?.phone || undefined,
+              address: currentOwner?.address || undefined,
+              aadhaarNo: ownerKycValue(currentOwner, ["aadhaarNo", "aadharNo", "aadhaar", "aadhar"]) || undefined,
+              panNo: ownerKycValue(currentOwner, ["panNo", "pan"]) || undefined,
+            },
+            sellerRelationPrefix: sellerRelationPrefix || undefined,
+            sellerFatherName: sellerRelationName || undefined,
+            originalAllotmentNumber: originalAllotmentNumber || undefined,
+            originalAllotmentDate: originalAllotmentDate || undefined,
+            notes: notes || undefined,
+          },
+          allottee: {
+            name,
+            relationPrefix: relationPrefix || undefined,
+            fatherName: relationName || undefined,
+            address: address || undefined,
+            phone: phone || undefined,
+            documents: mergedIdentityDocuments,
+          },
+          eStampNumber: stamps.find((entry) => entry.number)?.number || undefined,
+          eStampDate: stamps.find((entry) => entry.number)?.dated || undefined,
+          stamps: stamps.filter((entry) => entry.number || entry.dated),
+          customLetterFields: letterFields,
+          customLetterFiles: uploadedManualFieldFiles,
+        },
+      };
+      const response = await fetch(
+        historicalImport
+          ? `/api/v1/ownership/plots/${plotId}/historical-transfer`
+          : `/api/v1/ownership/plots/${plotId}/transfer`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          buyerOwnerId: resolvedBuyerId,
-          amountInr: amountInr ? Number(amountInr) : undefined,
-          sharePct: sharePct ? Number(sharePct) : undefined,
-          effectiveAt: effectiveAt ? new Date(effectiveAt).toISOString() : undefined,
-          notes: notes || undefined,
-          extraDetails: {
-            transfer: {
-              // A transfer letter is a historical document. Persist the transferor snapshot at
-              // the moment this transfer is recorded instead of relying on whichever owner is
-              // currently selected when the document is later opened or regenerated.
-              seller: {
-                name: currentOwner?.name ?? "",
-                relationPrefix: sellerRelationPrefix || undefined,
-                fatherName: sellerRelationName || undefined,
-                email: currentOwner?.email || undefined,
-                phone: currentOwner?.phone || undefined,
-                address: currentOwner?.address || undefined,
-                aadhaarNo: ownerKycValue(currentOwner, ["aadhaarNo", "aadharNo", "aadhaar", "aadhar"]) || undefined,
-                panNo: ownerKycValue(currentOwner, ["panNo", "pan"]) || undefined,
-              },
-              sellerRelationPrefix: sellerRelationPrefix || undefined,
-              sellerFatherName: sellerRelationName || undefined,
-              originalAllotmentNumber: originalAllotmentNumber || undefined,
-              originalAllotmentDate: originalAllotmentDate || undefined,
-              notes: notes || undefined,
-            },
-            allottee: {
-              name,
-              relationPrefix: relationPrefix || undefined,
-              fatherName: relationName || undefined,
-              address: address || undefined,
-              phone: phone || undefined,
-              documents: mergedIdentityDocuments,
-            },
-            eStampNumber: stamps.find((entry) => entry.number)?.number || undefined,
-            eStampDate: stamps.find((entry) => entry.number)?.dated || undefined,
-            stamps: stamps.filter((entry) => entry.number || entry.dated),
-            customLetterFields: letterFields,
-            customLetterFiles: uploadedManualFieldFiles,
-          },
-        }),
+        body: JSON.stringify(historicalImport
+          ? {
+              ...transferPayload,
+              fileAssetId: historicalImport.fileAssetId,
+              documentNumber: historicalImport.documentNumber || undefined,
+            }
+          : transferPayload),
       });
       const body = await response.json();
       if (!response.ok) throw new Error(body.error ?? "Transfer failed");
+      const recordId = body.data.record.id as string;
+      setSavedBuyerOwnerId(resolvedBuyerId);
+      setSavedRecordId(recordId);
+      setSavedIdentityFiles(nextSavedIdentityFiles);
+      setSavedManualFiles(uploadedManualFieldFiles);
+      saveDraft({
+        recordId,
+        savedBuyerOwnerId: resolvedBuyerId,
+        savedIdentityFiles: nextSavedIdentityFiles,
+        savedManualFiles: uploadedManualFieldFiles,
+      });
 
-      const draftResponse = await fetch("/api/v1/documents/drafts", {
+      if (historicalImport) {
+        window.localStorage.removeItem(storageKey);
+        router.push(`/app/projects/${projectId}/plots/${plotId}?tab=documents`);
+        router.refresh();
+        return;
+      }
+
+      const draftData = {
+        transferAmountInr: amountInr ? Number(amountInr) : undefined,
+        transferNotes: notes || undefined,
+        customLetterFields: letterFields,
+        customLetterFiles: uploadedManualFieldFiles,
+      };
+      const draftResponse = await fetch(savedDocumentId
+        ? `/api/v1/documents/${savedDocumentId}/refresh`
+        : "/api/v1/documents/drafts", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          type: "transfer_letter",
-          recordType: "Plot",
-          recordId: plotId,
-          data: {
-            transferAmountInr: amountInr ? Number(amountInr) : undefined,
-            transferNotes: notes || undefined,
-            customLetterFields: letterFields,
-            customLetterFiles: uploadedManualFieldFiles,
-          },
-        }),
+        body: JSON.stringify(savedDocumentId
+          ? { data: draftData }
+          : {
+              type: "transfer_letter",
+              recordType: "Plot",
+              recordId: plotId,
+              data: draftData,
+            }),
       });
       const draftBody = await draftResponse.json();
       if (!draftResponse.ok) {
@@ -826,10 +1060,18 @@ export function PlotTransferForm({
         router.refresh();
         return;
       }
+      const documentId = draftBody.data.document.id as string;
+      setSavedDocumentId(documentId);
+      saveDraft({
+        recordId,
+        documentId,
+        savedBuyerOwnerId: resolvedBuyerId,
+        savedIdentityFiles: nextSavedIdentityFiles,
+        savedManualFiles: uploadedManualFieldFiles,
+      });
       if (projectId) {
-        saveReturnState();
         const returnTo = `/app/projects/${projectId}/plots/${plotId}/transfer`;
-        router.push(`/app/projects/${projectId}/plots/${plotId}/letters/${draftBody.data.document.id}?returnTo=${encodeURIComponent(returnTo)}`);
+        router.push(`/app/projects/${projectId}/plots/${plotId}/letters/${documentId}?returnTo=${encodeURIComponent(returnTo)}`);
         return;
       }
       setMessage("Transfer recorded. Open the plot documents to edit the transfer letter.");
@@ -843,6 +1085,16 @@ export function PlotTransferForm({
 
   return (
     <form onSubmit={submit} className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3">
+        <div>
+          <div className="text-sm font-semibold text-slate-900">{historicalImport ? "Import completed transfer" : "Transfer form draft"}</div>
+          <div className="text-xs text-slate-500">{historicalImport ? "Complete the historical transferee and letter details before saving." : "Changes are saved automatically on this device."}</div>
+        </div>
+        <button type="button" className="btn-outline h-9 px-3 text-sm" onClick={eraseSavedForm}>
+          <X size={15} />
+          Erase saved form
+        </button>
+      </div>
       <div className="rounded-lg border border-slate-200 bg-white p-4">
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">1. Transferor details</div>
         <h3 className="mt-1 font-semibold">Current owner</h3>
@@ -899,7 +1151,13 @@ export function PlotTransferForm({
               <div className="grid gap-2 rounded-lg border border-slate-200 p-3 md:grid-cols-[150px_1fr_1fr_auto]" key={`${document.kind}-${index}`}>
                 <label><span className="label">Type</span><select className="input" value={document.kind} onChange={(event) => setIdentityDocuments((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, kind: event.target.value as TransferIdentityDocument["kind"] } : item))}><option>Aadhaar</option><option>PAN</option><option>DL</option><option>Other</option></select></label>
                 <label><span className="label">Number</span><input className="input" value={document.number} onChange={(event) => setIdentityDocuments((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, number: event.target.value } : item))} /></label>
-                <label><span className="label">Upload files</span><input className="input pt-2" type="file" multiple onChange={(event) => setIdentityDocuments((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, files: Array.from(event.target.files ?? []) } : item))} /></label>
+                <label>
+                  <span className="label">Upload files</span>
+                  <input className="input pt-2" type="file" multiple onChange={(event) => setIdentityDocuments((items) => items.map((item, itemIndex) => itemIndex === index ? { ...item, files: Array.from(event.target.files ?? []) } : item))} />
+                  {(document.files.length ? document.files.map((file) => file.name) : (savedIdentityFiles[String(index)] ?? []).map((file) => file.fileName)).length
+                    ? <div className="mt-1 text-xs text-slate-500">{(document.files.length ? document.files.map((file) => file.name) : (savedIdentityFiles[String(index)] ?? []).map((file) => file.fileName)).join(", ")}</div>
+                    : null}
+                </label>
                 <button type="button" className="btn-outline self-end px-3" disabled={identityDocuments.length === 1} onClick={() => setIdentityDocuments((items) => items.filter((_, itemIndex) => itemIndex !== index))} aria-label="Remove identity document"><X size={16} /></button>
               </div>
             ))}
@@ -943,8 +1201,12 @@ export function PlotTransferForm({
             {manualLetterFields.map((field) => field.inputType === "FILE" ? (
               <label key={field.key}>
                 <span className="label text-amber-950">{field.label}</span>
-                <input className="input bg-white pt-2" type="file" multiple required={(letterFieldFiles[field.key]?.length ?? 0) === 0} onChange={(event) => setLetterFieldFiles((current) => ({ ...current, [field.key]: Array.from(event.target.files ?? []) }))} />
-                {(letterFieldFiles[field.key]?.length ?? 0) > 0 ? <div className="mt-1 text-xs text-amber-900">{letterFieldFiles[field.key].map((file) => file.name).join(", ")}</div> : null}
+                <input className="input bg-white pt-2" type="file" multiple required={(letterFieldFiles[field.key]?.length ?? 0) === 0 && (savedManualFiles[field.key]?.length ?? 0) === 0} onChange={(event) => setLetterFieldFiles((current) => ({ ...current, [field.key]: Array.from(event.target.files ?? []) }))} />
+                {(letterFieldFiles[field.key]?.length ?? 0) > 0
+                  ? <div className="mt-1 text-xs text-amber-900">{letterFieldFiles[field.key].map((file) => file.name).join(", ")}</div>
+                  : (savedManualFiles[field.key]?.length ?? 0) > 0
+                    ? <div className="mt-1 text-xs text-amber-900">{savedManualFiles[field.key].map((file) => file.fileName).join(", ")} · already uploaded</div>
+                    : null}
               </label>
             ) : (
               <label key={field.key}>
@@ -959,7 +1221,7 @@ export function PlotTransferForm({
       {message ? <div className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
       <button className="btn-primary w-full" disabled={loading || (mode === "existing" ? !buyerOwnerId || !name : !name)}>
         {loading ? <Loader2 className="animate-spin" size={17} /> : <Send size={17} />}
-        Record transfer and open letter
+        {historicalImport ? "Save imported transfer" : "Record transfer and open letter"}
       </button>
     </form>
   );

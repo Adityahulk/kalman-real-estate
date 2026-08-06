@@ -76,9 +76,9 @@ export async function cleanPlotAuditEvents(context: RequestContext, plotId: stri
       ...revisions.flatMap((revision) => [revision.baseFileId, revision.outputFileId]).filter((id): id is string => Boolean(id)),
     ]);
     const fileFilters: Prisma.FileAssetWhereInput[] = [
-      { ownerType: "Plot", ownerId: plot.id, categoryKey: { in: ["signed-allotment-letter", "allotment-payment", "allotment-extra"] } },
+      { ownerType: "Plot", ownerId: plot.id, categoryKey: { in: ["signed-allotment-letter", "signed-transfer-letter", "allotment-payment", "allotment-extra"] } },
       { ownerType: "Plot", ownerId: plot.id, categoryKey: { startsWith: "manual-letter-" } },
-      { ownerType: "Plot", ownerId: plot.id, documentType: RealEstateDocumentType.ALLOTMENT_LETTER },
+      { ownerType: "Plot", ownerId: plot.id, documentType: { in: [RealEstateDocumentType.ALLOTMENT_LETTER, RealEstateDocumentType.TRANSFER_LETTER] } },
     ];
     if (fileIdsFromRecords.length || generatedFileIds.length) {
       fileFilters.push({ id: { in: unique([...fileIdsFromRecords, ...generatedFileIds]) } });

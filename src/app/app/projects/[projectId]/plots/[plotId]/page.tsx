@@ -27,6 +27,7 @@ import { FilePreview } from "@/components/file-preview";
 import { FileShareActions } from "@/components/file-share-actions";
 import { MultiFileShare } from "@/components/multi-file-share";
 import { FileUploader } from "@/components/file-uploader";
+import { SignedLetterUpload } from "@/components/signed-letter-upload";
 import { DeleteDocumentButton, DocumentApprovalButtons } from "../../../../documents/document-actions";
 import { ManualPlotZoneForm } from "../../../manual-entry-actions";
 import {
@@ -54,6 +55,7 @@ export default async function ProjectPlotWorkspacePage(
   const canManageOwnership = hasPermission(session.role, "ownership.manage", session.permissions);
   const canGenerateDocuments = hasPermission(session.role, "documents.generate", session.permissions);
   const canApproveDocuments = hasPermission(session.role, "documents.approve", session.permissions);
+  const canSignDocuments = hasPermission(session.role, "documents.sign", session.permissions);
   const canUploadFiles = hasPermission(session.role, "files.upload", session.permissions);
   const canRestoreRecords = hasPermission(session.role, "records.restore", session.permissions);
   const [workspace, firm] = await Promise.all([
@@ -67,17 +69,28 @@ export default async function ProjectPlotWorkspacePage(
   const cadFileId = workspace.spatialLinks[0]?.entity.scene.cadFileId;
   const plotMapFileId = workspace.childCadFiles[0]?.id ?? cadFileId;
   const plotMapFiles = workspace.plotFiles.filter((file) => file.categoryKey === "plot-map");
-  const signedAllotmentFiles = workspace.plotFiles.filter((file) => file.categoryKey === "signed-allotment-letter");
+  const signedOwnershipFiles = workspace.plotFiles.filter(
+    (file) => file.categoryKey === "signed-allotment-letter" || file.categoryKey === "signed-transfer-letter",
+  );
   const oldDocumentFiles = workspace.plotFiles.filter((file) => file.categoryKey === "old-documents");
+  const linkedOwnershipFileIds = new Set(
+    workspace.generatedDocuments
+      .flatMap((document) => [document.fileAssetId, document.signedFileAssetId])
+      .filter(Boolean) as string[],
+  );
+  const pendingHistoricalFiles = [...oldDocumentFiles, ...signedOwnershipFiles]
+    .filter((file, index, files) => files.findIndex((candidate) => candidate.id === file.id) === index)
+    .filter((file) => !linkedOwnershipFileIds.has(file.id));
   const latestPlotMapFile = plotMapFiles[0] ?? null;
   const latestPlotCadPreviewId = workspace.childCadFiles.find((file) => file.analysis?.previewArtifactKey)?.id ?? null;
   const registryDocuments = workspace.plotFiles.filter((file) => file.documentType === "REGISTRY_RECEIPT" || file.documentType === "REGISTRY_DEED");
   const ownershipLetters = workspace.generatedDocuments.filter((document) => document.type.includes("allotment") || document.type.includes("transfer"));
   const latestSignedLetterUploadTargetId = ownershipLetters
-    .filter((document) => document.type.includes("allotment") && document.fileAssetId && !["REJECTED", "CHANGES_REQUESTED"].includes(document.status))
+    .filter((document) => document.fileAssetId && ["APPROVED", "SENT_FOR_SIGNATURE", "SIGNED"].includes(document.status))
     .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0]?.id ?? null;
-  const latestSignedByDocumentNo = new globalThis.Map<string, typeof signedAllotmentFiles[number]>();
-  for (const file of signedAllotmentFiles) {
+  const latestSignedByDocumentNo = new globalThis.Map<string, typeof signedOwnershipFiles[number]>();
+  const availableSignedFileIds = new Set(signedOwnershipFiles.map((file) => file.id));
+  for (const file of signedOwnershipFiles) {
     if (file.documentNo && !latestSignedByDocumentNo.has(file.documentNo)) latestSignedByDocumentNo.set(file.documentNo, file);
   }
   const latestAllotmentRecord = plot.ownershipRecords.find((record) => record.kind === "ALLOTMENT") ?? null;
@@ -88,12 +101,10 @@ export default async function ProjectPlotWorkspacePage(
   const historicalAllotmentRecord = ownershipEventRecords.find(
     (record) => record.kind === "ALLOTMENT" && isHistoricalAllotment(record.extraDetails),
   ) ?? null;
-  const allotmentSupportFiles = uniqueFiles([
+  const currentAllotteeSupportingFiles = uniqueFiles([
     ...workspace.allotmentSupportingFiles,
     ...workspace.ownerFiles.filter((file) => file.categoryKey === "allottee-kyc" || file.categoryKey === "transfer-kyc"),
-    ...workspace.plotFiles.filter((file) => file.categoryKey === "allotment-payment"),
-    ...workspace.plotFiles.filter((file) => file.categoryKey === "allotment-extra" || file.categoryKey?.startsWith("manual-letter-")),
-  ]);
+  ]).sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
   const developmentPct = plot.checklistItems.length
     ? Math.round(plot.checklistItems.reduce((total, item) => total + item.progressPct, 0) / plot.checklistItems.length)
     : 0;
@@ -184,7 +195,8 @@ export default async function ProjectPlotWorkspacePage(
                   plotId={plot.id}
                   latestSignedLetterUploadTargetId={latestSignedLetterUploadTargetId}
                   signedByDocumentNo={latestSignedByDocumentNo}
-                  canUploadSigned={canUploadFiles}
+                  availableSignedFileIds={availableSignedFileIds}
+                  canUploadSigned={canSignDocuments}
                 />
               </div>
             </AccordionRow>
@@ -238,7 +250,8 @@ export default async function ProjectPlotWorkspacePage(
               plotId={plot.id}
               latestSignedLetterUploadTargetId={latestSignedLetterUploadTargetId}
               signedByDocumentNo={latestSignedByDocumentNo}
-              canUploadSigned={canUploadFiles}
+              availableSignedFileIds={availableSignedFileIds}
+              canUploadSigned={canSignDocuments}
             />
           </div>
         </section>
@@ -324,57 +337,91 @@ export default async function ProjectPlotWorkspacePage(
         <section className="mt-4 grid gap-6 xl:grid-cols-[1fr_320px]">
           <div className="space-y-6">
             <div className="card p-5">
-              <h2 className="mb-4 font-semibold">Generated letters</h2>
-              <div className="space-y-3">
-                {workspace.generatedDocuments.map((document) => (
-                  <div key={document.id} className="rounded-lg border border-slate-200 p-3 text-sm">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <div className="font-medium">{document.number ?? document.type}</div>
-                        <div className="mt-1 text-xs text-slate-500">{document.status} · {document.createdAt.toLocaleDateString("en-IN")}</div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {canGenerateDocuments ? <Link className="btn-outline h-8 px-3 text-xs" href={`/app/projects/${plot.projectId}/plots/${plot.id}/letters/${document.id}`}>Edit</Link> : null}
-                        {document.fileAssetId ? <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`}>Download</a> : null}
-                        {canRestoreRecords ? <DeleteDocumentButton documentId={document.id} documentName={document.number ?? document.type} /> : null}
-                        {canApproveDocuments ? <DocumentApprovalButtons documentId={document.id} status={document.status} fileAssetId={document.fileAssetId} /> : null}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-                {!workspace.generatedDocuments.length ? <Empty label="No letters generated yet." /> : null}
-              </div>
-            </div>
-            <div className="card p-5">
-              <h2 className="mb-4 font-semibold">Signed allotment letters</h2>
-              <DocumentGrid files={signedAllotmentFiles} empty="No signed allotment letter uploaded yet." />
-            </div>
-            <div className="card p-5">
-              <h2 className="mb-4 font-semibold">Old documents</h2>
-              {session.role === "SUPER_ADMIN" && (historicalAllotmentRecord || (!plot.currentOwnerId && oldDocumentFiles.length > 0)) ? (
+              <h2 className="mb-4 font-semibold">Signed allotment and transfer letters</h2>
+              <DocumentGrid files={signedOwnershipFiles} empty="No signed allotment or transfer letter uploaded yet." />
+              {session.role === "SUPER_ADMIN" && (historicalAllotmentRecord || pendingHistoricalFiles.length > 0) ? (
                 <HistoricalAllotmentToggle
+                  projectId={plot.projectId}
                   plotId={plot.id}
-                  sourceFileCount={oldDocumentFiles.length}
+                  sourceFileCount={pendingHistoricalFiles.length}
+                  sourceFiles={pendingHistoricalFiles.map((file) => ({
+                    id: file.id,
+                    fileName: file.fileName,
+                    documentType: file.documentType,
+                    documentNo: file.documentNo,
+                    documentDate: file.documentDate?.toLocaleDateString("en-IN") ?? null,
+                  }))}
+                  hasCurrentOwner={Boolean(plot.currentOwnerId)}
                   active={Boolean(historicalAllotmentRecord)}
                   historicalRecordId={historicalAllotmentRecord?.id ?? null}
                   latestRecordId={latestOwnershipEvent?.id ?? null}
                 />
               ) : null}
+            </div>
+            <div className="card p-5">
+              <h2 className="mb-4 font-semibold">Supporting documents of current allottee</h2>
+              <DocumentGrid files={currentAllotteeSupportingFiles} empty="No supporting documents uploaded for the current allottee yet." />
+            </div>
+            <div className="card p-5">
+              <h2 className="mb-4 font-semibold">Old documents</h2>
               <DocumentGrid files={oldDocumentFiles} empty="No old allotment or transfer letter uploaded yet." showShare />
             </div>
             <div className="card p-5">
-              <h2 className="mb-4 font-semibold">Ownership supporting documents</h2>
-              <DocumentGrid files={allotmentSupportFiles} empty="No identity, payment, or ownership support files uploaded yet." />
+              <h2 className="mb-4 font-semibold">Generated letters</h2>
+              <div className="space-y-3">
+                {workspace.generatedDocuments.map((document) => {
+                  const signedByNumber = document.number ? latestSignedByDocumentNo.get(document.number) : null;
+                  const signedFileAssetId = document.signedFileAssetId && availableSignedFileIds.has(document.signedFileAssetId)
+                    ? document.signedFileAssetId
+                    : signedByNumber?.id ?? null;
+                  const latestVisibleFileId = signedFileAssetId ?? document.fileAssetId;
+                  return (
+                    <div key={document.id} className="rounded-lg border border-slate-200 p-3 text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <div className="font-medium">{document.number ?? document.type}</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            {document.status} · {document.createdAt.toLocaleDateString("en-IN")}
+                            {signedFileAssetId ? <span className="ml-1 text-emerald-600">· Signed copy available</span> : null}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {canGenerateDocuments ? (
+                            isHistoricalAllotment(document.data) && document.type.includes("allotment")
+                              ? <Link className="btn-outline h-8 px-3 text-xs" href={`/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}&edit=1`}>Edit details</Link>
+                              : !isHistoricalAllotment(document.data)
+                                ? <Link className="btn-outline h-8 px-3 text-xs" href={`/app/projects/${plot.projectId}/plots/${plot.id}/letters/${document.id}`}>Edit</Link>
+                                : null
+                          ) : null}
+                          {latestVisibleFileId ? (
+                            <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${latestVisibleFileId}/download?disposition=inline&proxy=1`} target="_blank" rel="noreferrer">
+                              {signedFileAssetId ? "View signed letter" : "View letter"}
+                            </a>
+                          ) : null}
+                          {signedFileAssetId && document.fileAssetId ? (
+                            <a className="btn-outline h-8 px-3 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`}>Download generated</a>
+                          ) : null}
+                          {canRestoreRecords ? <DeleteDocumentButton documentId={document.id} documentName={document.number ?? document.type} /> : null}
+                          {canApproveDocuments ? <DocumentApprovalButtons documentId={document.id} status={document.status} fileAssetId={document.fileAssetId} /> : null}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                {!workspace.generatedDocuments.length ? <Empty label="No letters generated yet." /> : null}
+              </div>
             </div>
           </div>
           <aside className="space-y-6">
             <ActionCard title="Document actions">
               <Link
                 className="btn-primary justify-center"
-                href={`/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}${latestAllotmentRecord ? "&edit=1" : ""}`}
+                href={plot.currentOwnerId
+                  ? `/app/projects/${plot.projectId}/plots/${plot.id}/transfer`
+                  : `/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}`}
               >
                 <FileText size={17} />
-                Generate letter
+                {plot.currentOwnerId ? "Generate transfer letter" : "Generate allotment letter"}
               </Link>
               <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/documents/upload`}>
                 <Upload size={17} />
@@ -666,12 +713,14 @@ function OwnershipLetterRows({
   plotId,
   latestSignedLetterUploadTargetId,
   signedByDocumentNo,
+  availableSignedFileIds,
   canUploadSigned,
 }: {
   documents: Awaited<ReturnType<typeof getPlotWorkspace>>["generatedDocuments"];
   plotId: string;
   latestSignedLetterUploadTargetId: string | null;
   signedByDocumentNo: Map<string, Awaited<ReturnType<typeof getPlotWorkspace>>["plotFiles"][number]>;
+  availableSignedFileIds: Set<string>;
   canUploadSigned: boolean;
 }) {
   return (
@@ -682,7 +731,10 @@ function OwnershipLetterRows({
         </thead>
         <tbody className="divide-y divide-slate-100 bg-white">
           {documents.map((document) => {
-            const signed = document.number ? signedByDocumentNo.get(document.number) : null;
+            const legacySigned = document.number ? signedByDocumentNo.get(document.number) : null;
+            const signedFileAssetId = document.signedFileAssetId && availableSignedFileIds.has(document.signedFileAssetId)
+              ? document.signedFileAssetId
+              : legacySigned?.id ?? null;
             return (
               <tr key={document.id}>
                 <td className="px-4 py-3 font-medium">{document.number ?? document.type.replaceAll("_", " ")}</td>
@@ -695,13 +747,20 @@ function OwnershipLetterRows({
                         <Download size={14} />
                       </a>
                     ) : <span className="text-slate-500">PDF not generated</span>}
-                    {signed ? (
-                      <a className="btn-outline h-8 w-8 px-0 text-xs" href={`/api/v1/files/${signed.id}/download?disposition=inline&proxy=1`} target="_blank" rel="noreferrer" title="View signed copy" aria-label="View signed copy">
+                    {signedFileAssetId ? (
+                      <a className="btn-outline h-8 w-8 px-0 text-xs" href={`/api/v1/files/${signedFileAssetId}/download?disposition=inline&proxy=1`} target="_blank" rel="noreferrer" title="View signed copy" aria-label="View signed copy">
                         <Eye size={14} />
                       </a>
                     ) : null}
                     {canUploadSigned && document.id === latestSignedLetterUploadTargetId ? (
-                      <FileUploader compact label={signed ? "Replace signed" : "Upload signed"} ownerType="Plot" ownerId={plotId} visibility="OWNER_VISIBLE" accept="application/pdf,image/*" metadata={{ categoryKey: "signed-allotment-letter", documentType: "ALLOTMENT_LETTER", documentNo: document.number ?? undefined, documentDate: document.createdAt.toISOString(), notes: "Signed version of allotment letter" }} refreshOnUpload />
+                      <SignedLetterUpload
+                        documentId={document.id}
+                        plotId={plotId}
+                        documentType={document.type}
+                        documentNo={document.number}
+                        documentDate={document.createdAt.toISOString()}
+                        replacing={Boolean(signedFileAssetId)}
+                      />
                     ) : null}
                   </div>
                 </td>
@@ -740,7 +799,13 @@ function DocumentGrid({ files, empty, showShare = false }: { files: Awaited<Retu
       <div className="grid gap-3 md:grid-cols-2">
         {files.map((file) => (
           <div key={file.id} className="rounded-lg border border-slate-200 p-3 text-sm">
-            <div className="font-medium">{file.categoryKey === "signed-allotment-letter" ? "Signed version of allotment letter" : file.documentType?.replaceAll("_", " ") ?? "Document"}</div>
+            <div className="font-medium">
+              {file.categoryKey === "signed-allotment-letter"
+                ? "Signed version of allotment letter"
+                : file.categoryKey === "signed-transfer-letter"
+                  ? "Signed version of transfer letter"
+                  : file.documentType?.replaceAll("_", " ") ?? "Document"}
+            </div>
             <div className="mt-1 truncate text-xs text-slate-500">{file.fileName}</div>
             <div className="mt-2 text-xs text-slate-500">
               {file.documentNo ?? "No reference"} · {(file.documentDate ?? file.createdAt).toLocaleDateString("en-IN")} · {file.visibility.replaceAll("_", " ")}

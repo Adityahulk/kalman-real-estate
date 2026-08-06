@@ -3,7 +3,13 @@ import { z } from "zod";
 import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
-import { ambeyAllotmentTemplate, ambeyAllotmentJointTemplate, transferLetterTemplate, registryStatusLetterTemplate } from "./letter-templates";
+import {
+  ambeyAllotmentJointTemplate,
+  ambeyAllotmentTemplate,
+  registryStatusLetterTemplate,
+  transferLetterTemplate,
+  upgradeTransferTemplateBody,
+} from "./letter-templates";
 import { letterSystemFields } from "@/lib/letter-system-fields";
 
 export const letterTemplateTypeSchema = z.enum([
@@ -65,6 +71,21 @@ export async function ensureProjectLetterTemplates(tenantId: string, projectId: 
   // entry points call this self-healer before loading their page-specific data, so the ownership
   // guard belongs here rather than being duplicated at every caller.
   await prisma.project.findFirstOrThrow({ where: { id: projectId, tenantId }, select: { id: true } });
+  // Existing projects may have saved their transfer template before the structured transferee
+  // table was introduced. Upgrade only those exact legacy blocks, preserving every other edit.
+  const transferTemplates = await prisma.documentTemplate.findMany({
+    where: { tenantId, projectId, type: "transfer_letter" },
+    select: { id: true, body: true },
+  });
+  for (const template of transferTemplates) {
+    const upgradedBody = upgradeTransferTemplateBody(template.body);
+    if (upgradedBody !== template.body) {
+      await prisma.documentTemplate.update({
+        where: { id: template.id },
+        data: { body: upgradedBody },
+      });
+    }
+  }
   // The joint/partnership allotment letter is its own peer type (not a hidden variant of
   // "allotment_letter"), so it gets its own active default template + admin-editable slot in
   // Settings → Set your letters, exactly like the other three.

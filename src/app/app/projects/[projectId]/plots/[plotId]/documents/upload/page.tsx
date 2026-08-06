@@ -2,14 +2,14 @@ import { notFound } from "next/navigation";
 import { requirePagePermission } from "@/server/page-auth";
 import { prisma } from "@/server/db";
 import { ActionHint, ActionPageShell } from "../../../../../action-page-shell";
-import { OwnershipDocumentUpload } from "../../../../../../ownership/ownership-actions";
+import { HistoricalOwnershipDocumentUpload, OwnershipDocumentUpload } from "../../../../../../ownership/ownership-actions";
 
 export const dynamic = "force-dynamic";
 
 export default async function UploadPlotDocumentPage(props: { params: Promise<{ projectId: string; plotId: string }> }) {
   const params = await props.params;
   const session = await requirePagePermission("files.upload");
-  const [plot, generatedOwnershipLetterCount] = await Promise.all([
+  const [plot, generatedOwnershipLetterCount, transferCount] = await Promise.all([
     prisma.plot.findFirst({
       where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId, archivedAt: null },
       include: { project: true, currentOwner: true },
@@ -25,6 +25,9 @@ export default async function UploadPlotDocumentPage(props: { params: Promise<{ 
           { type: { contains: "transfer", mode: "insensitive" } },
         ],
       },
+    }),
+    prisma.ownershipRecord.count({
+      where: { tenantId: session.tenantId, plotId: params.plotId, kind: "TRANSFER", cancelledAt: null },
     }),
   ]);
   if (!plot) notFound();
@@ -52,14 +55,11 @@ export default async function UploadPlotDocumentPage(props: { params: Promise<{ 
             title="Upload signed copy of generated letter"
           />
         ) : null}
-        <OwnershipDocumentUpload
-          ownerType="Plot"
-          ownerId={plot.id}
-          defaultVisibility="OWNER_VISIBLE"
-          defaultDocumentType="ALLOTMENT_LETTER"
-          fixedCategoryKey="old-documents"
-          defaultNotes="Old signed allotment / transfer letter"
-          title="Upload old signed allotment / transfer letter"
+        <HistoricalOwnershipDocumentUpload
+          projectId={plot.projectId}
+          plotId={plot.id}
+          hasCurrentOwner={Boolean(plot.currentOwnerId)}
+          transferCount={transferCount}
         />
         {plot.currentOwnerId ? (
           <OwnershipDocumentUpload ownerType="Owner" ownerId={plot.currentOwnerId} defaultVisibility="TEAM" defaultDocumentType="PAN_CARD" title="Upload owner PAN / Aadhaar / KYC" />
