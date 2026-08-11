@@ -14,7 +14,7 @@ const LETTER_PRINT_CSS = `
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; background: #fff; }
   ${loadLetterEditorCss()}
-  .letter-paper-editor { display: block; gap: 0; color: #111827; font-family: Arial, Helvetica, sans-serif; font-size: 15px; line-height: 1.5; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .letter-paper-editor { display: block; gap: 0; color: #111827; font-family: "WideState Calibri", Carlito, Calibri, Arial, sans-serif; font-size: 17.3px; line-height: 1.25; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .letter-paper-editor [data-template="ambey-allotment"],
   .letter-paper-editor [data-letter-template] { display: block; gap: 0; }
   .letter-paper-editor section[data-ambey-page],
@@ -58,7 +58,28 @@ function loadLetterEditorCss() {
     console.error("[letter-pdf] Letter Studio CSS markers missing in globals.css — PDFs will render UNSTYLED.");
     return "";
   }
-  return stripCssBlock(css.slice(start, end), "@media (max-width: 900px)");
+  return inlineLetterFonts(stripCssBlock(css.slice(start, end), "@media (max-width: 900px)"));
+}
+
+function inlineLetterFonts(css: string) {
+  const fontDirectory = join(process.cwd(), "public/fonts/carlito");
+  const names = [
+    "Carlito-Regular.woff2",
+    "Carlito-Italic.woff2",
+    "Carlito-Bold.woff2",
+    "Carlito-BoldItalic.woff2",
+  ];
+  let inlined = css;
+  for (const name of names) {
+    const path = join(fontDirectory, name);
+    if (!existsSync(path)) {
+      console.error(`[letter-pdf] bundled letter font missing: ${path}`);
+      continue;
+    }
+    const dataUrl = `data:font/woff2;base64,${readFileSync(path).toString("base64")}`;
+    inlined = inlined.replaceAll(`/fonts/carlito/${name}`, dataUrl);
+  }
+  return inlined;
 }
 
 function stripCssBlock(css: string, selector: string) {
@@ -197,6 +218,11 @@ async function renderWithBrowser(browser: Browser, bodyHtml: string): Promise<Bu
     await page.setViewport({ width: 860, height: 1110 });
     await page.setContent(wrapDocument(bodyHtml), { waitUntil: "load", timeout: 30000 });
 
+    // Pagination is font-metric-sensitive. Wait for the bundled Calibri-compatible family before
+    // measuring any section; otherwise a Linux server can paginate once with Liberation Sans and
+    // print later with Carlito, making Edit Draft and the final PDF disagree.
+    await page.evaluate(() => document.fonts.ready);
+
     // Images are inlined as data URIs but decode asynchronously — wait so heights are correct.
     // Cap each image at 5s so a broken URL can't hang the whole render.
     await page.evaluate(() => Promise.all(
@@ -306,6 +332,12 @@ async function renderWithBrowser(browser: Browser, bodyHtml: string): Promise<Bu
           }
         });
       }, i);
+      // Switching sheets changes both grid layout and paint visibility. Waiting for two frames
+      // prevents Chromium from capturing a recently unhidden page before its text has painted,
+      // which otherwise appears as an intermittent blank page in the merged PDF.
+      await page.evaluate(() => new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }));
       const pdf = await page.pdf({
         width: `${EDITOR_PAGE_WIDTH_PX}px`,
         height: `${EDITOR_PAGE_HEIGHT_PX}px`,
