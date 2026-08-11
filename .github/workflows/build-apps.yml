@@ -80,6 +80,9 @@ jobs:
           npx cap add android || true
           npx cap sync android
 
+      - name: Verify Android launch configuration
+        run: node scripts/verify-android-shell.mjs
+
       - name: Build debug APK (always — sideloadable fallback)
         run: |
           cd android

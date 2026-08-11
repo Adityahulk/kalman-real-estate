@@ -7,7 +7,6 @@
 import { Capacitor } from "@capacitor/core";
 
 const SESSION_TOKEN_KEY = "kalman_session_token";
-let pushListenersBound = false;
 
 export function isNative(): boolean {
   try {
@@ -69,36 +68,12 @@ export async function nativeFetch(input: RequestInfo | URL, init: RequestInit = 
   return fetch(input, { ...init, headers });
 }
 
-// Register this device for push and forward the OS token to the backend. Called after login.
+// Push is intentionally disabled in the native shell until an Android Firebase project is
+// configured. The Capacitor push plugin initializes Firebase when Android starts; shipping it
+// without android/app/google-services.json produces an invalid native runtime. Keep this no-op
+// so callers remain stable and wire the plugin back only alongside a real Firebase config.
 export async function registerForPush(): Promise<void> {
-  if (!isNative()) return;
-  try {
-    const { PushNotifications } = await import("@capacitor/push-notifications");
-    const perm = await PushNotifications.requestPermissions();
-    if (perm.receive !== "granted") return;
-
-    if (!pushListenersBound) {
-      pushListenersBound = true;
-      PushNotifications.addListener("registration", (token) => {
-        void nativeFetch("/api/v1/notifications/devices", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ token: token.value, platform: nativePlatform() }),
-        }).catch(() => undefined);
-      });
-      // The web UI remains the single notification center inside the app. Refresh it when a
-      // foreground push arrives, and let a tap bring the user back to that same screen.
-      PushNotifications.addListener("pushNotificationReceived", () => {
-        window.dispatchEvent(new Event("widestate:notification"));
-      });
-      PushNotifications.addListener("pushNotificationActionPerformed", () => {
-        window.location.assign("/app/notifications");
-      });
-    }
-    await PushNotifications.register();
-  } catch {
-    // Push is best-effort; never block login on it.
-  }
+  return;
 }
 
 // Optional biometric gate hook. Intentionally a no-op: the only Capacitor biometric plugin
