@@ -7,6 +7,7 @@ import { hasPermission } from "@/server/rbac";
 import { BackButton } from "@/components/back-button";
 import { sortByPlotCode } from "@/lib/plot-code-sort";
 import { OwnershipPlotRow } from "./ownership-plot-row";
+import { getPlotDocumentStates } from "@/server/services/plot-documents";
 
 export const dynamic = "force-dynamic";
 
@@ -82,40 +83,7 @@ export default async function ProjectOwnershipPage(
     counts[plot.status] = (counts[plot.status] ?? 0) + 1;
     return counts;
   }, {});
-  const generatedLetters = await prisma.generatedDocument.findMany({
-    where: {
-      tenantId: session.tenantId,
-      recordType: "Plot",
-      recordId: { in: plots.map((plot) => plot.id) },
-      archivedAt: null,
-      OR: [
-        { type: { contains: "allotment", mode: "insensitive" } },
-        { type: { contains: "transfer", mode: "insensitive" } },
-      ],
-    },
-    orderBy: { createdAt: "desc" },
-  });
-  const signedLetters = await prisma.fileAsset.findMany({
-    where: {
-      tenantId: session.tenantId,
-      ownerType: "Plot",
-      ownerId: { in: plots.map((plot) => plot.id) },
-      categoryKey: { in: ["signed-allotment-letter", "signed-transfer-letter"] },
-      deletedAt: null,
-    },
-    orderBy: { createdAt: "desc" },
-  });
-  const letterByPlot = new Map<string, typeof generatedLetters[number]>();
-  for (const letter of generatedLetters) {
-    if (!letterByPlot.has(letter.recordId)) letterByPlot.set(letter.recordId, letter);
-  }
-  const signedLetterByPlotAndDocument = new Map<string, typeof signedLetters[number]>();
-  const availableSignedFileIds = new Set(signedLetters.map((file) => file.id));
-  for (const file of signedLetters) {
-    if (!file.ownerId || !file.documentNo) continue;
-    const key = `${file.ownerId}:${file.documentNo}`;
-    if (!signedLetterByPlotAndDocument.has(key)) signedLetterByPlotAndDocument.set(key, file);
-  }
+  const documentStates = await getPlotDocumentStates(session.tenantId, plots.map((plot) => plot.id));
   const filteredPlots = sortByPlotCode(plots);
 
   return (
@@ -188,14 +156,10 @@ export default async function ProjectOwnershipPage(
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredPlots.map((plot) => {
-                const letter = letterByPlot.get(plot.id);
+                const latestDocument = documentStates.get(plot.id)?.latestDocument ?? null;
                 const development = plot.checklistItems.length
                   ? Math.round(plot.checklistItems.reduce((total, item) => total + item.progressPct, 0) / plot.checklistItems.length)
                   : null;
-                const signedLetter = letter?.number ? signedLetterByPlotAndDocument.get(`${plot.id}:${letter.number}`) : null;
-                const signedFileAssetId = letter?.signedFileAssetId && availableSignedFileIds.has(letter.signedFileAssetId)
-                  ? letter.signedFileAssetId
-                  : signedLetter?.id ?? null;
                 return (
                   <OwnershipPlotRow
                     key={plot.id}
@@ -206,15 +170,16 @@ export default async function ProjectOwnershipPage(
                     area={`${plot.areaSqYards?.toString() ?? (plot.areaSqft ? String(Number(plot.areaSqft) / 9) : "-")} sq yd`}
                     development={development}
                     allotmentStatus={plot.status === "COMPANY_OWNED" ? "Available for allotment" : plot.status.replaceAll("_", " ").toLowerCase().replace(/^\w/, (letter) => letter.toUpperCase())}
-                    document={letter ? {
-                      id: letter.id,
-                      status: letter.status,
-                      fileAssetId: letter.fileAssetId,
-                      signedFileAssetId,
-                      viewFileAssetId: signedFileAssetId ?? letter.fileAssetId,
-                      type: letter.type,
-                      number: letter.number,
-                      createdAt: letter.createdAt.toISOString(),
+                    document={latestDocument ? {
+                      id: latestDocument.generatedDocumentId,
+                      status: latestDocument.status,
+                      fileAssetId: latestDocument.generatedFileAssetId,
+                      signedFileAssetId: latestDocument.signed ? latestDocument.fileAssetId : null,
+                      viewFileAssetId: latestDocument.fileAssetId,
+                      type: latestDocument.kind,
+                      label: latestDocument.label,
+                      number: latestDocument.number,
+                      createdAt: latestDocument.documentDate.toISOString(),
                     } : null}
                     canApprove={canApproveDocuments}
                     canSign={canSignDocuments}

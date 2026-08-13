@@ -1295,13 +1295,20 @@ async function putTransferUploadFile(target: TransferUploadTarget, file: File, c
   if (!response.ok) throw new Error(`${file.name} upload failed`);
 }
 
-export function PlotRegistryForm({ plotId }: { plotId: string }) {
+export function PlotRegistryForm({
+  plotId,
+  currentOwnerName,
+}: {
+  plotId: string;
+  currentOwnerName?: string | null;
+}) {
   const router = useRouter();
   const [status, setStatus] = useState("In process");
   const [registryNo, setRegistryNo] = useState("");
   const [registryDate, setRegistryDate] = useState("");
   const [registryOffice, setRegistryOffice] = useState("");
   const [notes, setNotes] = useState("");
+  const [registryFile, setRegistryFile] = useState<StoredFileRef | null>(null);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -1316,6 +1323,7 @@ export function PlotRegistryForm({ plotId }: { plotId: string }) {
         status,
         registryNo: registryNo || undefined,
         registryDate: registryDate ? new Date(registryDate).toISOString() : undefined,
+        fileAssetId: registryFile?.id,
         notes: combinedNotes || undefined,
       }),
     });
@@ -1328,15 +1336,41 @@ export function PlotRegistryForm({ plotId }: { plotId: string }) {
   return (
     <form onSubmit={submit} className="rounded-lg border border-slate-200 bg-white p-4">
       <h3 className="text-sm font-semibold">Registry status</h3>
+      <p className="mt-1 text-xs text-slate-500">
+        Registered owner: <span className="font-medium text-slate-700">{currentOwnerName ?? "Complete the allotment or transfer first"}</span>
+      </p>
       <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <label><span className="label">Status</span><select className="input" value={status} onChange={(event) => setStatus(event.target.value)}><option>Not started</option><option>In process</option><option>Submitted</option><option>Completed</option><option>On hold</option></select></label>
+        <label><span className="label">Status</span><select className="input" value={status} onChange={(event) => setStatus(event.target.value)}><option>Not started</option><option>In process</option><option>Submitted</option><option>Registered</option><option>On hold</option></select></label>
         <label><span className="label">Registry number</span><input className="input" value={registryNo} onChange={(event) => setRegistryNo(event.target.value)} /></label>
         <label><span className="label">Registry date</span><input className="input" type="date" value={registryDate} onChange={(event) => setRegistryDate(event.target.value)} /></label>
         <label><span className="label">Registry office</span><input className="input" value={registryOffice} onChange={(event) => setRegistryOffice(event.target.value)} /></label>
       </div>
       <label className="mt-3 block"><span className="label">Notes</span><textarea className="input min-h-20" value={notes} onChange={(event) => setNotes(event.target.value)} /></label>
+      <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <div className="mb-2 text-xs font-medium text-slate-700">Signed registry document</div>
+        <FileUploader
+          compact
+          label={registryFile ? "Replace registry document" : "Upload registry receipt / deed"}
+          ownerType="Plot"
+          ownerId={plotId}
+          visibility="OWNER_VISIBLE"
+          accept="application/pdf,image/*"
+          metadata={{
+            categoryKey: "registry-document",
+            documentType: "REGISTRY_DEED",
+            documentNo: registryNo || undefined,
+            documentDate: registryDate ? new Date(`${registryDate}T12:00:00`).toISOString() : undefined,
+            notes: "Signed registry document",
+          }}
+          onUploaded={(file) => setRegistryFile({ id: file.id, fileName: file.fileName })}
+        />
+        {registryFile ? <div className="mt-2 text-xs text-emerald-700">Attached: {registryFile.fileName}</div> : null}
+        {status === "Registered" && !registryFile ? (
+          <div className="mt-2 text-xs text-amber-700">A previously uploaded registry file will be used if available; otherwise upload one before completion.</div>
+        ) : null}
+      </div>
       {message ? <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600">{message}</div> : null}
-      <button className="btn-primary mt-4 w-full" disabled={loading}>
+      <button className="btn-primary mt-4 w-full" disabled={loading || !currentOwnerName}>
         {loading ? <Loader2 className="animate-spin" size={17} /> : <Save size={17} />}
         Save registry
       </button>

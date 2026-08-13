@@ -6,12 +6,13 @@ import { useState } from "react";
 import { SignedLetterUpload } from "@/components/signed-letter-upload";
 
 type PlotDocument = {
-  id: string;
+  id: string | null;
   status: string;
   fileAssetId: string | null;
   signedFileAssetId?: string | null;
   viewFileAssetId?: string | null;
   type?: string;
+  label?: string;
   number?: string | null;
   createdAt?: string;
 };
@@ -62,13 +63,13 @@ export function OwnershipPlotRow({
 
   const waiting = status === "SUBMITTED";
   const inProgress = Boolean(document && ["DRAFT", "GENERATED", "UNDER_REVIEW", "CHANGES_REQUESTED"].includes(status));
-  const approvalReady = Boolean(canApprove && waiting && document?.fileAssetId);
+  const approvalReady = Boolean(canApprove && waiting && document?.id && document.fileAssetId);
   const viewFileAssetId = signedFileAssetId ?? document?.viewFileAssetId ?? document?.fileAssetId ?? null;
-  const awaitingSignature = Boolean(document && ["APPROVED", "SENT_FOR_SIGNATURE"].includes(status));
-  const letterKind = document?.type?.toLowerCase().includes("transfer") ? "Transfer" : "Allotment";
+  const awaitingSignature = Boolean(document?.id && ["APPROVED", "SENT_FOR_SIGNATURE"].includes(status));
+  const letterKind = document?.label ?? (document?.type?.toLowerCase().includes("transfer") ? "Transfer letter" : "Allotment letter");
 
   async function decide(nextStatus: "APPROVED" | "REJECTED") {
-    if (!document || loading) return;
+    if (!document?.id || loading) return;
     setLoading(nextStatus);
     const endpoint = nextStatus === "REJECTED" ? "reject" : "approve";
     const response = await fetch(`/api/v1/documents/${document.id}/${endpoint}`, {
@@ -122,6 +123,9 @@ export function OwnershipPlotRow({
             {status === "ISSUED" ? <span className="chip bg-emerald-50 text-emerald-700">{letterKind} issued</span> : null}
             {status === "SIGNED" ? <span className="chip bg-emerald-50 text-emerald-700">{letterKind} signed</span> : null}
             {status === "REJECTED" ? <span className="chip bg-rose-50 text-rose-700">{letterKind} rejected</span> : null}
+            {document && !["DRAFT", "GENERATED", "UNDER_REVIEW", "CHANGES_REQUESTED", "SUBMITTED", "APPROVED", "SENT_FOR_SIGNATURE", "ISSUED", "SIGNED", "REJECTED"].includes(status) ? (
+              <span className="chip bg-emerald-50 text-emerald-700">{letterKind} · {status.replaceAll("_", " ")}</span>
+            ) : null}
           </div>
 
           {document ? (
@@ -153,13 +157,13 @@ export function OwnershipPlotRow({
                   </button>
                 </>
               ) : null}
-              {canSign && (awaitingSignature || status === "SIGNED") ? (
+              {canSign && document?.id && (awaitingSignature || status === "SIGNED") ? (
                 <SignedLetterUpload
-                  documentId={document!.id}
+                  documentId={document.id}
                   plotId={plotId}
-                  documentType={document!.type ?? "allotment_letter"}
-                  documentNo={document!.number}
-                  documentDate={document!.createdAt}
+                  documentType={document.type ?? "allotment_letter"}
+                  documentNo={document.number}
+                  documentDate={document.createdAt}
                   replacing={Boolean(signedFileAssetId)}
                   onSigned={(fileAssetId) => {
                     setSignedFileAssetId(fileAssetId);
@@ -190,7 +194,7 @@ export function OwnershipPlotRow({
                   globalThis.window.open(`/api/v1/files/${viewFileAssetId}/download?disposition=inline&proxy=1`, "_blank", "noopener,noreferrer");
                   return;
                 }
-                router.push(`${href}/letters/${document.id}`);
+                if (document.id) router.push(`${href}/letters/${document.id}`);
               }}
             >
               <FileText size={14} />

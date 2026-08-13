@@ -1,5 +1,6 @@
 import { prisma } from "../db";
 import { RequestContext } from "../api";
+import { getPlotDocumentState } from "./plot-documents";
 
 export async function getPlotWorkspace(context: RequestContext, plotId: string) {
   const plot = await prisma.plot.findFirstOrThrow({
@@ -27,6 +28,7 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
     auditEvents,
     spatialLinks,
     childCadFiles,
+    documentState,
   ] = await Promise.all([
     prisma.generatedDocument.findMany({
       where: { tenantId: context.tenantId, recordType: "Plot", recordId: plot.id, archivedAt: null },
@@ -91,6 +93,7 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
       },
       orderBy: { createdAt: "desc" },
     }),
+    getPlotDocumentState(context.tenantId, plot.id),
   ]);
 
   const documentIds = generatedDocuments.map((document) => document.id);
@@ -220,6 +223,7 @@ export async function getPlotWorkspace(context: RequestContext, plotId: string) 
     auditEvents,
     spatialLinks,
     childCadFiles,
+    documentState,
     timeline,
   };
 }

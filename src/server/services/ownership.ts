@@ -4,6 +4,7 @@ import { RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
 import { hasPermission } from "../rbac";
+import { notifyRoleWithPermission } from "./notifications";
 
 export const ownerSchema = z.object({
   type: z.enum(["INDIVIDUAL", "COMPANY", "SHARED"]),
@@ -709,12 +710,49 @@ export const registrySchema = z.object({
   status: z.string().min(2),
   registryNo: z.string().optional(),
   registryDate: z.string().datetime().optional(),
+  fileAssetId: z.string().optional(),
   notes: z.string().optional(),
 });
 
 export async function updateRegistry(context: RequestContext, plotId: string, input: z.infer<typeof registrySchema>) {
-  await prisma.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
+  const normalized = input.status.toUpperCase().replaceAll(" ", "_");
+  const completed = normalized === "COMPLETED" || normalized === "REGISTERED";
   const result = await prisma.$transaction(async (tx) => {
+    const before = await tx.plot.findFirstOrThrow({
+      where: { id: plotId, tenantId: context.tenantId, archivedAt: null },
+      select: { id: true, code: true, status: true, currentOwnerId: true, currentOwner: { select: { name: true } } },
+    });
+    if (completed && !before.currentOwnerId) {
+      throwBadRequest("Complete an allotment or transfer before marking this plot as registered.");
+    }
+    const suppliedFile = input.fileAssetId
+      ? await tx.fileAsset.findFirst({
+          where: {
+            id: input.fileAssetId,
+            tenantId: context.tenantId,
+            ownerType: "Plot",
+            ownerId: plotId,
+            deletedAt: null,
+            documentType: { in: ["REGISTRY_RECEIPT", "REGISTRY_DEED"] },
+          },
+        })
+      : null;
+    if (input.fileAssetId && !suppliedFile) {
+      throwBadRequest("The selected registry document does not belong to this plot or is not a registry receipt/deed.");
+    }
+    const existingFile = suppliedFile ?? await tx.fileAsset.findFirst({
+      where: {
+        tenantId: context.tenantId,
+        ownerType: "Plot",
+        ownerId: plotId,
+        deletedAt: null,
+        documentType: { in: ["REGISTRY_RECEIPT", "REGISTRY_DEED"] },
+      },
+      orderBy: [{ documentDate: "desc" }, { createdAt: "desc" }],
+    });
+    if (completed && !existingFile) {
+      throwBadRequest("Upload the signed registry receipt or deed before marking this plot as registered.");
+    }
     const registry = await tx.registryRecord.create({
       data: {
         tenantId: context.tenantId,
@@ -722,18 +760,28 @@ export async function updateRegistry(context: RequestContext, plotId: string, in
         status: input.status,
         registryNo: input.registryNo,
         registryDate: input.registryDate ? new Date(input.registryDate) : undefined,
+        registeredOwnerId: completed ? before.currentOwnerId : undefined,
+        fileAssetId: existingFile?.id,
+        createdById: context.userId,
         notes: input.notes,
       },
     });
-    const normalized = input.status.toUpperCase().replaceAll(" ", "_");
-    const plot = normalized === "COMPLETED" || normalized === "REGISTERED"
+    const plot = completed
       ? await tx.plot.update({ where: { id: plotId }, data: { status: PlotStatus.REGISTERED } })
       : normalized.includes("PROGRESS") || normalized === "SUBMITTED"
         ? await tx.plot.update({ where: { id: plotId }, data: { status: PlotStatus.REGISTRY_IN_PROGRESS } })
         : null;
-    return { registry, plot };
+    return { before, registry, plot, file: existingFile };
   });
   await writeAuditEvent(context, { action: AuditAction.REGISTRY_UPDATE, entityType: "Plot", entityId: plotId, after: result.registry as unknown as Prisma.InputJsonValue });
+  if (completed) {
+    await notifyRoleWithPermission(context, "ownership.view", {
+      title: `Plot ${result.before.code} registered`,
+      body: `${result.before.currentOwner?.name ?? "The current owner"} is now recorded as the registered owner.`,
+      data: { plotId, registryRecordId: result.registry.id, fileAssetId: result.file?.id },
+      excludeUserId: context.userId,
+    });
+  }
   return result.registry;
 }
 

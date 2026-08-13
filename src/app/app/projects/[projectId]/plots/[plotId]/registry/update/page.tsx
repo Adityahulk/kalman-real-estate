@@ -11,7 +11,11 @@ export default async function UpdateRegistryPage(props: { params: Promise<{ proj
   const session = await requirePagePermission("ownership.manage");
   const plot = await prisma.plot.findFirst({
     where: { id: params.plotId, tenantId: session.tenantId, projectId: params.projectId, archivedAt: null },
-    include: { project: true, registryRecords: { where: { archivedAt: null }, orderBy: { createdAt: "desc" }, take: 1 } },
+    include: {
+      project: true,
+      currentOwner: { select: { name: true } },
+      registryRecords: { where: { archivedAt: null }, orderBy: { createdAt: "desc" }, take: 1 },
+    },
   });
   if (!plot) notFound();
   const latest = plot.registryRecords[0];
@@ -26,7 +30,7 @@ export default async function UpdateRegistryPage(props: { params: Promise<{ proj
       aside={<ActionHint title="Latest status">{latest?.status ?? "Not started"}</ActionHint>}
     >
       <div className="grid gap-5 lg:grid-cols-2">
-        <PlotRegistryForm plotId={plot.id} />
+        <PlotRegistryForm plotId={plot.id} currentOwnerName={plot.currentOwner?.name} />
         <OwnershipDocumentUpload ownerType="Plot" ownerId={plot.id} defaultVisibility="OWNER_VISIBLE" defaultDocumentType="REGISTRY_RECEIPT" title="Upload registry receipt / deed" />
       </div>
     </ActionPageShell>

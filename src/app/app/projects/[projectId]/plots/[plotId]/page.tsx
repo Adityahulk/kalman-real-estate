@@ -112,6 +112,13 @@ export default async function ProjectPlotWorkspacePage(
   const allotmentStatus = plot.currentOwnerId ? "Allotted" : "Not allotted";
   const acceptedTransferCount = await acceptedTransferCountForPlot(session.tenantId, plot.id);
   const transferLimitReached = acceptedTransferCount >= firm.maxTransfersPerPlot;
+  const documentState = workspace.documentState;
+  const latestDocument = documentState?.latestDocument ?? null;
+  const latestDocumentHref = latestDocument?.fileAssetId
+    ? `/api/v1/files/${latestDocument.fileAssetId}/download?disposition=inline&proxy=1`
+    : latestDocument?.generatedDocumentId
+      ? `/app/projects/${plot.projectId}/plots/${plot.id}/letters/${latestDocument.generatedDocumentId}`
+      : null;
 
   return (
     <main className="min-h-[calc(100vh-4rem)] px-4 py-6 lg:px-8">
@@ -144,6 +151,47 @@ export default async function ProjectPlotWorkspacePage(
           </Link>
         </div>
       </div>
+
+      <section className="grid gap-3 border-b border-slate-200 py-4 sm:grid-cols-2 xl:grid-cols-[1fr_1fr_1.2fr_auto] xl:items-stretch">
+        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+          <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Current owner</div>
+          <div className="mt-1 font-semibold text-navy-950">{plot.currentOwner?.name ?? firm.name}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+          <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Plot status</div>
+          <div className="mt-1 font-semibold text-navy-950">{plot.status.replaceAll("_", " ")}</div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+          <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Latest document</div>
+          <div className="mt-1 flex flex-wrap items-center gap-2 font-semibold text-navy-950">
+            <span>{latestDocument?.label ?? "No legal document available"}</span>
+            {latestDocument?.signed ? <span className="chip bg-emerald-50 text-emerald-700">Signed</span> : null}
+          </div>
+          <div className="mt-1 text-xs text-slate-500">
+            {latestDocument
+              ? [latestDocument.number, latestDocument.ownerName, latestDocument.documentDate.toLocaleDateString("en-IN")].filter(Boolean).join(" · ")
+              : "Upload or generate the ownership document"}
+          </div>
+        </div>
+        <div className="flex items-stretch">
+          {latestDocumentHref && latestDocument ? (
+            <a
+              className="btn-primary min-h-16 w-full justify-center px-5 xl:w-auto"
+              href={latestDocumentHref}
+              target={latestDocument.fileAssetId ? "_blank" : undefined}
+              rel={latestDocument.fileAssetId ? "noreferrer" : undefined}
+            >
+              <Eye size={17} />
+              See latest document
+            </a>
+          ) : (
+            <Link className="btn-outline min-h-16 w-full justify-center px-5 xl:w-auto" href="?tab=documents">
+              <Upload size={17} />
+              Add document
+            </Link>
+          )}
+        </div>
+      </section>
 
       {activeTab === "overview" ? (
         <section className="mt-6">
@@ -189,6 +237,11 @@ export default async function ProjectPlotWorkspacePage(
             </AccordionRow>
 
             <AccordionRow label="Status" value={allotmentStatus}>
+              <div className="mb-4 grid gap-3 sm:grid-cols-3">
+                <Info label="Latest document" value={latestDocument?.label ?? "Not available"} />
+                <Info label="Signed allotment letter" value={documentState?.signedAllotmentAvailable ? "Available" : "Not available"} />
+                <Info label="Registry document" value={documentState?.registryDocumentAvailable ? "Available" : "Not available"} />
+              </div>
               <div className="overflow-x-auto rounded-lg border border-slate-200">
                 <OwnershipLetterRows
                   documents={ownershipLetters}
@@ -541,7 +594,8 @@ export default async function ProjectPlotWorkspacePage(
       ) : null}
 
       {activeTab === "history" ? (
-        <section className="mt-4">
+        <section className="mt-4 space-y-6">
+          <DocumentHistoryTable items={documentState?.history ?? []} projectId={plot.projectId} plotId={plot.id} />
           <OwnershipEventHistory
             plotId={plot.id}
             canCancel={session.role === "SUPER_ADMIN"}
@@ -557,6 +611,82 @@ export default async function ProjectPlotWorkspacePage(
         </section>
       ) : null}
     </main>
+  );
+}
+
+function DocumentHistoryTable({
+  items,
+  projectId,
+  plotId,
+}: {
+  items: NonNullable<Awaited<ReturnType<typeof getPlotWorkspace>>["documentState"]>["history"];
+  projectId: string;
+  plotId: string;
+}) {
+  return (
+    <div className="card overflow-hidden p-0">
+      <div className="border-b border-slate-200 px-5 py-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <FileText size={18} />
+          <h2 className="font-semibold">Document history</h2>
+          <span className="chip bg-slate-100 text-slate-700">{items.length}</span>
+        </div>
+        <p className="mt-1 text-sm text-slate-500">All allotment, transfer, registry, and supporting documents remain available in effective-date order.</p>
+      </div>
+      {items.length ? (
+        <div className="max-h-[36rem] overflow-auto">
+          <table className="w-full min-w-[840px] text-left text-sm">
+            <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 shadow-[0_1px_0_0_rgb(226_232_240)]">
+              <tr>
+                <th className="px-5 py-3">Document</th>
+                <th className="px-5 py-3">Owner at the time</th>
+                <th className="px-5 py-3">Reference</th>
+                <th className="px-5 py-3">Document date</th>
+                <th className="px-5 py-3">Status</th>
+                <th className="px-5 py-3">Version</th>
+                <th className="px-5 py-3 text-right">Open</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {items.map((item) => {
+                const href = item.fileAssetId
+                  ? `/api/v1/files/${item.fileAssetId}/download?disposition=inline&proxy=1`
+                  : item.generatedDocumentId
+                    ? `/app/projects/${projectId}/plots/${plotId}/letters/${item.generatedDocumentId}`
+                    : null;
+                return (
+                  <tr key={item.id} className={item.latest ? "bg-emerald-50/50" : "hover:bg-slate-50/60"}>
+                    <td className="px-5 py-3">
+                      <div className="flex items-center gap-2 font-medium text-navy-950">
+                        {item.label}
+                        {item.latest ? <span className="chip bg-emerald-100 text-emerald-800">Latest</span> : null}
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">{item.uploadedBy ? `Uploaded by ${item.uploadedBy}` : "Recorded in ownership workflow"}</div>
+                    </td>
+                    <td className="px-5 py-3">{item.ownerName ?? "-"}</td>
+                    <td className="px-5 py-3">{item.number ?? "-"}</td>
+                    <td className="whitespace-nowrap px-5 py-3">{item.documentDate.toLocaleDateString("en-IN")}</td>
+                    <td className="px-5 py-3">
+                      <span className={`chip ${item.missing ? "bg-amber-50 text-amber-800" : item.signed ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-700"}`}>
+                        {item.status.replaceAll("_", " ")}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3">{item.version || "-"}</td>
+                    <td className="px-5 py-3 text-right">
+                      {href ? (
+                        <a className="btn-outline h-8 px-3 text-xs" href={href} target={item.fileAssetId ? "_blank" : undefined} rel={item.fileAssetId ? "noreferrer" : undefined}>
+                          <Eye size={14} /> View
+                        </a>
+                      ) : <span className="text-xs text-amber-700">Document unavailable</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : <div className="p-5 text-sm text-slate-500">No ownership or registry documents have been recorded.</div>}
+    </div>
   );
 }
 
