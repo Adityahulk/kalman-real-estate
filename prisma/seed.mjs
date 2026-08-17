@@ -189,6 +189,50 @@ async function main() {
     });
   }
 
+  // CRM team structure. These are custom roles so management can change their permissions later
+  // without adding another database enum or redeploying the application.
+  const crmDepartment = await prisma.department.upsert({
+    where: { tenantId_name: { tenantId: tenant.id, name: "CRM & Sales" } },
+    update: {},
+    create: { tenantId: tenant.id, name: "CRM & Sales" },
+  });
+  const crmDesignations = {};
+  for (const name of ["CRM Manager", "Caller", "Salesperson", "Reception"]) {
+    crmDesignations[name] = await prisma.designation.upsert({
+      where: { departmentId_name: { departmentId: crmDepartment.id, name } },
+      update: {},
+      create: { tenantId: tenant.id, departmentId: crmDepartment.id, name },
+    });
+  }
+  const crmRoleDefinitions = [
+    { name: "CRM Manager", permissions: ["projects.view", "crm.view", "crm.manage", "crm.assign", "crm.reports"] },
+    { name: "CRM Caller", permissions: ["projects.view", "crm.view", "crm.manage"] },
+    { name: "CRM Salesperson", permissions: ["projects.view", "crm.view", "crm.manage"] },
+    { name: "CRM Reception", permissions: ["projects.view", "crm.view", "crm.manage"] },
+  ];
+  const crmRoles = {};
+  for (const definition of crmRoleDefinitions) {
+    const designationName = definition.name.replace("CRM ", "") === "Manager" ? "CRM Manager" : definition.name.replace("CRM ", "");
+    crmRoles[definition.name] = await prisma.customRole.upsert({
+      where: { tenantId_name: { tenantId: tenant.id, name: definition.name } },
+      update: { permissions: definition.permissions, departmentId: crmDepartment.id, designationId: crmDesignations[designationName].id },
+      create: { tenantId: tenant.id, name: definition.name, description: `WIDESTATE ${definition.name} access`, baseRole: "VIEWER", permissions: definition.permissions, departmentId: crmDepartment.id, designationId: crmDesignations[designationName].id },
+    });
+  }
+  const crmUsers = [
+    { email: "crmmanager@saldhaland.example", name: "CRM Manager", phone: "+91 98765 88901", role: "CRM Manager", designation: "CRM Manager" },
+    { email: "caller@saldhaland.example", name: "CRM Caller", phone: "+91 98765 88902", role: "CRM Caller", designation: "Caller" },
+    { email: "salesperson@saldhaland.example", name: "CRM Salesperson", phone: "+91 98765 88903", role: "CRM Salesperson", designation: "Salesperson" },
+    { email: "reception@saldhaland.example", name: "CRM Reception", phone: "+91 98765 88904", role: "CRM Reception", designation: "Reception" },
+  ];
+  for (const user of crmUsers) {
+    await prisma.user.upsert({
+      where: { email: user.email },
+      update: { tenantId: tenant.id, passwordHash, name: user.name, phone: user.phone, role: "VIEWER", customRoleId: crmRoles[user.role].id, departmentId: crmDepartment.id, designationId: crmDesignations[user.designation].id, status: "ACTIVE" },
+      create: { tenantId: tenant.id, email: user.email, passwordHash, name: user.name, phone: user.phone, role: "VIEWER", customRoleId: crmRoles[user.role].id, departmentId: crmDepartment.id, designationId: crmDesignations[user.designation].id, status: "ACTIVE" },
+    });
+  }
+
   const firmUsers = await prisma.user.findMany({
     where: { tenantId: tenant.id },
     select: { id: true, role: true },
@@ -539,6 +583,10 @@ async function main() {
   console.log("ALLOTMENT_EXEC   : executive@saldhaland.example");
   console.log("APPROVING_AUTH   : approver@saldhaland.example");
   console.log("AUTH_SIGNATORY   : signatory@saldhaland.example");
+  console.log("CRM_MANAGER      : crmmanager@saldhaland.example");
+  console.log("CRM_CALLER       : caller@saldhaland.example");
+  console.log("CRM_SALESPERSON  : salesperson@saldhaland.example");
+  console.log("CRM_RECEPTION    : reception@saldhaland.example");
   console.log("BUILDER_ADMIN    : companyadmin@widestate.in / WideState@2026");
   console.log("PLATFORM_ADMIN   : platformadmin@widestate.in / WideState@2026");
   console.log("SUPER_ADMIN      : login ID 'Dakshdod' / 252008");

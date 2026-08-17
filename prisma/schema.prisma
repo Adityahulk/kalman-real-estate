@@ -216,6 +216,86 @@ enum AuditAction {
   RETURN
 }
 
+enum CrmLeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  INTERESTED
+  FOLLOW_UP_REQUIRED
+  VISIT_PROPOSED
+  VISIT_SCHEDULED
+  VISIT_COMPLETED
+  NEGOTIATION
+  BOOKING_PENDING
+  BOOKED
+  CUSTOMER
+  NOT_INTERESTED
+  FUTURE_PROSPECT
+  LOST
+  INVALID
+}
+
+enum CrmLeadPotential {
+  COLD
+  WARM
+  HOT
+  VERY_HOT
+}
+
+enum CrmActivityType {
+  LEAD_CREATED
+  INCOMING_CALL
+  OUTGOING_CALL
+  NOTE
+  STATUS_CHANGED
+  POTENTIAL_CHANGED
+  ASSIGNED
+  FOLLOW_UP_CREATED
+  FOLLOW_UP_COMPLETED
+  VISIT_PROPOSED
+  VISIT_SCHEDULED
+  VISIT_COMPLETED
+  VISIT_CANCELLED
+  MESSAGE_OPENED
+  FEEDBACK_RECEIVED
+  BOOKING_CREATED
+  CUSTOMER_CONVERTED
+  MERGED
+  TICKET_CREATED
+  TICKET_UPDATED
+}
+
+enum CrmFollowUpStatus {
+  PENDING
+  COMPLETED
+  RESCHEDULED
+  CANCELLED
+  OVERDUE
+}
+
+enum CrmVisitStatus {
+  PROPOSED
+  SCHEDULED
+  CONFIRMED
+  VISITED
+  DID_NOT_VISIT
+  RESCHEDULED
+  CANCELLED
+}
+
+enum CrmBookingStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+}
+
+enum CrmTicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
 model Tenant {
   id                  String   @id @default(cuid())
   name                String
@@ -1251,6 +1331,290 @@ model Notification {
   createdAt DateTime  @default(now())
 
   @@index([tenantId, userId, status])
+}
+
+model CrmSequence {
+  id        String   @id @default(cuid())
+  tenantId  String
+  key       String
+  nextValue Int      @default(1)
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, key])
+}
+
+model CrmLeadSource {
+  id         String    @id @default(cuid())
+  tenantId   String
+  name       String
+  key        String
+  active     Boolean   @default(true)
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@unique([tenantId, key])
+  @@index([tenantId, active])
+}
+
+model CrmCampaign {
+  id         String    @id @default(cuid())
+  tenantId   String
+  name       String
+  sourceId   String?
+  projectId  String?
+  spendInr   Decimal?  @db.Decimal(14, 2)
+  startedAt  DateTime?
+  endedAt    DateTime?
+  notes      String?
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@index([tenantId, archivedAt])
+  @@index([tenantId, sourceId])
+}
+
+model CrmLead {
+  id                       String           @id @default(cuid())
+  tenantId                 String
+  leadCode                 String
+  name                     String
+  primaryPhone             String
+  primaryPhoneNormalized   String
+  alternatePhone           String?
+  alternatePhoneNormalized String?
+  whatsappPhone            String?
+  whatsappPhoneNormalized  String?
+  email                    String?
+  city                     String?
+  area                     String?
+  sourceId                 String?
+  campaignId               String?
+  firstEnquiryAt           DateTime         @default(now())
+  status                   CrmLeadStatus    @default(NEW)
+  potential                CrmLeadPotential @default(COLD)
+  score                    Int              @default(0)
+  interestedProjectId      String?
+  propertyType             String?
+  interestedProperty       String?
+  budgetMinInr             Decimal?         @db.Decimal(14, 2)
+  budgetMaxInr             Decimal?         @db.Decimal(14, 2)
+  purchaseTimeline         String?
+  purpose                  String?
+  previousWork             String?
+  existingCustomer         Boolean          @default(false)
+  previousInteraction      String?
+  preferredLanguage        String?
+  preferredContactMethod   String?
+  assignedCallerId         String?
+  assignedSalespersonId    String?
+  nextFollowUpAt           DateTime?
+  lastContactAt            DateTime?
+  notes                    String?
+  tags                     Json?
+  qualification            Json?
+  customFields             Json?
+  referredByLeadId         String?
+  consentWhatsApp          Boolean          @default(false)
+  consentSms               Boolean          @default(false)
+  consentEmail             Boolean          @default(false)
+  convertedOwnerId         String?
+  createdById              String
+  archivedAt               DateTime?
+  archivedById             String?
+  archiveReason            String?
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+
+  @@unique([tenantId, leadCode])
+  @@index([tenantId, primaryPhoneNormalized])
+  @@index([tenantId, alternatePhoneNormalized])
+  @@index([tenantId, whatsappPhoneNormalized])
+  @@index([tenantId, email])
+  @@index([tenantId, status, archivedAt])
+  @@index([tenantId, assignedCallerId, nextFollowUpAt])
+  @@index([tenantId, assignedSalespersonId, nextFollowUpAt])
+  @@index([tenantId, sourceId])
+  @@index([tenantId, interestedProjectId])
+}
+
+model CrmLeadAssignment {
+  id             String   @id @default(cuid())
+  tenantId       String
+  leadId         String
+  assignmentType String
+  previousUserId String?
+  assignedUserId String?
+  reason         String?
+  assignedById   String
+  createdAt      DateTime @default(now())
+
+  @@index([tenantId, leadId, createdAt])
+  @@index([tenantId, assignedUserId])
+}
+
+model CrmActivity {
+  id              String          @id @default(cuid())
+  tenantId        String
+  leadId          String
+  type            CrmActivityType
+  title           String
+  notes           String?
+  outcome         String?
+  durationSeconds Int?
+  metadata        Json?
+  actorUserId     String?
+  occurredAt      DateTime        @default(now())
+  createdAt       DateTime        @default(now())
+
+  @@index([tenantId, leadId, occurredAt])
+  @@index([tenantId, type, occurredAt])
+}
+
+model CrmFollowUp {
+  id                String            @id @default(cuid())
+  tenantId          String
+  leadId            String
+  actionType        String
+  reason            String?
+  dueAt             DateTime
+  assignedToId      String?
+  status            CrmFollowUpStatus @default(PENDING)
+  outcome           String?
+  completedAt       DateTime?
+  completedById     String?
+  rescheduledFromId String?
+  escalationLevel   Int               @default(0)
+  lastReminderAt    DateTime?
+  createdById       String
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  @@index([tenantId, status, dueAt])
+  @@index([tenantId, assignedToId, status, dueAt])
+  @@index([tenantId, leadId, createdAt])
+}
+
+model CrmVisit {
+  id                     String         @id @default(cuid())
+  tenantId               String
+  visitCode              String
+  leadId                 String
+  projectId              String
+  scheduledAt            DateTime
+  visitorCount           Int            @default(1)
+  preferredSalespersonId String?
+  assignedSalespersonId  String?
+  pickupRequired         Boolean        @default(false)
+  specialRequirements    String?
+  status                 CrmVisitStatus @default(SCHEDULED)
+  checkedInAt            DateTime?
+  completedAt            DateTime?
+  customerResponse       String?
+  propertiesShown        Json?
+  propertiesLiked        Json?
+  budgetConfirmedInr     Decimal?       @db.Decimal(14, 2)
+  objections             String?
+  purchaseProbability    Int?
+  customerNextAction     String?
+  salespersonNextAction  String?
+  nextFollowUpAt         DateTime?
+  lastReminderAt         DateTime?
+  createdById            String
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+
+  @@unique([tenantId, visitCode])
+  @@index([tenantId, status, scheduledAt])
+  @@index([tenantId, assignedSalespersonId, scheduledAt])
+  @@index([tenantId, leadId, createdAt])
+}
+
+model CrmFeedback {
+  id          String   @id @default(cuid())
+  tenantId    String
+  leadId      String
+  visitId     String?
+  projectId   String?
+  rating      Int
+  comments    String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, leadId, createdAt])
+  @@index([tenantId, visitId])
+}
+
+model CrmBooking {
+  id          String           @id @default(cuid())
+  tenantId    String
+  bookingCode String
+  leadId      String
+  projectId   String
+  plotId      String?
+  ownerId     String?
+  amountInr   Decimal?         @db.Decimal(14, 2)
+  status      CrmBookingStatus @default(PENDING)
+  notes       String?
+  bookedAt    DateTime         @default(now())
+  createdById String
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  @@unique([tenantId, bookingCode])
+  @@index([tenantId, leadId])
+  @@index([tenantId, projectId, status])
+  @@index([tenantId, plotId])
+}
+
+model CrmCommunicationTemplate {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  key       String
+  channel   String
+  subject   String?
+  body      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, key])
+  @@index([tenantId, channel, active])
+}
+
+model CrmAutomationRule {
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  trigger   String
+  actions   Json
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, active])
+}
+
+model CrmTicket {
+  id           String          @id @default(cuid())
+  tenantId     String
+  ticketCode   String
+  leadId       String
+  category     String
+  subject      String
+  description  String?
+  status       CrmTicketStatus @default(OPEN)
+  assignedToId String?
+  resolvedAt   DateTime?
+  createdById  String
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@unique([tenantId, ticketCode])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, leadId, createdAt])
 }
 
 // Government / statutory approvals managed by the Liaison department (RERA, LDC, CLU, NOC, licenses,

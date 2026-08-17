@@ -59,6 +59,7 @@ export const updateUserSchema = z.object({
   designationId: z.string().optional().nullable(),
   profileData: z.record(z.unknown()).optional(),
   status: z.nativeEnum(UserStatus).optional(),
+  reassignToId: z.string().optional().nullable(),
 });
 
 export const resetPasswordSchema = z.object({
@@ -151,6 +152,18 @@ export async function updateUser(context: RequestContext, id: string, input: z.i
     error.name = "BadRequestError";
     throw error;
   }
+  const crmWorkload = input.status === UserStatus.DISABLED ? await activeCrmWorkload(context.tenantId, id) : null;
+  if (crmWorkload?.total && !input.reassignToId) {
+    const error = new Error(`This employee still has ${crmWorkload.leads.length} active leads, ${crmWorkload.followUps} follow-ups, ${crmWorkload.visits} visits, and ${crmWorkload.tickets} tickets. Select an active replacement before deactivating them.`);
+    error.name = "BadRequestError";
+    throw error;
+  }
+  if (input.reassignToId) {
+    if (input.reassignToId === id) {
+      const error = new Error("Select a different employee for reassignment."); error.name = "BadRequestError"; throw error;
+    }
+    await prisma.user.findFirstOrThrow({ where: { id: input.reassignToId, tenantId: context.tenantId, status: UserStatus.ACTIVE } });
+  }
   const organization = await resolveOrganization(context, {
     role: input.role ?? before.role,
     customRoleId: input.customRoleId === undefined ? before.customRoleId : input.customRoleId,
@@ -173,6 +186,7 @@ export async function updateUser(context: RequestContext, id: string, input: z.i
     },
     select: { id: true, name: true, email: true, loginId: true, phone: true, role: true, customRoleId: true, departmentId: true, designationId: true, profileData: true, status: true },
   });
+  if (crmWorkload?.total && input.reassignToId) await reassignCrmWorkload(context, id, input.reassignToId, crmWorkload.leads);
   // Keep the firm-membership role in sync with the primary role so RBAC stays consistent.
   if (organization.role !== before.role) {
     await prisma.userFirmMembership.updateMany({
@@ -190,6 +204,32 @@ export async function updateUser(context: RequestContext, id: string, input: z.i
   return user;
 }
 
+async function activeCrmWorkload(tenantId: string, userId: string) {
+  const [leads, followUps, visits, tickets] = await Promise.all([
+    prisma.crmLead.findMany({ where: { tenantId, archivedAt: null, OR: [{ assignedCallerId: userId }, { assignedSalespersonId: userId }] }, select: { id: true, assignedCallerId: true, assignedSalespersonId: true } }),
+    prisma.crmFollowUp.count({ where: { tenantId, assignedToId: userId, status: { in: ["PENDING", "OVERDUE"] } } }),
+    prisma.crmVisit.count({ where: { tenantId, assignedSalespersonId: userId, status: { in: ["PROPOSED", "SCHEDULED", "CONFIRMED"] } } }),
+    prisma.crmTicket.count({ where: { tenantId, assignedToId: userId, status: { in: ["OPEN", "IN_PROGRESS"] } } }),
+  ]);
+  return { leads, followUps, visits, tickets, total: leads.length + followUps + visits + tickets };
+}
+
+async function reassignCrmWorkload(context: RequestContext, previousUserId: string, nextUserId: string, leads: Array<{ id: string; assignedCallerId: string | null; assignedSalespersonId: string | null }>) {
+  await prisma.$transaction(async (tx) => {
+    for (const lead of leads) {
+      const wasCaller = lead.assignedCallerId === previousUserId;
+      const wasSalesperson = lead.assignedSalespersonId === previousUserId;
+      await tx.crmLead.update({ where: { id: lead.id }, data: { assignedCallerId: wasCaller ? nextUserId : undefined, assignedSalespersonId: wasSalesperson ? nextUserId : undefined } });
+      if (wasCaller) await tx.crmLeadAssignment.create({ data: { tenantId: context.tenantId, leadId: lead.id, assignmentType: "CALLER", previousUserId, assignedUserId: nextUserId, reason: "Employee deactivated", assignedById: context.userId } });
+      if (wasSalesperson) await tx.crmLeadAssignment.create({ data: { tenantId: context.tenantId, leadId: lead.id, assignmentType: "SALESPERSON", previousUserId, assignedUserId: nextUserId, reason: "Employee deactivated", assignedById: context.userId } });
+      await tx.crmActivity.create({ data: { tenantId: context.tenantId, leadId: lead.id, type: "ASSIGNED", title: "Work reassigned after employee deactivation", notes: "Open CRM work moved to an active employee; prior history was preserved.", actorUserId: context.userId, metadata: { previousUserId, nextUserId } } });
+    }
+    await tx.crmFollowUp.updateMany({ where: { tenantId: context.tenantId, assignedToId: previousUserId, status: { in: ["PENDING", "OVERDUE"] } }, data: { assignedToId: nextUserId } });
+    await tx.crmVisit.updateMany({ where: { tenantId: context.tenantId, assignedSalespersonId: previousUserId, status: { in: ["PROPOSED", "SCHEDULED", "CONFIRMED"] } }, data: { assignedSalespersonId: nextUserId } });
+    await tx.crmTicket.updateMany({ where: { tenantId: context.tenantId, assignedToId: previousUserId, status: { in: ["OPEN", "IN_PROGRESS"] } }, data: { assignedToId: nextUserId } });
+  });
+}
+
 export async function deleteUser(context: RequestContext, id: string) {
   if (context.role !== Role.SUPER_ADMIN) {
     const error = new Error("Only a Super Admin can delete user accounts.");
@@ -202,6 +242,12 @@ export async function deleteUser(context: RequestContext, id: string) {
     throw error;
   }
   const before = await prisma.user.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  const crmWorkload = await activeCrmWorkload(context.tenantId, id);
+  if (crmWorkload.total) {
+    const error = new Error("This user has active CRM work. Use Deactivate and select a replacement employee first.");
+    error.name = "BadRequestError";
+    throw error;
+  }
   const user = await prisma.$transaction(async (tx) => {
     await tx.deviceToken.deleteMany({ where: { tenantId: context.tenantId, userId: id } });
     return tx.user.update({

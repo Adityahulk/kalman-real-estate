@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Clapperboard,
+  ContactRound,
   FileStack,
   Gauge,
   Hammer,
@@ -54,6 +55,7 @@ type ShellAccess = {
   ownership: boolean;
   development: boolean;
   marketing: boolean;
+  crm: boolean;
   documents: boolean;
   settings: boolean;
   audit: boolean;
@@ -284,6 +286,15 @@ export function AppShell({
               active={pathname.startsWith(item.href)}
             />
           )) : null}
+          {access.crm ? (
+            <ShellLink
+              href="/app/crm"
+              label="CRM"
+              icon={ContactRound}
+              collapsed={collapsed}
+              active={pathname.startsWith("/app/crm")}
+            />
+          ) : null}
           {access.reports ? (
             <ShellLink
               href="/app/dashboard"

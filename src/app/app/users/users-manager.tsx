@@ -149,6 +149,18 @@ export function UsersManager({
     }
   }
 
+  async function changeUserStatus(user: ManagedUser) {
+    if (user.status !== "ACTIVE") return updateUser(user.id, { status: "ACTIVE" }, "User activated.");
+    const replacementEmail = window.prompt(
+      `Deactivate ${user.name}?\n\nIf this employee has open CRM leads, follow-ups, visits, or tickets, enter the email/login ID of the active employee who should receive them. Leave blank only when there is no open CRM work.`,
+      "",
+    );
+    if (replacementEmail === null) return;
+    const replacement = users.find((candidate) => candidate.id !== user.id && candidate.status === "ACTIVE" && (candidate.email.toLowerCase() === replacementEmail.trim().toLowerCase() || candidate.loginId?.toLowerCase() === replacementEmail.trim().toLowerCase()));
+    if (replacementEmail.trim() && !replacement) return setMessage({ kind: "error", text: "No active replacement user matches that email or login ID." });
+    return updateUser(user.id, { status: "DISABLED", reassignToId: replacement?.id ?? null }, replacement ? `User deactivated. Open CRM work moved to ${replacement.name}.` : "User deactivated.");
+  }
+
   async function resetPassword(id: string, userName: string) {
     const nextPassword = globalThis.prompt(`Enter a new password for ${userName} (min 6 characters):`);
     if (!nextPassword) return;
@@ -278,7 +290,7 @@ export function UsersManager({
                         <div className="mt-5 flex flex-wrap gap-2">
                           {isSuperAdmin ? <button className="btn-outline h-9 text-xs" onClick={() => startEdit(user)}><Pencil size={13} /> Edit user</button> : null}
                           <button className="btn-outline h-9 text-xs" disabled={busyId === user.id} onClick={() => void resetPassword(user.id, user.name)}><KeyRound size={13} /> Reset password</button>
-                          {isSuperAdmin && user.id !== currentUserId ? <button className="btn-outline h-9 text-xs" disabled={busyId === user.id} onClick={() => void updateUser(user.id, { status: user.status === "ACTIVE" ? "DISABLED" : "ACTIVE" }, user.status === "ACTIVE" ? "User deactivated." : "User activated.")}>{user.status === "ACTIVE" ? "Deactivate" : "Activate"}</button> : null}
+                          {isSuperAdmin && user.id !== currentUserId ? <button className="btn-outline h-9 text-xs" disabled={busyId === user.id} onClick={() => void changeUserStatus(user)}>{user.status === "ACTIVE" ? "Deactivate" : "Activate"}</button> : null}
                           {isSuperAdmin && user.id !== currentUserId ? <button className="btn-outline h-9 border-rose-200 text-xs text-rose-700" disabled={busyId === user.id} onClick={() => void deleteUser(user)}><Trash2 size={13} /> Delete user</button> : null}
                         </div>
                       </>

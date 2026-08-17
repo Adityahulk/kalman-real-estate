@@ -112,3 +112,51 @@ export async function sendDailyTaskReminders() {
 }
 
 export const sendOverdueTaskReminders = sendDailyTaskReminders;
+
+// Internal CRM reminders work without WhatsApp/SMS providers. They appear in WIDESTATE's
+// notification centre; the same events can be connected to external providers later.
+export async function sendCrmReminders() {
+  const now = new Date();
+  const cooldown = new Date(now.getTime() - 20 * 60 * 60 * 1000);
+  const visitHorizon = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+  const [followUps, visits] = await Promise.all([
+    prisma.crmFollowUp.findMany({
+      where: { status: { in: ["PENDING", "OVERDUE"] }, dueAt: { lte: now }, OR: [{ lastReminderAt: null }, { lastReminderAt: { lte: cooldown } }] },
+    }),
+    prisma.crmVisit.findMany({
+      where: { status: { in: ["PROPOSED", "SCHEDULED", "CONFIRMED"] }, scheduledAt: { gte: now, lte: visitHorizon }, OR: [{ lastReminderAt: null }, { lastReminderAt: { lte: cooldown } }] },
+    }),
+  ]);
+  const leadIds = [...new Set([...followUps.map((item) => item.leadId), ...visits.map((item) => item.leadId)])];
+  const leads = leadIds.length ? await prisma.crmLead.findMany({ where: { id: { in: leadIds } }, select: { id: true, name: true, leadCode: true } }) : [];
+  const leadMap = Object.fromEntries(leads.map((lead) => [lead.id, lead]));
+  const managerCache = new Map<string, string[]>();
+  async function managers(tenantId: string) {
+    if (!managerCache.has(tenantId)) {
+      const users = await prisma.user.findMany({ where: { tenantId, status: "ACTIVE" }, select: { id: true, role: true, customRole: { select: { permissions: true } } } });
+      managerCache.set(tenantId, users.filter((user) => hasPermission(user.role, "crm.assign", normalizePermissions(user.customRole?.permissions))).map((user) => user.id));
+    }
+    return managerCache.get(tenantId)!;
+  }
+  let notifications = 0;
+  for (const followUp of followUps) {
+    const overdueHours = Math.max(0, (now.getTime() - followUp.dueAt.getTime()) / 3_600_000);
+    const escalationLevel = overdueHours >= 48 ? 2 : overdueHours >= 24 ? 1 : 0;
+    const recipients = new Set<string>();
+    if (followUp.assignedToId) recipients.add(followUp.assignedToId);
+    if (escalationLevel > 0) (await managers(followUp.tenantId)).forEach((id) => recipients.add(id));
+    const lead = leadMap[followUp.leadId];
+    if (recipients.size) await prisma.notification.createMany({ data: [...recipients].map((userId) => ({ tenantId: followUp.tenantId, userId, channel: "in_app", title: escalationLevel ? "CRM follow-up overdue" : "CRM follow-up due", body: `${lead?.name ?? "Customer"}: ${followUp.actionType}`, data: { leadId: followUp.leadId, followUpId: followUp.id, escalationLevel } })) });
+    await prisma.crmFollowUp.update({ where: { id: followUp.id }, data: { status: "OVERDUE", lastReminderAt: now, escalationLevel: Math.max(followUp.escalationLevel, escalationLevel) } });
+    notifications += recipients.size;
+  }
+  for (const visit of visits) {
+    if (visit.assignedSalespersonId) {
+      const lead = leadMap[visit.leadId];
+      await prisma.notification.create({ data: { tenantId: visit.tenantId, userId: visit.assignedSalespersonId, channel: "in_app", title: "Site visit within 24 hours", body: `${lead?.name ?? "Customer"} is scheduled for ${visit.scheduledAt.toLocaleString()}.`, data: { leadId: visit.leadId, visitId: visit.id } } });
+      notifications += 1;
+    }
+    await prisma.crmVisit.update({ where: { id: visit.id }, data: { lastReminderAt: now } });
+  }
+  return { followUps: followUps.length, visits: visits.length, notifications };
+}

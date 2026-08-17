@@ -238,6 +238,7 @@ export function ProjectAllotmentFlow({
   manualLetterFields = [],
   initialData,
   historicalImport,
+  crmLeadId,
 }: {
   projectId: string;
   plots: PlotOption[];
@@ -246,6 +247,7 @@ export function ProjectAllotmentFlow({
   manualLetterFields?: ManualLetterField[];
   initialData?: InitialAllotmentData;
   historicalImport?: { fileAssetId: string; documentNumber: string; documentDate: string };
+  crmLeadId?: string;
 }) {
   const router = useRouter();
   const [plotId, setPlotId] = useState(defaultPlotId && plots.some((plot) => plot.id === defaultPlotId) ? defaultPlotId : "");
@@ -601,6 +603,17 @@ export function ProjectAllotmentFlow({
         router.refresh();
         return;
       }
+      if (crmLeadId) {
+        const conversionResponse = await fetch(`/api/v1/crm/leads/${crmLeadId}/convert`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ ownerId }),
+        });
+        if (!conversionResponse.ok) {
+          const conversionBody = await conversionResponse.json().catch(() => null);
+          setMessage(conversionBody?.error ?? "Allotment was recorded, but the CRM customer link could not be updated.");
+        }
+      }
       const draftResponse = await fetch("/api/v1/documents/drafts", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -637,7 +650,7 @@ export function ProjectAllotmentFlow({
           letterFieldUploadedFiles: mergedManualLetterFiles,
         }));
       }
-      const returnTo = `/app/projects/${projectId}/ownership/new-allotment?plotId=${encodeURIComponent(plotId)}${initialData ? "&edit=1" : ""}&restore=1`;
+      const returnTo = `/app/projects/${projectId}/ownership/new-allotment?plotId=${encodeURIComponent(plotId)}${initialData && !crmLeadId ? "&edit=1" : ""}${crmLeadId ? `&crmLeadId=${encodeURIComponent(crmLeadId)}` : ""}&restore=1`;
       router.push(`/app/projects/${projectId}/plots/${plotId}/letters/${draftBody.data.document.id}?returnTo=${encodeURIComponent(returnTo)}`);
     } catch (error) {
       setLoading(false);

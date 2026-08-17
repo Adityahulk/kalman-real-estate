@@ -27,6 +27,10 @@ export type Permission =
   | "liaison.view"
   | "marketing.manage"
   | "marketing.execute"
+  | "crm.view"
+  | "crm.manage"
+  | "crm.assign"
+  | "crm.reports"
   | "finance.manage"
   | "finance.view"
   | "ai.generate"
@@ -64,6 +68,10 @@ export const ALL_PERMISSIONS: Permission[] = [
   "liaison.view",
   "marketing.manage",
   "marketing.execute",
+  "crm.view",
+  "crm.manage",
+  "crm.assign",
+  "crm.reports",
   "finance.manage",
   "finance.view",
   "ai.generate",
@@ -102,6 +110,10 @@ export const permissionsByRole: Record<Role, Permission[]> = {
     "liaison.view",
     "marketing.manage",
     "marketing.execute",
+    "crm.view",
+    "crm.manage",
+    "crm.assign",
+    "crm.reports",
     "finance.manage",
     "finance.view",
     "ai.generate",
@@ -137,6 +149,10 @@ export const permissionsByRole: Record<Role, Permission[]> = {
     "liaison.view",
     "marketing.manage",
     "marketing.execute",
+    "crm.view",
+    "crm.manage",
+    "crm.assign",
+    "crm.reports",
     "finance.manage",
     "finance.view",
     "ai.generate",
@@ -170,6 +186,10 @@ export const permissionsByRole: Record<Role, Permission[]> = {
     "liaison.view",
     "marketing.manage",
     "marketing.execute",
+    "crm.view",
+    "crm.manage",
+    "crm.assign",
+    "crm.reports",
     "finance.view",
     "ai.generate",
     "audit.view",
@@ -223,7 +243,7 @@ export const permissionsByRole: Record<Role, Permission[]> = {
   ],
   SITE_ENGINEER: ["projects.view", "cad.view", "development.update_assigned", "development.view", "documents.view", "files.upload"],
   FINANCE_MANAGER: ["projects.view", "finance.manage", "finance.view", "documents.view", "files.upload", "ai.generate", "reports.view"],
-  MARKETING_HEAD: ["projects.view", "marketing.manage", "marketing.execute", "documents.view", "files.upload"],
+  MARKETING_HEAD: ["projects.view", "marketing.manage", "marketing.execute", "crm.view", "crm.manage", "crm.assign", "crm.reports", "documents.view", "files.upload"],
   VIDEOGRAPHER: ["projects.view", "marketing.execute", "files.upload"],
   EDITOR: ["projects.view", "marketing.execute", "files.upload"],
   CONTRACTOR: ["projects.view", "development.update_assigned", "development.view", "files.upload"],

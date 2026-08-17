@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 export default async function NewAllotmentPage(
   props: {
     params: Promise<{ projectId: string }>;
-    searchParams: Promise<{ plotId?: string; edit?: string; historical?: string; historicalFileId?: string }>;
+    searchParams: Promise<{ plotId?: string; edit?: string; historical?: string; historicalFileId?: string; crmLeadId?: string }>;
   }
 ) {
   const searchParams = await props.searchParams;
@@ -23,7 +23,7 @@ export default async function NewAllotmentPage(
   if (!project) notFound();
   const isHistoricalImport = searchParams.historical === "1";
   await ensureProjectLetterTemplates(session.tenantId, project.id);
-  const [plots, firm, letterTemplate, letterCategories, existingAllotment, historicalFile] = await Promise.all([
+  const [plots, firm, letterTemplate, letterCategories, existingAllotment, historicalFile, crmLead] = await Promise.all([
     prisma.plot.findMany({
       where: {
         tenantId: session.tenantId,
@@ -62,6 +62,9 @@ export default async function NewAllotmentPage(
           },
         })
       : null,
+    searchParams.crmLeadId
+      ? prisma.crmLead.findFirst({ where: { id: searchParams.crmLeadId, tenantId: session.tenantId, archivedAt: null, status: { in: ["BOOKED", "CUSTOMER"] } } })
+      : null,
   ]);
   if (isHistoricalImport && !historicalFile) notFound();
   const authorizedPersons = Array.isArray(firm.authorizedPersons)
@@ -93,6 +96,22 @@ export default async function NewAllotmentPage(
           : savedAllotmentData.effectiveAt,
       }
     : undefined;
+  const crmInitialData = !existingInitialData && crmLead ? {
+    name: crmLead.name,
+    address: [crmLead.area, crmLead.city].filter(Boolean).join(", "),
+    phone: crmLead.primaryPhone,
+    selectedAuthorizedPerson: authorizedPersons[0] ?? "",
+    totalAreaPrice: crmLead.budgetMaxInr?.toString() ?? "",
+    perUnitPrice: "",
+    paymentEntries: [{ mode: "Cheque" as const, amount: "", reference: "", files: [], uploadedFiles: [] }],
+    effectiveAt: new Date().toISOString().slice(0, 10),
+    stamps: [{ number: "", dated: new Date().toISOString().slice(0, 10) }],
+    witnesses: [{ name: "", phone: "", address: "" }],
+    allotteeDocuments: [{ kind: "Aadhaar" as const, number: "", files: [], uploadedFiles: [] }],
+    extraFields: [],
+    letterFields: {},
+    letterFieldUploadedFiles: {},
+  } : undefined;
 
   const availableLetterFields = letterCategories.flatMap((category) => category.fields.map((field) => ({
     id: field.id,
@@ -144,7 +163,8 @@ export default async function NewAllotmentPage(
           };
         })}
         firm={{ ...firm, authorizedPersons }}
-        initialData={existingInitialData}
+        initialData={existingInitialData ?? crmInitialData}
+        crmLeadId={crmLead?.id}
         historicalImport={historicalFile ? {
           fileAssetId: historicalFile.id,
           documentNumber: historicalFile.documentNo ?? "",

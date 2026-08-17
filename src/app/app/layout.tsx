@@ -42,6 +42,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         development: hasPermission(session.role, "development.view", session.permissions),
         marketing: hasPermission(session.role, "marketing.manage", session.permissions)
           || hasPermission(session.role, "marketing.execute", session.permissions),
+        crm: hasPermission(session.role, "crm.view", session.permissions),
         documents: hasPermission(session.role, "documents.view", session.permissions),
         settings: hasPermission(session.role, "tenant.manage", session.permissions)
           || hasPermission(session.role, "users.manage", session.permissions),
