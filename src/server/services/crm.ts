@@ -27,15 +27,23 @@ export const createCrmLeadSchema = z.object({
   email: z.string().email().optional().or(z.literal("")),
   city: optionalText,
   area: optionalText,
+  clientType: optionalText,
   sourceId: z.string().trim().min(1, "Select where this lead came from."),
   campaignId: optionalId,
-  interestedProjectId: optionalId,
+  interestedProjectId: z.string().trim().min(1, "Select the project for this opportunity."),
   propertyType: optionalText,
   interestedProperty: optionalText,
   budgetMinInr: optionalMoney,
   budgetMaxInr: optionalMoney,
   purchaseTimeline: optionalText,
   purpose: optionalText,
+  priceDiscussedInr: optionalMoney,
+  offersDiscounts: optionalText,
+  paymentPreference: optionalText,
+  negotiationStatus: optionalText,
+  mainObjections: optionalText,
+  competitorComparison: optionalText,
+  requestedInformation: optionalText,
   previousWork: optionalText,
   existingCustomer: z.boolean().default(false),
   previousInteraction: optionalText,
@@ -99,6 +107,8 @@ export const crmLeadActionSchema = z.discriminatedUnion("action", [
     preferredSalespersonId: optionalId,
     assignedSalespersonId: optionalId,
     pickupRequired: z.boolean().default(false),
+    visitPurpose: optionalText,
+    propertyToShow: optionalText,
     specialRequirements: optionalText,
   }),
   z.object({
@@ -108,6 +118,8 @@ export const crmLeadActionSchema = z.discriminatedUnion("action", [
     customerResponse: optionalText,
     propertiesShown: z.array(z.string()).default([]),
     propertiesLiked: z.array(z.string()).default([]),
+    customerDisliked: z.array(z.string()).default([]),
+    revisedRequirement: optionalText,
     budgetConfirmedInr: optionalMoney,
     objections: optionalText,
     purchaseProbability: z.number().int().min(0).max(100).optional().nullable(),
@@ -138,6 +150,9 @@ export const crmLeadActionSchema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("archive"),
     reason: z.string().trim().min(2),
+  }),
+  z.object({
+    action: z.literal("send_brief"),
   }),
 ]);
 
@@ -215,7 +230,7 @@ export async function getCrmReferenceData(context: RequestContext) {
     prisma.crmLeadSource.findMany({ where: { tenantId: context.tenantId, active: true, archivedAt: null }, orderBy: { name: "asc" } }),
     prisma.crmCampaign.findMany({ where: { tenantId: context.tenantId, archivedAt: null }, orderBy: { createdAt: "desc" } }),
     prisma.crmCommunicationTemplate.findMany({ where: { tenantId: context.tenantId, active: true }, orderBy: { name: "asc" } }),
-    prisma.project.findMany({ where: { tenantId: context.tenantId }, select: { id: true, name: true, city: true }, orderBy: { name: "asc" } }),
+    prisma.project.findMany({ where: { tenantId: context.tenantId }, select: { id: true, name: true, city: true, state: true }, orderBy: { name: "asc" } }),
     prisma.user.findMany({
       where: { tenantId: context.tenantId, status: "ACTIVE", role: { not: Role.PLOT_OWNER } },
       select: { id: true, name: true, email: true, phone: true, role: true, customRole: { select: { name: true, permissions: true } } },
@@ -332,7 +347,9 @@ export async function listCrmLeads(
 
 export async function getCrmLead(context: RequestContext, leadId: string) {
   const lead = await prisma.crmLead.findFirstOrThrow({ where: { id: leadId, tenantId: context.tenantId, archivedAt: null, ...leadScope(context) } });
-  const [activities, assignments, followUps, visits, feedback, bookings, tickets, refs] = await Promise.all([
+  const [contact, otherOpportunities, activities, assignments, followUps, visits, feedback, bookings, tickets, refs] = await Promise.all([
+    prisma.crmContact.findFirstOrThrow({ where: { id: lead.contactId, tenantId: context.tenantId, archivedAt: null } }),
+    canSeeAll(context) ? prisma.crmLead.findMany({ where: { tenantId: context.tenantId, contactId: lead.contactId, id: { not: lead.id }, archivedAt: null }, orderBy: { updatedAt: "desc" } }) : [],
     prisma.crmActivity.findMany({ where: { tenantId: context.tenantId, leadId }, orderBy: { occurredAt: "desc" } }),
     prisma.crmLeadAssignment.findMany({ where: { tenantId: context.tenantId, leadId }, orderBy: { createdAt: "desc" } }),
     prisma.crmFollowUp.findMany({ where: { tenantId: context.tenantId, leadId }, orderBy: { dueAt: "desc" } }),
@@ -342,34 +359,73 @@ export async function getCrmLead(context: RequestContext, leadId: string) {
     prisma.crmTicket.findMany({ where: { tenantId: context.tenantId, leadId }, orderBy: { createdAt: "desc" } }),
     getCrmReferenceData(context),
   ]);
-  return { lead, activities, assignments, followUps, visits, feedback, bookings, tickets, ...refs };
+  return { lead, contact, otherOpportunities, activities, assignments, followUps, visits, feedback, bookings, tickets, ...refs };
+}
+
+export async function getCrmContactProfile(context: RequestContext, contactId: string) {
+  if (!canSeeAll(context)) forbidden("The company-wide client profile is available only to CRM management.");
+  const contact = await prisma.crmContact.findFirstOrThrow({ where: { id: contactId, tenantId: context.tenantId, archivedAt: null } });
+  const opportunities = await prisma.crmLead.findMany({ where: { tenantId: context.tenantId, contactId, archivedAt: null }, orderBy: { updatedAt: "desc" } });
+  const leadIds = opportunities.map((item) => item.id);
+  const [activities, visits, followUps, bookings, refs] = await Promise.all([
+    leadIds.length ? prisma.crmActivity.findMany({ where: { tenantId: context.tenantId, leadId: { in: leadIds } }, orderBy: { occurredAt: "desc" }, take: 250 }) : [],
+    leadIds.length ? prisma.crmVisit.findMany({ where: { tenantId: context.tenantId, leadId: { in: leadIds } }, orderBy: { scheduledAt: "desc" } }) : [],
+    leadIds.length ? prisma.crmFollowUp.findMany({ where: { tenantId: context.tenantId, leadId: { in: leadIds } }, orderBy: { dueAt: "desc" } }) : [],
+    leadIds.length ? prisma.crmBooking.findMany({ where: { tenantId: context.tenantId, leadId: { in: leadIds } }, orderBy: { bookedAt: "desc" } }) : [],
+    getCrmReferenceData(context),
+  ]);
+  return { contact, opportunities, activities, visits, followUps, bookings, ...refs };
+}
+
+export async function getCrmVisitBrief(context: RequestContext, leadId: string, visitId?: string) {
+  const data = await getCrmLead(context, leadId);
+  const visit = visitId ? data.visits.find((item) => item.id === visitId) : data.visits[0];
+  if (visitId && !visit) badRequest("The selected visit does not belong to this opportunity.");
+  const projectId = visit?.projectId ?? data.lead.interestedProjectId;
+  const project = data.projects.find((item) => item.id === projectId) ?? null;
+  const source = data.sources.find((item) => item.id === data.lead.sourceId) ?? null;
+  const salesperson = data.users.find((item) => item.id === (visit?.assignedSalespersonId ?? data.lead.assignedSalespersonId)) ?? null;
+  const caller = data.users.find((item) => item.id === data.lead.assignedCallerId) ?? null;
+  const tenant = await prisma.tenant.findUnique({ where: { id: context.tenantId }, select: { name: true, logoDataUrl: true, address: true, contactEmail: true, contactPhone: true } });
+  return {
+    ...data,
+    visit: visit ?? null,
+    project,
+    source,
+    salesperson,
+    caller,
+    tenant,
+    canViewFullProfile: canSeeAll(context),
+    otherInteractions: canSeeAll(context) ? data.otherOpportunities.map((item) => ({ id: item.id, leadCode: item.leadCode, projectId: item.interestedProjectId, status: item.status, firstEnquiryAt: item.firstEnquiryAt })) : [],
+  };
 }
 
 export async function createCrmLead(context: RequestContext, input: z.infer<typeof createCrmLeadSchema>) {
   const phones = phoneCandidates(input);
-  const duplicate = await findDuplicateLead(context.tenantId, phones, input.email);
-  if (duplicate) {
-    const error = new Error(`Existing lead found: ${duplicate.name} (${duplicate.leadCode}). Open that lead and add a new interaction instead.`);
-    error.name = "BadRequestError";
-    throw error;
-  }
+  const existingContact = await findDuplicateContact(context.tenantId, phones, input.email);
+  const duplicate = existingContact ? await findProjectOpportunity(context.tenantId, existingContact.id, input.interestedProjectId) : null;
+  if (duplicate) badRequest(`This client already has ${duplicate.leadCode} for the selected project. Open that opportunity instead.`);
   await validateLeadReferences(context, input);
   const lead = await prisma.$transaction(async (tx) => {
+    const contactId = existingContact?.id ?? (await tx.crmContact.create({
+      data: contactData(context, input, await nextCode(tx, context.tenantId, "contact", "CONTACT")),
+    })).id;
     const leadCode = await nextCode(tx, context.tenantId, "lead", "LEAD");
     const created = await tx.crmLead.create({
-      data: leadData(context, input, leadCode),
+      data: { ...leadData(context, input, contactId, leadCode), ...(existingContact ? contactToLeadIdentity(existingContact) : {}) },
     });
     await tx.crmActivity.create({
       data: {
         tenantId: context.tenantId,
         leadId: created.id,
+        projectId: created.interestedProjectId,
         type: CrmActivityType.LEAD_CREATED,
         title: "Lead created",
         notes: input.notes || null,
         actorUserId: context.userId,
       },
     });
-    await createAssignmentRows(tx, context, created.id, null, created.assignedCallerId, null, created.assignedSalespersonId, "Initial assignment");
+    await createAssignmentRows(tx, context, created.id, created.interestedProjectId, null, created.assignedCallerId, null, created.assignedSalespersonId, "Initial assignment");
     return created;
   });
   await writeAuditEvent(context, { action: AuditAction.CREATE, entityType: "CrmLead", entityId: lead.id, after: lead as unknown as Prisma.InputJsonValue });
@@ -380,17 +436,16 @@ export async function createCrmLead(context: RequestContext, input: z.infer<type
 export async function updateCrmLead(context: RequestContext, leadId: string, input: z.infer<typeof updateCrmLeadSchema>) {
   const before = await requireEditableLead(context, leadId);
   if (input.sourceId !== undefined && input.sourceId !== before.sourceId) badRequest("A lead's original source is permanent. Add a campaign or timeline note instead.");
+  if (before.interestedProjectId && input.interestedProjectId && input.interestedProjectId !== before.interestedProjectId) {
+    badRequest("Create a separate opportunity for another project. Existing project history cannot be moved between projects.");
+  }
   const phoneInput = {
     primaryPhone: input.primaryPhone ?? before.primaryPhone,
     alternatePhone: input.alternatePhone === undefined ? before.alternatePhone : input.alternatePhone,
     whatsappPhone: input.whatsappPhone === undefined ? before.whatsappPhone : input.whatsappPhone,
   };
-  const duplicate = await findDuplicateLead(context.tenantId, phoneCandidates(phoneInput), input.email === undefined ? before.email : input.email, leadId);
-  if (duplicate) {
-    const error = new Error(`Those contact details already belong to ${duplicate.name} (${duplicate.leadCode}).`);
-    error.name = "BadRequestError";
-    throw error;
-  }
+  const duplicateContact = await findDuplicateContact(context.tenantId, phoneCandidates(phoneInput), input.email === undefined ? before.email : input.email, before.contactId);
+  if (duplicateContact) badRequest(`Those contact details already belong to ${duplicateContact.name} (${duplicateContact.contactCode}).`);
   await validateLeadReferences(context, input);
   const data: Prisma.CrmLeadUpdateInput = {
     ...plainLeadUpdate(input),
@@ -398,11 +453,17 @@ export async function updateCrmLead(context: RequestContext, leadId: string, inp
   };
   const lead = await prisma.$transaction(async (tx) => {
     const updated = await tx.crmLead.update({ where: { id: leadId }, data });
+    const identity = defined(contactIdentityUpdate(input));
+    if (Object.keys(identity).length) {
+      await tx.crmContact.update({ where: { id: before.contactId }, data: identity });
+      const leadIdentity = defined(leadIdentityUpdate(input));
+      if (Object.keys(leadIdentity).length) await tx.crmLead.updateMany({ where: { tenantId: context.tenantId, contactId: before.contactId, id: { not: leadId }, archivedAt: null }, data: leadIdentity });
+    }
     if (input.status && input.status !== before.status) {
-      await tx.crmActivity.create({ data: activityData(context, leadId, CrmActivityType.STATUS_CHANGED, `Status changed to ${label(input.status)}`, null, { from: before.status, to: input.status }) });
+      await tx.crmActivity.create({ data: activityData(context, leadId, CrmActivityType.STATUS_CHANGED, `Status changed to ${label(input.status)}`, null, { from: before.status, to: input.status }, before.interestedProjectId) });
     }
     if (input.potential && input.potential !== before.potential) {
-      await tx.crmActivity.create({ data: activityData(context, leadId, CrmActivityType.POTENTIAL_CHANGED, `Potential changed to ${label(input.potential)}`, null, { from: before.potential, to: input.potential }) });
+      await tx.crmActivity.create({ data: activityData(context, leadId, CrmActivityType.POTENTIAL_CHANGED, `Potential changed to ${label(input.potential)}`, null, { from: before.potential, to: input.potential }, before.interestedProjectId) });
     }
     return updated;
   });
@@ -421,6 +482,7 @@ export async function actOnCrmLead(context: RequestContext, leadId: string, inpu
   if (input.action === "feedback") return addFeedback(context, lead, input);
   if (input.action === "booking") return createBooking(context, lead, input);
   if (input.action === "ticket") return createTicket(context, lead, input);
+  if (input.action === "send_brief") return sendVisitBrief(context, lead);
   return archiveLead(context, lead, input.reason);
 }
 
@@ -431,6 +493,7 @@ export async function mergeCrmLeads(context: RequestContext, input: z.infer<type
     prisma.crmLead.findFirstOrThrow({ where: { id: input.sourceLeadId, tenantId: context.tenantId, archivedAt: null } }),
     prisma.crmLead.findFirstOrThrow({ where: { id: input.targetLeadId, tenantId: context.tenantId, archivedAt: null } }),
   ]);
+  if (source.interestedProjectId !== target.interestedProjectId) badRequest("Opportunities from different projects cannot be merged. Link them to one master contact instead.");
   await prisma.$transaction(async (tx) => {
     await Promise.all([
       tx.crmActivity.updateMany({ where: { tenantId: context.tenantId, leadId: source.id }, data: { leadId: target.id } }),
@@ -441,7 +504,7 @@ export async function mergeCrmLeads(context: RequestContext, input: z.infer<type
       tx.crmTicket.updateMany({ where: { tenantId: context.tenantId, leadId: source.id }, data: { leadId: target.id } }),
       tx.crmLeadAssignment.updateMany({ where: { tenantId: context.tenantId, leadId: source.id }, data: { leadId: target.id } }),
     ]);
-    await tx.crmActivity.create({ data: activityData(context, target.id, CrmActivityType.MERGED, `${source.leadCode} merged into this lead`, source.notes, { sourceLeadId: source.id, sourceLeadCode: source.leadCode }) });
+    await tx.crmActivity.create({ data: activityData(context, target.id, CrmActivityType.MERGED, `${source.leadCode} merged into this lead`, source.notes, { sourceLeadId: source.id, sourceLeadCode: source.leadCode }, target.interestedProjectId) });
     await tx.crmLead.update({
       where: { id: target.id },
       data: {
@@ -467,8 +530,9 @@ export async function convertCrmLeadToCustomer(context: RequestContext, leadId: 
   if (lead.status !== CrmLeadStatus.BOOKED && lead.status !== CrmLeadStatus.CUSTOMER) badRequest("This CRM lead must have a confirmed booking before allotment.");
   const updated = await prisma.$transaction(async (tx) => {
     const result = await tx.crmLead.update({ where: { id: lead.id }, data: { status: CrmLeadStatus.CUSTOMER, convertedOwnerId: owner.id, nextFollowUpAt: null } });
+    await tx.crmContact.update({ where: { id: lead.contactId }, data: { convertedOwnerId: owner.id, existingCustomer: true } });
     if (lead.status !== CrmLeadStatus.CUSTOMER || lead.convertedOwnerId !== owner.id) {
-      await tx.crmActivity.create({ data: activityData(context, lead.id, CrmActivityType.CUSTOMER_CONVERTED, "Lead converted to customer", `Linked to ownership profile ${owner.name}.`, { ownerId: owner.id }) });
+      await tx.crmActivity.create({ data: activityData(context, lead.id, CrmActivityType.CUSTOMER_CONVERTED, "Lead converted to customer", `Linked to ownership profile ${owner.name}.`, { ownerId: owner.id }, lead.interestedProjectId) });
     }
     return result;
   });
@@ -580,8 +644,8 @@ async function assignLead(context: RequestContext, lead: Awaited<ReturnType<type
   await validateUsers(context.tenantId, [input.callerId, input.salespersonId]);
   const updated = await prisma.$transaction(async (tx) => {
     const result = await tx.crmLead.update({ where: { id: lead.id }, data: { assignedCallerId: input.callerId || null, assignedSalespersonId: input.salespersonId || null } });
-    await createAssignmentRows(tx, context, lead.id, lead.assignedCallerId, input.callerId, lead.assignedSalespersonId, input.salespersonId, input.reason);
-    await tx.crmActivity.create({ data: activityData(context, lead.id, CrmActivityType.ASSIGNED, "Lead assignment updated", input.reason, { callerId: input.callerId, salespersonId: input.salespersonId }) });
+    await createAssignmentRows(tx, context, lead.id, lead.interestedProjectId, lead.assignedCallerId, input.callerId, lead.assignedSalespersonId, input.salespersonId, input.reason);
+    await tx.crmActivity.create({ data: activityData(context, lead.id, CrmActivityType.ASSIGNED, "Lead assignment updated", input.reason, { callerId: input.callerId, salespersonId: input.salespersonId }, lead.interestedProjectId) });
     return result;
   });
   await writeAuditEvent(context, { action: AuditAction.ASSIGN, entityType: "CrmLead", entityId: lead.id, before: lead as unknown as Prisma.InputJsonValue, after: updated as unknown as Prisma.InputJsonValue });
@@ -595,10 +659,10 @@ async function recordActivity(context: RequestContext, lead: Awaited<ReturnType<
   const now = new Date();
   const result = await prisma.$transaction(async (tx) => {
     const activity = await tx.crmActivity.create({
-      data: { tenantId: context.tenantId, leadId: lead.id, type, title: label(input.type), notes: input.notes, outcome: input.outcome, durationSeconds: input.durationMinutes ? Math.round(input.durationMinutes * 60) : null, metadata: { nextAction: input.nextAction }, actorUserId: context.userId },
+      data: { tenantId: context.tenantId, leadId: lead.id, projectId: lead.interestedProjectId, type, title: label(input.type), notes: input.notes, outcome: input.outcome, durationSeconds: input.durationMinutes ? Math.round(input.durationMinutes * 60) : null, metadata: { nextAction: input.nextAction }, actorUserId: context.userId },
     });
     if (input.nextFollowUpAt) {
-      await tx.crmFollowUp.create({ data: { tenantId: context.tenantId, leadId: lead.id, actionType: input.nextAction, reason: input.outcome, dueAt: new Date(input.nextFollowUpAt), assignedToId: lead.assignedSalespersonId || lead.assignedCallerId || context.userId, createdById: context.userId } });
+      await tx.crmFollowUp.create({ data: { tenantId: context.tenantId, leadId: lead.id, projectId: lead.interestedProjectId, actionType: input.nextAction, reason: input.outcome, dueAt: new Date(input.nextFollowUpAt), assignedToId: lead.assignedSalespersonId || lead.assignedCallerId || context.userId, createdById: context.userId } });
     }
     const status = input.status ?? deriveStatus(input.outcome, lead.status);
     await tx.crmLead.update({ where: { id: lead.id }, data: { status, potential: input.potential, lastContactAt: now, nextFollowUpAt: input.nextFollowUpAt ? new Date(input.nextFollowUpAt) : null, score: calculateScore({ ...lead, status, potential: input.potential ?? lead.potential }) } });
@@ -611,9 +675,9 @@ async function recordActivity(context: RequestContext, lead: Awaited<ReturnType<
 async function createFollowUp(context: RequestContext, lead: Awaited<ReturnType<typeof requireEditableLead>>, input: Extract<z.infer<typeof crmLeadActionSchema>, { action: "follow_up" }>) {
   await validateUsers(context.tenantId, [input.assignedToId]);
   const followUp = await prisma.$transaction(async (tx) => {
-    const created = await tx.crmFollowUp.create({ data: { tenantId: context.tenantId, leadId: lead.id, actionType: input.actionType, reason: input.reason || null, dueAt: new Date(input.dueAt), assignedToId: input.assignedToId || lead.assignedSalespersonId || lead.assignedCallerId || context.userId, createdById: context.userId } });
+    const created = await tx.crmFollowUp.create({ data: { tenantId: context.tenantId, leadId: lead.id, projectId: lead.interestedProjectId, actionType: input.actionType, reason: input.reason || null, dueAt: new Date(input.dueAt), assignedToId: input.assignedToId || lead.assignedSalespersonId || lead.assignedCallerId || context.userId, createdById: context.userId } });
     await tx.crmLead.update({ where: { id: lead.id }, data: { nextFollowUpAt: created.dueAt, status: CrmLeadStatus.FOLLOW_UP_REQUIRED } });
-    await tx.crmActivity.create({ data: activityData(context, lead.id, CrmActivityType.FOLLOW_UP_CREATED, `Follow-up: ${created.actionType}`, created.reason, { followUpId: created.id, dueAt: created.dueAt.toISOString() }) });
+    await tx.crmActivity.create({ data: activityData(context, lead.id, CrmActivityType.FOLLOW_UP_CREATED, `Follow-up: ${created.actionType}`, created.reason, { followUpId: created.id, dueAt: created.dueAt.toISOString() }, lead.interestedProjectId) });
     return created;
   });
   if (followUp.assignedToId && followUp.assignedToId !== context.userId) await createNotification(context, { userId: followUp.assignedToId, title: "CRM follow-up assigned", body: `${lead.name}: ${followUp.actionType}`, data: { leadId: lead.id, followUpId: followUp.id } });
@@ -627,23 +691,24 @@ async function completeFollowUp(context: RequestContext, lead: Awaited<ReturnTyp
     const completed = await tx.crmFollowUp.update({ where: { id: followUp.id }, data: { status: CrmFollowUpStatus.COMPLETED, outcome: input.outcome, completedAt: new Date(), completedById: context.userId } });
     let nextId: string | null = null;
     if (input.nextFollowUpAt) {
-      const next = await tx.crmFollowUp.create({ data: { tenantId: context.tenantId, leadId: lead.id, actionType: input.nextAction, reason: input.outcome, dueAt: new Date(input.nextFollowUpAt), assignedToId: followUp.assignedToId || context.userId, rescheduledFromId: followUp.id, createdById: context.userId } });
+      const next = await tx.crmFollowUp.create({ data: { tenantId: context.tenantId, leadId: lead.id, projectId: followUp.projectId ?? lead.interestedProjectId, actionType: input.nextAction, reason: input.outcome, dueAt: new Date(input.nextFollowUpAt), assignedToId: followUp.assignedToId || context.userId, rescheduledFromId: followUp.id, createdById: context.userId } });
       nextId = next.id;
     }
     await tx.crmLead.update({ where: { id: lead.id }, data: { status: input.status ?? lead.status, nextFollowUpAt: input.nextFollowUpAt ? new Date(input.nextFollowUpAt) : null, lastContactAt: new Date() } });
-    await tx.crmActivity.create({ data: activityData(context, lead.id, CrmActivityType.FOLLOW_UP_COMPLETED, `Follow-up completed: ${followUp.actionType}`, input.outcome, { followUpId: followUp.id, nextFollowUpId: nextId }) });
+    await tx.crmActivity.create({ data: activityData(context, lead.id, CrmActivityType.FOLLOW_UP_COMPLETED, `Follow-up completed: ${followUp.actionType}`, input.outcome, { followUpId: followUp.id, nextFollowUpId: nextId }, followUp.projectId ?? lead.interestedProjectId) });
     return completed;
   });
 }
 
 async function scheduleVisit(context: RequestContext, lead: Awaited<ReturnType<typeof requireEditableLead>>, input: Extract<z.infer<typeof crmLeadActionSchema>, { action: "visit" }>) {
+  if (lead.interestedProjectId && lead.interestedProjectId !== input.projectId) badRequest("Schedule this visit from the opportunity for that project. Project histories cannot be mixed.");
   await prisma.project.findFirstOrThrow({ where: { id: input.projectId, tenantId: context.tenantId } });
   await validateUsers(context.tenantId, [input.preferredSalespersonId, input.assignedSalespersonId]);
   const visit = await prisma.$transaction(async (tx) => {
     const visitCode = await nextCode(tx, context.tenantId, "visit", "VIS");
-    const created = await tx.crmVisit.create({ data: { tenantId: context.tenantId, visitCode, leadId: lead.id, projectId: input.projectId, scheduledAt: new Date(input.scheduledAt), visitorCount: input.visitorCount, preferredSalespersonId: input.preferredSalespersonId || null, assignedSalespersonId: input.assignedSalespersonId || lead.assignedSalespersonId || null, pickupRequired: input.pickupRequired, specialRequirements: input.specialRequirements || null, createdById: context.userId } });
+    const created = await tx.crmVisit.create({ data: { tenantId: context.tenantId, visitCode, leadId: lead.id, projectId: input.projectId, scheduledAt: new Date(input.scheduledAt), visitorCount: input.visitorCount, preferredSalespersonId: input.preferredSalespersonId || null, assignedSalespersonId: input.assignedSalespersonId || lead.assignedSalespersonId || null, pickupRequired: input.pickupRequired, visitPurpose: input.visitPurpose || null, propertyToShow: input.propertyToShow || null, specialRequirements: input.specialRequirements || null, createdById: context.userId } });
     await tx.crmLead.update({ where: { id: lead.id }, data: { status: CrmLeadStatus.VISIT_SCHEDULED, interestedProjectId: input.projectId, assignedSalespersonId: created.assignedSalespersonId, nextFollowUpAt: created.scheduledAt, score: calculateScore({ ...lead, status: CrmLeadStatus.VISIT_SCHEDULED, interestedProjectId: input.projectId }) } });
-    await tx.crmActivity.create({ data: activityData(context, lead.id, CrmActivityType.VISIT_SCHEDULED, `Visit ${visitCode} scheduled`, input.specialRequirements, { visitId: created.id, scheduledAt: created.scheduledAt.toISOString(), projectId: created.projectId }) });
+    await tx.crmActivity.create({ data: activityData(context, lead.id, CrmActivityType.VISIT_SCHEDULED, `Visit ${visitCode} scheduled`, input.specialRequirements, { visitId: created.id, scheduledAt: created.scheduledAt.toISOString(), projectId: created.projectId }, created.projectId) });
     return created;
   });
   if (visit.assignedSalespersonId) await createNotification(context, { userId: visit.assignedSalespersonId, title: "Site visit assigned", body: `${lead.name} is scheduled to visit.`, data: { leadId: lead.id, visitId: visit.id } });
@@ -655,11 +720,11 @@ async function updateVisit(context: RequestContext, lead: Awaited<ReturnType<typ
   if (!canSeeAll(context) && visit.assignedSalespersonId && visit.assignedSalespersonId !== context.userId) forbidden("This visit is assigned to another salesperson.");
   const completed = input.status === CrmVisitStatus.VISITED;
   const updated = await prisma.$transaction(async (tx) => {
-    const result = await tx.crmVisit.update({ where: { id: visit.id }, data: { status: input.status, checkedInAt: completed ? visit.checkedInAt ?? new Date() : undefined, completedAt: completed ? new Date() : null, customerResponse: input.customerResponse || null, propertiesShown: input.propertiesShown, propertiesLiked: input.propertiesLiked, budgetConfirmedInr: money(input.budgetConfirmedInr), objections: input.objections || null, purchaseProbability: input.purchaseProbability, customerNextAction: input.customerNextAction || null, salespersonNextAction: input.salespersonNextAction || null, nextFollowUpAt: date(input.nextFollowUpAt) } });
+    const result = await tx.crmVisit.update({ where: { id: visit.id }, data: { status: input.status, checkedInAt: completed ? visit.checkedInAt ?? new Date() : undefined, completedAt: completed ? new Date() : null, customerResponse: input.customerResponse || null, propertiesShown: input.propertiesShown, propertiesLiked: input.propertiesLiked, customerDisliked: input.customerDisliked, revisedRequirement: input.revisedRequirement || null, budgetConfirmedInr: money(input.budgetConfirmedInr), objections: input.objections || null, purchaseProbability: input.purchaseProbability, customerNextAction: input.customerNextAction || null, salespersonNextAction: input.salespersonNextAction || null, nextFollowUpAt: date(input.nextFollowUpAt) } });
     const leadStatus = completed ? CrmLeadStatus.VISIT_COMPLETED : input.status === CrmVisitStatus.CANCELLED ? CrmLeadStatus.FOLLOW_UP_REQUIRED : lead.status;
     await tx.crmLead.update({ where: { id: lead.id }, data: { status: leadStatus, nextFollowUpAt: date(input.nextFollowUpAt), score: calculateScore({ ...lead, status: leadStatus }) } });
-    if (input.nextFollowUpAt) await tx.crmFollowUp.create({ data: { tenantId: context.tenantId, leadId: lead.id, actionType: input.salespersonNextAction || "Post-visit follow-up", reason: input.customerResponse || null, dueAt: new Date(input.nextFollowUpAt), assignedToId: visit.assignedSalespersonId || context.userId, createdById: context.userId } });
-    await tx.crmActivity.create({ data: activityData(context, lead.id, completed ? CrmActivityType.VISIT_COMPLETED : input.status === CrmVisitStatus.CANCELLED ? CrmActivityType.VISIT_CANCELLED : CrmActivityType.VISIT_SCHEDULED, `Visit ${label(input.status)}`, input.customerResponse, { visitId: visit.id, propertiesShown: input.propertiesShown, propertiesLiked: input.propertiesLiked, purchaseProbability: input.purchaseProbability }) });
+    if (input.nextFollowUpAt) await tx.crmFollowUp.create({ data: { tenantId: context.tenantId, leadId: lead.id, projectId: visit.projectId, actionType: input.salespersonNextAction || "Post-visit follow-up", reason: input.customerResponse || null, dueAt: new Date(input.nextFollowUpAt), assignedToId: visit.assignedSalespersonId || context.userId, createdById: context.userId } });
+    await tx.crmActivity.create({ data: activityData(context, lead.id, completed ? CrmActivityType.VISIT_COMPLETED : input.status === CrmVisitStatus.CANCELLED ? CrmActivityType.VISIT_CANCELLED : CrmActivityType.VISIT_SCHEDULED, `Visit ${label(input.status)}`, input.customerResponse, { visitId: visit.id, propertiesShown: input.propertiesShown, propertiesLiked: input.propertiesLiked, customerDisliked: input.customerDisliked, purchaseProbability: input.purchaseProbability }, visit.projectId) });
     return result;
   });
   if (completed) await notifyRoleWithPermission(context, "crm.assign", { title: "Site visit completed", body: `${lead.name}'s visit is ready for review.`, data: { leadId: lead.id, visitId: visit.id }, excludeUserId: context.userId });
@@ -669,7 +734,7 @@ async function updateVisit(context: RequestContext, lead: Awaited<ReturnType<typ
 async function addFeedback(context: RequestContext, lead: Awaited<ReturnType<typeof requireEditableLead>>, input: Extract<z.infer<typeof crmLeadActionSchema>, { action: "feedback" }>) {
   if (input.visitId) await prisma.crmVisit.findFirstOrThrow({ where: { id: input.visitId, tenantId: context.tenantId, leadId: lead.id } });
   const feedback = await prisma.crmFeedback.create({ data: { tenantId: context.tenantId, leadId: lead.id, visitId: input.visitId || null, projectId: lead.interestedProjectId, rating: input.rating, comments: input.comments || null, createdById: context.userId } });
-  await prisma.crmActivity.create({ data: activityData(context, lead.id, CrmActivityType.FEEDBACK_RECEIVED, `${input.rating}/5 feedback received`, input.comments, { feedbackId: feedback.id }) });
+  await prisma.crmActivity.create({ data: activityData(context, lead.id, CrmActivityType.FEEDBACK_RECEIVED, `${input.rating}/5 feedback received`, input.comments, { feedbackId: feedback.id }, lead.interestedProjectId) });
   return feedback;
 }
 
@@ -680,7 +745,7 @@ async function createBooking(context: RequestContext, lead: Awaited<ReturnType<t
     const bookingCode = await nextCode(tx, context.tenantId, "booking", "BOOK");
     const created = await tx.crmBooking.create({ data: { tenantId: context.tenantId, bookingCode, leadId: lead.id, projectId: project.id, plotId: input.plotId || null, amountInr: money(input.amountInr), status: "CONFIRMED", notes: input.notes || null, createdById: context.userId } });
     await tx.crmLead.update({ where: { id: lead.id }, data: { status: CrmLeadStatus.BOOKED, interestedProjectId: project.id, nextFollowUpAt: null, score: calculateScore({ ...lead, status: CrmLeadStatus.BOOKED }) } });
-    await tx.crmActivity.create({ data: activityData(context, lead.id, CrmActivityType.BOOKING_CREATED, `Booking ${bookingCode} confirmed`, input.notes, { bookingId: created.id, projectId: project.id, plotId: input.plotId, amountInr: input.amountInr }) });
+    await tx.crmActivity.create({ data: activityData(context, lead.id, CrmActivityType.BOOKING_CREATED, `Booking ${bookingCode} confirmed`, input.notes, { bookingId: created.id, projectId: project.id, plotId: input.plotId, amountInr: input.amountInr }, project.id) });
     return created;
   });
   await notifyRoleWithPermission(context, "documents.generate", { title: "CRM booking ready for allotment", body: `${lead.name} booked in ${project.name}.`, data: { leadId: lead.id, bookingId: booking.id, projectId: project.id, plotId: booking.plotId }, excludeUserId: context.userId });
@@ -690,12 +755,23 @@ async function createBooking(context: RequestContext, lead: Awaited<ReturnType<t
 async function createTicket(context: RequestContext, lead: Awaited<ReturnType<typeof requireEditableLead>>, input: Extract<z.infer<typeof crmLeadActionSchema>, { action: "ticket" }>) {
   const ticket = await prisma.$transaction(async (tx) => {
     const ticketCode = await nextCode(tx, context.tenantId, "ticket", "TKT");
-    const created = await tx.crmTicket.create({ data: { tenantId: context.tenantId, ticketCode, leadId: lead.id, category: input.category, subject: input.subject, description: input.description || null, assignedToId: input.assignedToId || null, createdById: context.userId } });
-    await tx.crmActivity.create({ data: activityData(context, lead.id, CrmActivityType.TICKET_CREATED, `Ticket ${ticketCode}: ${input.subject}`, input.description, { ticketId: created.id, category: input.category }) });
+    const created = await tx.crmTicket.create({ data: { tenantId: context.tenantId, ticketCode, leadId: lead.id, projectId: lead.interestedProjectId, category: input.category, subject: input.subject, description: input.description || null, assignedToId: input.assignedToId || null, createdById: context.userId } });
+    await tx.crmActivity.create({ data: activityData(context, lead.id, CrmActivityType.TICKET_CREATED, `Ticket ${ticketCode}: ${input.subject}`, input.description, { ticketId: created.id, category: input.category }, lead.interestedProjectId) });
     return created;
   });
   if (ticket.assignedToId) await createNotification(context, { userId: ticket.assignedToId, title: "Customer ticket assigned", body: `${ticket.ticketCode}: ${ticket.subject}`, data: { leadId: lead.id, ticketId: ticket.id } });
   return ticket;
+}
+
+async function sendVisitBrief(context: RequestContext, lead: Awaited<ReturnType<typeof requireEditableLead>>) {
+  const salespersonId = lead.assignedSalespersonId;
+  if (!salespersonId) badRequest("Assign a salesperson before sending the visit brief.");
+  const latestVisit = await prisma.crmVisit.findFirst({ where: { tenantId: context.tenantId, leadId: lead.id }, orderBy: { scheduledAt: "desc" } });
+  if (!latestVisit) badRequest("Schedule a visit before sending the visit brief.");
+  const url = `/crm/visit-brief/${lead.id}?visitId=${latestVisit.id}`;
+  await createNotification(context, { userId: salespersonId, title: "Client visit brief ready", body: `${lead.name} · ${latestVisit.visitCode}`, data: { leadId: lead.id, visitId: latestVisit.id, url } });
+  await prisma.crmActivity.create({ data: activityData(context, lead.id, CrmActivityType.MESSAGE_OPENED, "Visit brief sent to salesperson", null, { visitId: latestVisit.id, salespersonId, url }, latestVisit.projectId) });
+  return { url, salespersonId, visitId: latestVisit.id };
 }
 
 async function archiveLead(context: RequestContext, lead: Awaited<ReturnType<typeof requireEditableLead>>, reason: string) {
@@ -731,9 +807,10 @@ function assertCanAssign(context: RequestContext) {
 }
 
 async function validateLeadReferences(context: RequestContext, input: Partial<z.infer<typeof createCrmLeadSchema>>) {
+  const campaign = input.campaignId ? await prisma.crmCampaign.findFirstOrThrow({ where: { id: input.campaignId, tenantId: context.tenantId, archivedAt: null } }) : null;
+  if (campaign?.projectId && input.interestedProjectId && campaign.projectId !== input.interestedProjectId) badRequest("The selected campaign belongs to another project.");
   await Promise.all([
     input.sourceId ? prisma.crmLeadSource.findFirstOrThrow({ where: { id: input.sourceId, tenantId: context.tenantId, archivedAt: null } }) : null,
-    input.campaignId ? prisma.crmCampaign.findFirstOrThrow({ where: { id: input.campaignId, tenantId: context.tenantId, archivedAt: null } }) : null,
     input.interestedProjectId ? prisma.project.findFirstOrThrow({ where: { id: input.interestedProjectId, tenantId: context.tenantId } }) : null,
     input.referredByLeadId ? prisma.crmLead.findFirstOrThrow({ where: { id: input.referredByLeadId, tenantId: context.tenantId, archivedAt: null } }) : null,
     validateUsers(context.tenantId, [input.assignedCallerId, input.assignedSalespersonId]),
@@ -747,10 +824,73 @@ async function validateUsers(tenantId: string, ids: Array<string | null | undefi
   if (count !== values.length) badRequest("One of the selected employees is not active in this firm.");
 }
 
-function leadData(context: RequestContext, input: z.infer<typeof createCrmLeadSchema>, leadCode: string): Prisma.CrmLeadUncheckedCreateInput {
+function contactData(context: RequestContext, input: z.infer<typeof createCrmLeadSchema>, contactCode: string): Prisma.CrmContactUncheckedCreateInput {
+  return {
+    tenantId: context.tenantId,
+    contactCode,
+    name: input.name,
+    primaryPhone: input.primaryPhone,
+    primaryPhoneNormalized: normalizePhone(input.primaryPhone),
+    alternatePhone: input.alternatePhone || null,
+    alternatePhoneNormalized: input.alternatePhone ? normalizePhone(input.alternatePhone) : null,
+    whatsappPhone: input.whatsappPhone || null,
+    whatsappPhoneNormalized: input.whatsappPhone ? normalizePhone(input.whatsappPhone) : null,
+    email: input.email?.toLowerCase() || null,
+    city: input.city || null,
+    area: input.area || null,
+    clientType: input.clientType || null,
+    preferredLanguage: input.preferredLanguage || null,
+    preferredContactMethod: input.preferredContactMethod || null,
+    existingCustomer: input.existingCustomer,
+    previousWork: input.previousWork || null,
+    previousInteraction: input.previousInteraction || null,
+    notes: input.notes || null,
+    tags: input.tags,
+    createdById: context.userId,
+  };
+}
+
+function contactIdentityUpdate(input: z.infer<typeof updateCrmLeadSchema>): Prisma.CrmContactUpdateInput {
+  return {
+    name: input.name,
+    primaryPhone: input.primaryPhone,
+    primaryPhoneNormalized: input.primaryPhone ? normalizePhone(input.primaryPhone) : undefined,
+    alternatePhone: input.alternatePhone === undefined ? undefined : input.alternatePhone || null,
+    alternatePhoneNormalized: input.alternatePhone === undefined ? undefined : input.alternatePhone ? normalizePhone(input.alternatePhone) : null,
+    whatsappPhone: input.whatsappPhone === undefined ? undefined : input.whatsappPhone || null,
+    whatsappPhoneNormalized: input.whatsappPhone === undefined ? undefined : input.whatsappPhone ? normalizePhone(input.whatsappPhone) : null,
+    email: input.email === undefined ? undefined : input.email?.toLowerCase() || null,
+    city: nullable(input.city),
+    area: nullable(input.area),
+    clientType: nullable(input.clientType),
+    preferredLanguage: nullable(input.preferredLanguage),
+    preferredContactMethod: nullable(input.preferredContactMethod),
+    existingCustomer: input.existingCustomer,
+    previousWork: nullable(input.previousWork),
+    previousInteraction: nullable(input.previousInteraction),
+  };
+}
+
+function leadIdentityUpdate(input: z.infer<typeof updateCrmLeadSchema>): Prisma.CrmLeadUpdateManyMutationInput {
+  return {
+    name: input.name,
+    primaryPhone: input.primaryPhone,
+    primaryPhoneNormalized: input.primaryPhone ? normalizePhone(input.primaryPhone) : undefined,
+    alternatePhone: input.alternatePhone === undefined ? undefined : input.alternatePhone || null,
+    alternatePhoneNormalized: input.alternatePhone === undefined ? undefined : input.alternatePhone ? normalizePhone(input.alternatePhone) : null,
+    whatsappPhone: input.whatsappPhone === undefined ? undefined : input.whatsappPhone || null,
+    whatsappPhoneNormalized: input.whatsappPhone === undefined ? undefined : input.whatsappPhone ? normalizePhone(input.whatsappPhone) : null,
+    email: input.email === undefined ? undefined : input.email?.toLowerCase() || null,
+    city: nullable(input.city),
+    area: nullable(input.area),
+  };
+}
+
+function leadData(context: RequestContext, input: z.infer<typeof createCrmLeadSchema>, contactId: string, leadCode: string): Prisma.CrmLeadUncheckedCreateInput {
   const primary = normalizePhone(input.primaryPhone);
   return {
     tenantId: context.tenantId,
+    contactId,
     leadCode,
     name: input.name,
     primaryPhone: input.primaryPhone,
@@ -772,6 +912,13 @@ function leadData(context: RequestContext, input: z.infer<typeof createCrmLeadSc
     budgetMaxInr: money(input.budgetMaxInr),
     purchaseTimeline: input.purchaseTimeline || null,
     purpose: input.purpose || null,
+    priceDiscussedInr: money(input.priceDiscussedInr),
+    offersDiscounts: input.offersDiscounts || null,
+    paymentPreference: input.paymentPreference || null,
+    negotiationStatus: input.negotiationStatus || null,
+    mainObjections: input.mainObjections || null,
+    competitorComparison: input.competitorComparison || null,
+    requestedInformation: input.requestedInformation || null,
     previousWork: input.previousWork || null,
     existingCustomer: input.existingCustomer,
     previousInteraction: input.previousInteraction || null,
@@ -805,6 +952,9 @@ function plainLeadUpdate(input: z.infer<typeof updateCrmLeadSchema>): Prisma.Crm
     status: input.status, potential: input.potential, interestedProjectId: nullable(input.interestedProjectId), propertyType: nullable(input.propertyType),
     interestedProperty: nullable(input.interestedProperty), budgetMinInr: input.budgetMinInr === undefined ? undefined : money(input.budgetMinInr),
     budgetMaxInr: input.budgetMaxInr === undefined ? undefined : money(input.budgetMaxInr), purchaseTimeline: nullable(input.purchaseTimeline), purpose: nullable(input.purpose),
+    priceDiscussedInr: input.priceDiscussedInr === undefined ? undefined : money(input.priceDiscussedInr), offersDiscounts: nullable(input.offersDiscounts),
+    paymentPreference: nullable(input.paymentPreference), negotiationStatus: nullable(input.negotiationStatus), mainObjections: nullable(input.mainObjections),
+    competitorComparison: nullable(input.competitorComparison), requestedInformation: nullable(input.requestedInformation),
     previousWork: nullable(input.previousWork), existingCustomer: input.existingCustomer, previousInteraction: nullable(input.previousInteraction),
     preferredLanguage: nullable(input.preferredLanguage), preferredContactMethod: nullable(input.preferredContactMethod), notes: nullable(input.notes),
     tags: input.tags, qualification: input.qualification as Prisma.InputJsonValue | undefined, referredByLeadId: nullable(input.referredByLeadId),
@@ -812,10 +962,10 @@ function plainLeadUpdate(input: z.infer<typeof updateCrmLeadSchema>): Prisma.Crm
   };
 }
 
-async function findDuplicateLead(tenantId: string, phones: string[], email?: string | null, excludeId?: string) {
+async function findDuplicateContact(tenantId: string, phones: string[], email?: string | null, excludeId?: string) {
   const normalizedEmail = email?.trim().toLowerCase();
   if (!phones.length && !normalizedEmail) return null;
-  return prisma.crmLead.findFirst({
+  return prisma.crmContact.findFirst({
     where: {
       tenantId,
       archivedAt: null,
@@ -829,12 +979,37 @@ async function findDuplicateLead(tenantId: string, phones: string[], email?: str
         ...(normalizedEmail ? [{ email: normalizedEmail }] : []),
       ],
     },
+  });
+}
+
+async function findProjectOpportunity(tenantId: string, contactId: string, projectId?: string | null) {
+  return prisma.crmLead.findFirst({
+    where: { tenantId, contactId, interestedProjectId: projectId || null, archivedAt: null },
     select: { id: true, leadCode: true, name: true },
   });
 }
 
 function phoneCandidates(input: { primaryPhone: string; alternatePhone?: string | null; whatsappPhone?: string | null }) {
   return [...new Set([input.primaryPhone, input.alternatePhone, input.whatsappPhone].filter((value): value is string => Boolean(value)).map(normalizePhone).filter(Boolean))];
+}
+
+function contactToLeadIdentity(contact: Awaited<ReturnType<typeof findDuplicateContact>> & {}) {
+  if (!contact) return {};
+  return {
+    name: contact.name,
+    primaryPhone: contact.primaryPhone,
+    primaryPhoneNormalized: contact.primaryPhoneNormalized,
+    alternatePhone: contact.alternatePhone,
+    alternatePhoneNormalized: contact.alternatePhoneNormalized,
+    whatsappPhone: contact.whatsappPhone,
+    whatsappPhoneNormalized: contact.whatsappPhoneNormalized,
+    email: contact.email,
+    city: contact.city,
+    area: contact.area,
+    preferredLanguage: contact.preferredLanguage,
+    preferredContactMethod: contact.preferredContactMethod,
+    existingCustomer: contact.existingCustomer,
+  };
 }
 
 export function normalizePhone(value: string) {
@@ -857,6 +1032,7 @@ async function createAssignmentRows(
   tx: Prisma.TransactionClient,
   context: RequestContext,
   leadId: string,
+  projectId?: string | null,
   oldCaller?: string | null,
   newCaller?: string | null,
   oldSalesperson?: string | null,
@@ -864,8 +1040,8 @@ async function createAssignmentRows(
   reason?: string,
 ) {
   const rows: Prisma.CrmLeadAssignmentCreateManyInput[] = [];
-  if (oldCaller !== newCaller) rows.push({ tenantId: context.tenantId, leadId, assignmentType: "CALLER", previousUserId: oldCaller || null, assignedUserId: newCaller || null, reason: reason || null, assignedById: context.userId });
-  if (oldSalesperson !== newSalesperson) rows.push({ tenantId: context.tenantId, leadId, assignmentType: "SALESPERSON", previousUserId: oldSalesperson || null, assignedUserId: newSalesperson || null, reason: reason || null, assignedById: context.userId });
+  if (oldCaller !== newCaller) rows.push({ tenantId: context.tenantId, leadId, projectId: projectId || null, assignmentType: "CALLER", previousUserId: oldCaller || null, assignedUserId: newCaller || null, reason: reason || null, assignedById: context.userId });
+  if (oldSalesperson !== newSalesperson) rows.push({ tenantId: context.tenantId, leadId, projectId: projectId || null, assignmentType: "SALESPERSON", previousUserId: oldSalesperson || null, assignedUserId: newSalesperson || null, reason: reason || null, assignedById: context.userId });
   if (rows.length) await tx.crmLeadAssignment.createMany({ data: rows });
 }
 
@@ -874,8 +1050,8 @@ async function notifyAssignees(context: RequestContext, lead: { id: string; assi
   await Promise.all(users.map((userId) => createNotification(context, { userId, title: titleText, body, data: { leadId: lead.id } })));
 }
 
-function activityData(context: RequestContext, leadId: string, type: CrmActivityType, titleText: string, notes?: string | null, metadata?: Record<string, unknown>): Prisma.CrmActivityUncheckedCreateInput {
-  return { tenantId: context.tenantId, leadId, type, title: titleText, notes: notes || null, metadata: (metadata ?? {}) as Prisma.InputJsonValue, actorUserId: context.userId };
+function activityData(context: RequestContext, leadId: string, type: CrmActivityType, titleText: string, notes?: string | null, metadata?: Record<string, unknown>, projectId?: string | null): Prisma.CrmActivityUncheckedCreateInput {
+  return { tenantId: context.tenantId, leadId, projectId: projectId || null, type, title: titleText, notes: notes || null, metadata: (metadata ?? {}) as Prisma.InputJsonValue, actorUserId: context.userId };
 }
 
 function calculateScore(value: Record<string, unknown>) {
@@ -929,6 +1105,10 @@ function date(value: string | null | undefined) {
 
 function nullable(value: string | null | undefined) {
   return value === undefined ? undefined : value || null;
+}
+
+function defined<T extends Record<string, unknown>>(value: T) {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined)) as T;
 }
 
 function label(value: string) {

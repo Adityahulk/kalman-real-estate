@@ -193,6 +193,28 @@ export async function renderLetterHtmlToPdf(bodyHtml: string): Promise<Buffer> {
   return run;
 }
 
+export async function renderStandaloneHtmlToPdf(documentHtml: string): Promise<Buffer> {
+  const run = renderChain.then(async () => {
+    const { default: puppeteer } = await import("puppeteer");
+    let browser: Browser | undefined;
+    try {
+      browser = await puppeteer.launch(launchOptions());
+      return await withDeadline((async () => {
+        const page = await browser!.newPage();
+        await page.setContent(documentHtml, { waitUntil: "load", timeout: 30_000 });
+        await page.emulateMediaType("print");
+        const pdf = await page.pdf({ format: "A4", printBackground: true, margin: { top: "0", right: "0", bottom: "0", left: "0" }, preferCSSPageSize: true });
+        await page.close();
+        return Buffer.from(pdf);
+      })(), RENDER_DEADLINE_MS, "CRM visit brief PDF render");
+    } finally {
+      if (browser) await closeBrowserSafely(browser);
+    }
+  });
+  renderChain = run.catch(() => undefined);
+  return run;
+}
+
 async function renderOnce(bodyHtml: string): Promise<Buffer> {
   const { default: puppeteer } = await import("puppeteer");
   let browser: Browser | undefined;

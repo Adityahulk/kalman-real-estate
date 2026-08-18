@@ -1,4 +1,5 @@
-import { Bell, CheckCircle2 } from "lucide-react";
+import { Bell, CheckCircle2, ExternalLink } from "lucide-react";
+import Link from "next/link";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
 import { NotificationReadButton } from "./read-button";
@@ -42,7 +43,7 @@ export default async function NotificationsPage() {
                 <p className="mt-1 text-sm text-slate-600">{notification.body}</p>
                 <div className="mt-2 text-xs text-slate-400">{notification.channel} · {notification.createdAt.toLocaleString("en-IN")}</div>
               </div>
-              {notification.status !== "READ" ? <NotificationReadButton id={notification.id} /> : <CheckCircle2 className="text-emerald-600" size={18} />}
+              <div className="flex items-center gap-2">{typeof notification.data === "object" && notification.data && !Array.isArray(notification.data) && "url" in notification.data && typeof notification.data.url === "string" ? <Link className="btn-outline h-9 px-3 text-xs" href={notification.data.url}>Open <ExternalLink size={13}/></Link> : null}{notification.status !== "READ" ? <NotificationReadButton id={notification.id} /> : <CheckCircle2 className="text-emerald-600" size={18} />}</div>
             </div>
           ))}
           {!notifications.length ? <div className="p-8 text-center text-sm text-slate-500">No notifications yet.</div> : null}

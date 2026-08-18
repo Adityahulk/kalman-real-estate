@@ -10,6 +10,7 @@ type NotificationItem = {
   body: string;
   status: string;
   createdAt: string;
+  data?: { url?: string } | null;
 };
 
 export function NotificationBell() {
@@ -62,7 +63,7 @@ export function NotificationBell() {
           </div>
           <div className="max-h-80 divide-y divide-slate-100 overflow-y-auto">
             {items.slice(0, 8).map((item) => (
-              <button key={item.id} type="button" className={`w-full px-3 py-3 text-left hover:bg-slate-50 ${item.status === "READ" ? "" : "bg-navy-50/50"}`} onClick={() => void markRead(item.id)}>
+              <button key={item.id} type="button" className={`w-full px-3 py-3 text-left hover:bg-slate-50 ${item.status === "READ" ? "" : "bg-navy-50/50"}`} onClick={() => { void markRead(item.id); if (item.data?.url) window.location.assign(item.data.url); }}>
                 <div className="flex gap-2">
                   {item.status !== "READ" ? <span className="mt-1.5 size-2 shrink-0 rounded-full bg-navy-600" /> : <CheckCheck className="mt-0.5 shrink-0 text-slate-400" size={14} />}
                   <span className="min-w-0"><span className="block text-sm font-medium text-slate-800">{item.title}</span><span className="mt-0.5 block text-xs leading-5 text-slate-600">{item.body}</span><span className="mt-1 block text-[11px] text-slate-400">{new Date(item.createdAt).toLocaleString("en-IN")}</span></span>
