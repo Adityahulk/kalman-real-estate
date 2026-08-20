@@ -80,7 +80,12 @@ const stamp = `${Date.now()}-${randomUUID().slice(0, 8)}`;
 const projectReport = await fetch(`${baseUrl}/api/v1/projects/${project.id}/report`, { headers: { cookie } });
 assert(projectReport.status === 200, "project report download failed");
 const projectReportText = await projectReport.text();
-assert(projectReportText.includes("Plot Number") && projectReportText.includes("Owner Name / Company Status"), "project report is missing ownership columns");
+assert(
+  projectReportText.includes("Plot Number")
+    && projectReportText.includes("Owner Name / Company Status")
+    && projectReportText.includes("Letter Number"),
+  "project report is missing ownership or letter-number columns",
+);
 
 const projectPatch = await request(`/api/v1/projects/${project.id}`, {
   method: "PATCH",
@@ -410,10 +415,27 @@ await createAndApproveOwnershipLetter({
 const approvedTransferPlot = await prisma.plot.findUniqueOrThrow({ where: { id: smokePlot.id } });
 assert(approvedTransferPlot.currentOwnerId === buyer.json.data.id, "approved transfer did not update current owner");
 
+const smokeRegistryDocKey = `local/smoke/registry-${smokePlot.id}-${stamp}.pdf`;
+writeLocalSmokeFile(smokeRegistryDocKey);
+const smokeRegistryDoc = await prisma.fileAsset.create({
+  data: {
+    tenantId,
+    storageKey: smokeRegistryDocKey,
+    fileName: `registry-${smokePlot.code}.pdf`,
+    mimeType: "application/pdf",
+    sizeBytes: localPdfBytes.length,
+    visibility: "OWNER_VISIBLE",
+    documentType: "REGISTRY_RECEIPT",
+    documentNo: `REGDOC-${stamp}`,
+    ownerType: "Plot",
+    ownerId: smokePlot.id,
+    uploadedById: me.json.data.id,
+  },
+});
 const registry = await request(`/api/v1/ownership/plots/${smokePlot.id}/registry`, {
   method: "POST",
   headers: { "content-type": "application/json", cookie },
-  body: JSON.stringify({ status: "REGISTERED", registryNo: `REG-${stamp}` }),
+  body: JSON.stringify({ status: "REGISTERED", registryNo: `REG-${stamp}`, fileAssetId: smokeRegistryDoc.id }),
 });
 assert(registry.response.status === 200, "registry update failed");
 

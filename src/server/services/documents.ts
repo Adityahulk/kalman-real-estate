@@ -67,6 +67,7 @@ export const updateDocumentDraftSchema = z.object({
 });
 
 export const refreshDocumentDraftSchema = z.object({
+  type: letterTemplateTypeSchema.optional(),
   data: z.record(z.unknown()).default({}),
 });
 
@@ -170,25 +171,61 @@ export async function refreshDocumentDraft(
   const before = await prisma.generatedDocument.findFirstOrThrow({
     where: { id, tenantId: context.tenantId, archivedAt: null },
   });
-  assertDocumentEditable(before.status);
-  const parsedType = letterTemplateTypeSchema.parse(before.type);
+  if (before.status === DocumentStatus.SIGNED || before.status === DocumentStatus.ISSUED) {
+    const error = new Error(
+      "This letter is signed or issued. Keep it unchanged and create a revised document through the controlled revision workflow.",
+    );
+    error.name = "BadRequestError";
+    throw error;
+  }
+  const parsedType = input.type ?? letterTemplateTypeSchema.parse(before.type);
+  const requestedNumber = typeof input.data.documentNumber === "string" && input.data.documentNumber.trim()
+    ? input.data.documentNumber.trim()
+    : before.number ?? `${before.type.toUpperCase()}-${new Date().getFullYear()}`;
   const draft = await buildDocumentDraftContent(context, {
     type: parsedType,
     recordId: before.recordId,
-    templateId: before.templateId ?? undefined,
+    templateId: parsedType === before.type ? before.templateId ?? undefined : undefined,
     data: input.data,
-    documentNumber: before.number ?? `${before.type.toUpperCase()}-${new Date().getFullYear()}`,
+    documentNumber: requestedNumber,
     documentDate: before.createdAt,
   });
-  const document = await prisma.generatedDocument.update({
-    where: { id },
-    data: {
-      templateId: draft.templateId,
-      data: draft.data,
-      editableHtml: draft.editableHtml,
-      fileAssetId: null,
-      status: DocumentStatus.DRAFT,
-    },
+  const document = await prisma.$transaction(async (tx) => {
+    if (before.fileAssetId) {
+      const latestRevision = await tx.generatedDocumentRevision.aggregate({
+        where: { tenantId: context.tenantId, documentId: id },
+        _max: { revisionNo: true },
+      });
+      await tx.generatedDocumentRevision.create({
+        data: {
+          tenantId: context.tenantId,
+          documentId: id,
+          revisionNo: (latestRevision._max.revisionNo ?? 0) + 1,
+          status: before.status,
+          baseFileId: before.fileAssetId,
+          outputFileId: before.fileAssetId,
+          createdById: context.userId,
+        },
+      });
+    }
+    return tx.generatedDocument.update({
+      where: { id },
+      data: {
+        type: parsedType,
+        number: requestedNumber,
+        templateId: draft.templateId,
+        data: draft.data,
+        editableHtml: draft.editableHtml,
+        fileAssetId: null,
+        status: DocumentStatus.DRAFT,
+        submittedById: null,
+        submittedAt: null,
+        approvedById: null,
+        approvedAt: null,
+        reviewNotes: null,
+        finalizedAt: null,
+      },
+    });
   });
   await writeAuditEvent(context, {
     action: AuditAction.UPDATE,

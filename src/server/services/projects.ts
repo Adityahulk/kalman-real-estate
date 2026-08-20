@@ -236,6 +236,7 @@ export async function getProjectReportCsv(context: RequestContext, projectId: st
     include: {
       currentOwner: true,
       ownershipRecords: {
+        where: { cancelledAt: null },
         include: { owner: true },
         orderBy: { effectiveAt: "asc" },
       },
@@ -249,19 +250,34 @@ export async function getProjectReportCsv(context: RequestContext, projectId: st
     _count: true,
   });
   const documentCountByPlot = new Map(documentCounts.map((item) => [item.ownerId, item._count]));
+  const linkedDocumentIds = sortedPlots
+    .flatMap((plot) => plot.ownershipRecords.map((record) => record.documentId))
+    .filter((id): id is string => Boolean(id));
+  const linkedDocuments = linkedDocumentIds.length
+    ? await prisma.generatedDocument.findMany({
+        where: { tenantId: context.tenantId, id: { in: linkedDocumentIds }, archivedAt: null },
+        select: { id: true, number: true },
+      })
+    : [];
+  const letterNumberById = new Map(linkedDocuments.map((document) => [document.id, document.number ?? ""]));
 
   const rows = [
     ["Project", project.name],
     ["City", project.city],
     [],
-    ["Plot Number", "Date of Allotment", "Owner Name / Company Status", "Registry Status", "Document Count", "Value INR"],
+    ["Plot Number", "Date of Allotment", "Owner Name / Company Status", "Letter Number", "Registry Status", "Document Count", "Value INR"],
     ...sortedPlots.map((plot) => {
       const allotment = plot.ownershipRecords.find((record) => record.kind === "ALLOTMENT");
       const latestOwnership = [...plot.ownershipRecords].reverse()[0];
+      const latestLetterNumber = [...plot.ownershipRecords]
+        .reverse()
+        .map((record) => record.documentId ? letterNumberById.get(record.documentId) : "")
+        .find(Boolean) ?? "";
       return [
         plot.code,
         allotment?.effectiveAt.toISOString().slice(0, 10) ?? "",
         plot.currentOwner?.name ?? "With Company",
+        latestLetterNumber,
         plot.registryRecords[0]?.status ?? "Not started",
         String(documentCountByPlot.get(plot.id) ?? 0),
         String(Number(latestOwnership?.amountInr ?? plot.priceInr ?? 0)),

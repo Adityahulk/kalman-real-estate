@@ -8,6 +8,7 @@ import {
   ambeyAllotmentTemplate,
   registryStatusLetterTemplate,
   transferLetterTemplate,
+  upgradeAllotmentTemplateBody,
   upgradeTransferTemplateBody,
 } from "./letter-templates";
 import { letterSystemFields } from "@/lib/letter-system-fields";
@@ -79,6 +80,19 @@ export async function ensureProjectLetterTemplates(tenantId: string, projectId: 
   });
   for (const template of transferTemplates) {
     const upgradedBody = upgradeTransferTemplateBody(template.body);
+    if (upgradedBody !== template.body) {
+      await prisma.documentTemplate.update({
+        where: { id: template.id },
+        data: { body: upgradedBody },
+      });
+    }
+  }
+  const allotmentTemplates = await prisma.documentTemplate.findMany({
+    where: { tenantId, projectId, type: { in: ["allotment_letter", "allotment_letter_joint"] } },
+    select: { id: true, body: true },
+  });
+  for (const template of allotmentTemplates) {
+    const upgradedBody = upgradeAllotmentTemplateBody(template.body);
     if (upgradedBody !== template.body) {
       await prisma.documentTemplate.update({
         where: { id: template.id },

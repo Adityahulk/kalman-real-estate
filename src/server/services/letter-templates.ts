@@ -163,7 +163,7 @@ export function ambeyAllotmentTemplate() {
 <p class="closing-intro"><strong>IN WITNESS WHEREOF</strong>, the parties hereto have set and subscribed their respective hands at the places and on the day, month and year mentioned under their respective signatures</p>
 <p class="closing-title"><u><strong>SIGNED AND DELIVERED BY THE WITH IN NAMED</strong></u><br>Allottee (including joint allottees)</p>
 <table class="signature-lines">
-<tr><td>(1) NAME: {{owner.nameWithRelation}}</td><td>SIGNATURE</td></tr>
+<tr><td>(1) NAME: {{owner.nameWithRelationUpper}}</td><td>SIGNATURE</td></tr>
 <tr><td>(2) NAME: ________________________</td><td>SIGNATURE</td></tr>
 </table>
 <p class="closing-meta">At {{witness.place}} on {{ownership.effectiveDateDots}}</p>
@@ -270,10 +270,19 @@ export function ambeyAllotmentJointTemplate() {
   // Closing: the second joint allottee signs on the (2) NAME line.
   joint = mustReplace(joint,
     `<tr><td>(2) NAME: ________________________</td><td>SIGNATURE</td></tr>`,
-    `<tr><td>(2) NAME: {{owner2.nameWithRelation}}</td><td>SIGNATURE</td></tr>`,
+    `<tr><td>(2) NAME: {{owner2.nameWithRelationUpper}}</td><td>SIGNATURE</td></tr>`,
   );
 
   return joint.replace('<div data-template="ambey-allotment">', '<div data-template="ambey-allotment" data-template-variant="joint">');
+}
+
+// Keep saved allotment templates compatible with the current legal closing block without
+// replacing any user-written wording or layout. Older project templates used title-case names in
+// the signature rows; the approved format requires both allottee names in capitals.
+export function upgradeAllotmentTemplateBody(body: string) {
+  return body
+    .replaceAll("(1) NAME: {{owner.nameWithRelation}}", "(1) NAME: {{owner.nameWithRelationUpper}}")
+    .replaceAll("(2) NAME: {{owner2.nameWithRelation}}", "(2) NAME: {{owner2.nameWithRelationUpper}}");
 }
 
 function transferRecipientTable(alignmentClass: "transfer-recipient-table-centered" | "transfer-recipient-table-left") {

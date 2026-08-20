@@ -67,6 +67,28 @@ export default async function NewAllotmentPage(
       : null,
   ]);
   if (isHistoricalImport && !historicalFile) notFound();
+  const existingDocument = existingAllotment?.documentId
+    ? await prisma.generatedDocument.findFirst({
+        where: {
+          id: existingAllotment.documentId,
+          tenantId: session.tenantId,
+          recordType: "Plot",
+          recordId: searchParams.plotId,
+          archivedAt: null,
+        },
+      })
+    : searchParams.edit && searchParams.plotId
+      ? await prisma.generatedDocument.findFirst({
+          where: {
+            tenantId: session.tenantId,
+            recordType: "Plot",
+            recordId: searchParams.plotId,
+            type: { in: ["allotment_letter", "allotment_letter_joint"] },
+            archivedAt: null,
+          },
+          orderBy: { updatedAt: "desc" },
+        })
+      : null;
   const authorizedPersons = Array.isArray(firm.authorizedPersons)
     ? firm.authorizedPersons.map((person) => {
         if (typeof person === "string") return person;
@@ -85,12 +107,17 @@ export default async function NewAllotmentPage(
   const savedAllotmentData = mayPrefillExisting && existingAllotment?.owner
     ? buildInitialAllotmentData(existingAllotment.owner, existingExtra, firm)
     : undefined;
+  const existingAllotmentNumber = existingDocument?.number
+    ?? (typeof existingExtra.allotmentNumber === "string" && existingExtra.allotmentNumber
+      ? existingExtra.allotmentNumber
+      : typeof existingExtra.historicalDocumentNumber === "string" && existingExtra.historicalDocumentNumber
+        ? existingExtra.historicalDocumentNumber
+        : historicalFile?.documentNo ?? historicalFile?.fileName.replace(/\.[^.]+$/, "") ?? "");
   const existingInitialData = savedAllotmentData
     ? {
         ...savedAllotmentData,
-        allotmentNumber: typeof existingExtra.historicalDocumentNumber === "string" && existingExtra.historicalDocumentNumber
-          ? existingExtra.historicalDocumentNumber
-          : historicalFile?.documentNo ?? historicalFile?.fileName.replace(/\.[^.]+$/, "") ?? "",
+        documentId: existingDocument?.id,
+        allotmentNumber: existingAllotmentNumber,
         effectiveAt: isHistoricalImport && existingAllotment
           ? dateInput(existingAllotment.effectiveAt)
           : savedAllotmentData.effectiveAt,
@@ -217,7 +244,11 @@ function buildInitialAllotmentData(
       mobileNo: typeof secondAllottee.mobileNo === "string" ? secondAllottee.mobileNo : "",
       share: typeof secondAllottee.share === "string" ? secondAllottee.share : "",
     },
-    allotmentNumber: typeof extra.historicalDocumentNumber === "string" ? extra.historicalDocumentNumber : "",
+    allotmentNumber: typeof extra.allotmentNumber === "string"
+      ? extra.allotmentNumber
+      : typeof extra.historicalDocumentNumber === "string"
+        ? extra.historicalDocumentNumber
+        : "",
     selectedAuthorizedPerson: typeof firmData.authorizedPerson === "string" && firmData.authorizedPerson
       ? firmData.authorizedPerson
       : typeof authorizedPersons[0] === "string"

@@ -310,7 +310,7 @@ await exerciseLetterType("registry_status_letter");
     assert(html.includes("s/o Surinder Kumar"), "joint: second allottee relation missing from draft");
     assert(html.includes("<th>Share</th>"), "joint: Share row missing from details table");
     assert((html.match(/50%/g) ?? []).length >= 2, "joint: 50/50 share split missing");
-    assert(html.includes("(2) NAME:") && html.includes(`(2) NAME: ${jointName}`), "joint: second allottee missing from closing signature line");
+    assert(html.includes("(2) NAME:") && html.includes(`(2) NAME: ${jointName.toUpperCase()}`), "joint: uppercase second allottee missing from closing signature line");
     assert((html.match(/Please affix/g) ?? []).length >= 4, "joint: expected two photograph boxes on declaration + agreement pages");
     assert(!/\{\{[^}]+\}\}/.test(html), "joint: unresolved {{placeholder}} left in draft");
     console.log("  ✓ joint draft structure matches the Double reference");
@@ -399,6 +399,112 @@ await exerciseLetterType("registry_status_letter");
     await prisma.auditEvent.deleteMany({ where: { entityType: "GeneratedDocument", entityId: document.id } });
     await prisma.generatedDocument.delete({ where: { id: document.id } });
     await prisma.fileAsset.deleteMany({ where: { id: { in: [wrongPlotFile.id, firstSignedFile.id, replacementSignedFile.id] } } });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Returning from an allotment letter to correct the form must update the one pending allotment,
+// reopen the same document, and preserve the previously generated PDF as a revision.
+{
+  console.log("\n■ allotment form correction reuses the transaction and letter");
+  const temporaryPlot = await prisma.plot.create({
+    data: {
+      tenantId: plot.tenantId,
+      projectId: plot.projectId,
+      code: `EDIT-${stamp}`,
+      areaSqYards: 250,
+      priceInr: 1_250_000,
+    },
+  });
+  const owner = await request("/api/v1/ownership/owners", {
+    method: "POST",
+    headers: { "content-type": "application/json", cookie },
+    body: JSON.stringify({
+      type: "INDIVIDUAL",
+      name: `Draft Allottee ${stamp}`,
+      phone: "9876504321",
+      address: "Original address, Barnala",
+    }),
+  });
+  assert(owner.response.status === 201, "allotment correction: owner creation failed");
+  const ownerId = owner.json.data.id;
+  let documentId;
+  const fileIds = [];
+  try {
+    const recorded = await request(`/api/v1/ownership/plots/${temporaryPlot.id}/allot`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        ownerId,
+        amountInr: 1_250_000,
+        extraDetails: { allotmentNumber: `TEST/${stamp}`, allottee: { name: `Draft Allottee ${stamp}` } },
+      }),
+    });
+    assert(recorded.response.status === 200, `allotment correction: initial record failed (${recorded.json.error ?? recorded.response.status})`);
+    const recordId = recorded.json.data.record.id;
+
+    const drafted = await request("/api/v1/documents/drafts", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        type: "allotment_letter",
+        recordType: "Plot",
+        recordId: temporaryPlot.id,
+        data: { documentNumber: `TEST/${stamp}` },
+      }),
+    });
+    assert(drafted.response.status === 201, `allotment correction: draft failed (${drafted.json.error ?? drafted.response.status})`);
+    documentId = drafted.json.data.document.id;
+
+    const rendered = await request(`/api/v1/documents/${documentId}/render`, { method: "POST", headers: { cookie } });
+    assert(rendered.response.status === 200, `allotment correction: render failed (${rendered.json.error ?? rendered.response.status})`);
+    const firstFileId = rendered.json.data.document.fileAssetId;
+    fileIds.push(firstFileId);
+
+    const updated = await request(`/api/v1/ownership/plots/${temporaryPlot.id}/allot`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        ownerId,
+        amountInr: 1_300_000,
+        extraDetails: { allotmentNumber: `TEST-REVISED/${stamp}`, allottee: { name: `Corrected Allottee ${stamp}` } },
+      }),
+    });
+    assert(updated.response.status === 200, `allotment correction: transaction update failed (${updated.json.error ?? updated.response.status})`);
+    assert(updated.json.data.record.id === recordId, "allotment correction: created a second ownership record");
+    assert(updated.json.data.record.documentId === documentId, "allotment correction: detached the existing letter");
+
+    const refreshed = await request(`/api/v1/documents/${documentId}/refresh`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        type: "allotment_letter",
+        data: { documentNumber: `TEST-REVISED/${stamp}` },
+      }),
+    });
+    assert(refreshed.response.status === 200, `allotment correction: draft refresh failed (${refreshed.json.error ?? refreshed.response.status})`);
+    assert(refreshed.json.data.document.id === documentId, "allotment correction: created a second letter");
+    assert(refreshed.json.data.document.status === "DRAFT", "allotment correction: refreshed letter is not a draft");
+    assert(refreshed.json.data.document.fileAssetId === null, "allotment correction: stale PDF remained active");
+    assert(refreshed.json.data.document.number === `TEST-REVISED/${stamp}`, "allotment correction: revised letter number was not saved");
+    const revisions = await prisma.generatedDocumentRevision.findMany({ where: { documentId } });
+    assert(revisions.length === 1, `allotment correction: expected one preserved PDF revision, found ${revisions.length}`);
+    assert(revisions[0].baseFileId === firstFileId, "allotment correction: revision does not point to the previous PDF");
+    const ownershipCount = await prisma.ownershipRecord.count({
+      where: { plotId: temporaryPlot.id, kind: "ALLOTMENT", cancelledAt: null },
+    });
+    assert(ownershipCount === 1, `allotment correction: expected one allotment record, found ${ownershipCount}`);
+    console.log("  ✓ generated PDF preserved, same allotment and letter reopened as an editable draft");
+  } finally {
+    if (documentId) {
+      await prisma.generatedDocumentRevision.deleteMany({ where: { documentId } });
+      await prisma.generatedDocument.deleteMany({ where: { id: documentId } });
+    }
+    await prisma.auditEvent.deleteMany({ where: { entityId: { in: [temporaryPlot.id, documentId].filter(Boolean) } } });
+    await prisma.ownershipRecord.deleteMany({ where: { plotId: temporaryPlot.id } });
+    await prisma.fileAsset.deleteMany({ where: { id: { in: fileIds.filter(Boolean) } } });
+    await prisma.plot.delete({ where: { id: temporaryPlot.id } });
+    await prisma.owner.delete({ where: { id: ownerId } });
   }
 }
 

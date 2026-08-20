@@ -92,6 +92,7 @@ type AdditionalFieldEntry = {
 
 type InitialAllotmentData = {
   ownerId?: string;
+  documentId?: string;
   name: string;
   address: string;
   phone: string;
@@ -388,31 +389,40 @@ export function ProjectAllotmentFlow({
     if (typeof window !== "undefined") window.sessionStorage.setItem(restoreKey, JSON.stringify(restorePayload));
     setLoading(true);
     setMessage("");
-    const ownerResponse = await fetch(initialData?.ownerId ? `/api/v1/ownership/owners/${initialData.ownerId}` : "/api/v1/ownership/owners", {
-      method: initialData?.ownerId ? "PATCH" : "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        type: "INDIVIDUAL",
-        name,
-        phone: phone || undefined,
-        address: address || undefined,
-        kyc: {
-          aadhaarNo: firstDocumentNumber(allotteeDocuments, "Aadhaar"),
-          panNo: firstDocumentNumber(allotteeDocuments, "PAN"),
-          dlNo: firstDocumentNumber(allotteeDocuments, "DL"),
-          documents: allotteeDocuments.filter((entry) => entry.number).map((entry) => ({ kind: entry.kind, number: entry.number })),
-        },
-      }),
-    });
-    const ownerBody = await ownerResponse.json();
-    if (!ownerResponse.ok) {
+    const ownerPayload = {
+      type: "INDIVIDUAL",
+      name,
+      phone: phone || undefined,
+      address: address || undefined,
+      kyc: {
+        aadhaarNo: firstDocumentNumber(allotteeDocuments, "Aadhaar"),
+        panNo: firstDocumentNumber(allotteeDocuments, "PAN"),
+        dlNo: firstDocumentNumber(allotteeDocuments, "DL"),
+        documents: allotteeDocuments.filter((entry) => entry.number).map((entry) => ({ kind: entry.kind, number: entry.number })),
+      },
+    };
+    let ownerId = initialData?.ownerId;
+    if (!ownerId) {
+      const ownerResponse = await fetch("/api/v1/ownership/owners", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(ownerPayload),
+      });
+      const ownerBody = await ownerResponse.json();
+      if (!ownerResponse.ok) {
+        setLoading(false);
+        setMessage(ownerBody.error ?? "Allottee creation failed");
+        return;
+      }
+      ownerId = ownerBody.data.id as string;
+    }
+    if (!ownerId) {
       setLoading(false);
-      setMessage(ownerBody.error ?? "Allottee creation failed");
+      setMessage("The allottee record could not be resolved.");
       return;
     }
 
     try {
-      const ownerId = ownerBody.data.id as string;
       const uploadedAllotteeDocs = await uploadDocumentGroups(
         allotteeDocuments.map((entry, index) => ({
           group: `${entry.kind}-${index + 1}`,
@@ -507,6 +517,7 @@ export function ProjectAllotmentFlow({
       );
 
       const extraDetails = {
+        allotmentNumber: allotmentNumber || undefined,
         plot: selectedPlot ? {
           code: selectedPlot.code,
           areaSqYards: selectedPlot.areaSqYards,
@@ -576,7 +587,7 @@ export function ProjectAllotmentFlow({
           ? `/api/v1/ownership/plots/${plotId}/historical-allotment`
           : `/api/v1/ownership/plots/${plotId}/allot`,
         {
-        method: historicalImport ? "POST" : selectedPlot?.currentOwnerId ? "PATCH" : "POST",
+        method: historicalImport ? "POST" : initialData?.ownerId ? "PATCH" : "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(historicalImport
           ? {
@@ -596,6 +607,17 @@ export function ProjectAllotmentFlow({
         setMessage(body.error ?? "Allotment failed");
         return;
       }
+      if (initialData?.ownerId) {
+        const ownerResponse = await fetch(`/api/v1/ownership/owners/${initialData.ownerId}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(ownerPayload),
+        });
+        const ownerBody = await ownerResponse.json();
+        if (!ownerResponse.ok) {
+          throw new Error(ownerBody.error ?? "The allotment was saved, but the allottee details could not be updated.");
+        }
+      }
       if (historicalImport) {
         setLoading(false);
         if (typeof window !== "undefined") window.sessionStorage.removeItem(restoreKey);
@@ -614,21 +636,32 @@ export function ProjectAllotmentFlow({
           setMessage(conversionBody?.error ?? "Allotment was recorded, but the CRM customer link could not be updated.");
         }
       }
-      const draftResponse = await fetch("/api/v1/documents/drafts", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          // A filled joint-allottee section drafts the two-allottee (partnership) letter type.
-          type: jointAllottee.name ? "allotment_letter_joint" : "allotment_letter",
-          recordType: "Plot",
-          recordId: plotId,
-          data: {
-            documentNumber: allotmentNumber || undefined,
-            customLetterFields: letterFields,
-            customLetterFiles: mergedManualLetterFiles,
-          },
-        }),
-      });
+      const draftData = {
+        documentNumber: allotmentNumber || undefined,
+        customLetterFields: letterFields,
+        customLetterFiles: mergedManualLetterFiles,
+      };
+      const draftResponse = await fetch(
+        initialData?.documentId
+          ? `/api/v1/documents/${initialData.documentId}/refresh`
+          : "/api/v1/documents/drafts",
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(initialData?.documentId
+            ? {
+                type: jointAllottee.name ? "allotment_letter_joint" : "allotment_letter",
+                data: draftData,
+              }
+            : {
+                // A filled joint-allottee section drafts the two-allottee (partnership) letter type.
+                type: jointAllottee.name ? "allotment_letter_joint" : "allotment_letter",
+                recordType: "Plot",
+                recordId: plotId,
+                data: draftData,
+              }),
+        },
+      );
       const draftBody = await draftResponse.json();
       setLoading(false);
       if (!draftResponse.ok) {
@@ -650,7 +683,7 @@ export function ProjectAllotmentFlow({
           letterFieldUploadedFiles: mergedManualLetterFiles,
         }));
       }
-      const returnTo = `/app/projects/${projectId}/ownership/new-allotment?plotId=${encodeURIComponent(plotId)}${initialData && !crmLeadId ? "&edit=1" : ""}${crmLeadId ? `&crmLeadId=${encodeURIComponent(crmLeadId)}` : ""}&restore=1`;
+      const returnTo = `/app/projects/${projectId}/ownership/new-allotment?plotId=${encodeURIComponent(plotId)}&edit=1${crmLeadId ? `&crmLeadId=${encodeURIComponent(crmLeadId)}` : ""}&restore=1`;
       router.push(`/app/projects/${projectId}/plots/${plotId}/letters/${draftBody.data.document.id}?returnTo=${encodeURIComponent(returnTo)}`);
     } catch (error) {
       setLoading(false);

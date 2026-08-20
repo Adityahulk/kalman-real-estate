@@ -121,6 +121,17 @@ export async function updateLatestAllotment(context: RequestContext, plotId: str
     if (!recordBefore) {
       throwBadRequest("No allotment record exists for this plot yet.");
     }
+    if (recordBefore.documentId) {
+      const linkedDocument = await tx.generatedDocument.findFirst({
+        where: { id: recordBefore.documentId, tenantId: context.tenantId, archivedAt: null },
+        select: { status: true },
+      });
+      if (linkedDocument && ["SIGNED", "ISSUED"].includes(linkedDocument.status)) {
+        throwBadRequest(
+          "This allotment has a signed or issued letter. Create a revised legal document instead of changing the completed allotment.",
+        );
+      }
+    }
     await tx.owner.findFirstOrThrow({ where: { id: input.ownerId, tenantId: context.tenantId } });
     const plot = before;
     const record = await tx.ownershipRecord.update({
@@ -129,7 +140,6 @@ export async function updateLatestAllotment(context: RequestContext, plotId: str
         ownerId: input.ownerId,
         amountInr: input.amountInr,
         sharePct: input.sharePct,
-        documentId: null,
         notes: input.notes,
         paymentMode: input.paymentMode,
         extraDetails: input.extraDetails as Prisma.InputJsonValue | undefined,

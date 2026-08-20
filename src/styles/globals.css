@@ -583,7 +583,7 @@
 .letter-paper-editor .closing-witness-layout {
   display: flex;
   flex-direction: column;
-  gap: 34px;
+  gap: 18px;
   margin-bottom: 18px;
 }
 .letter-paper-editor .closing-witness-row {
@@ -591,6 +591,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 56px;
+  min-height: 142px;
 }
 .letter-paper-editor .closing-witness-entry {
   flex: 1 1 auto;
@@ -601,7 +602,10 @@
   grid-template-columns: 148px minmax(0, 1fr);
   align-items: end;
   column-gap: 10px;
-  margin: 0 0 28px;
+  margin: 0 0 13px;
+}
+.letter-paper-editor .closing-witness-line:last-child {
+  margin-bottom: 0;
 }
 .letter-paper-editor .closing-witness-label {
   display: block;
