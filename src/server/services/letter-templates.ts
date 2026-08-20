@@ -235,7 +235,7 @@ export function ambeyAllotmentJointTemplate() {
 <tr><th>Unit No.</th><td><strong>{{plot.code}}</strong></td><td><strong>{{plot.code}}</strong></td></tr>
 <tr><th>Share</th><td><strong>{{owner.share}}</strong></td><td><strong>{{owner2.share}}</strong></td></tr>
 <tr><th>Name of Project</th><td><strong>{{project.nameUpper}}</strong></td><td><strong>{{project.nameUpper}}</strong></td></tr>
-<tr><th>Total Sale Price</th><td><strong>{{plot.priceInrFormatted}}/-*</strong></td><td><strong>{{plot.priceInrFormatted}}/-*</strong></td></tr>
+<tr><th>Total Sale Price</th><td colspan="2"><strong>{{plot.priceInrFormatted}}/-*</strong></td></tr>
 </table>`,
   );
 
@@ -282,7 +282,11 @@ export function ambeyAllotmentJointTemplate() {
 export function upgradeAllotmentTemplateBody(body: string) {
   return body
     .replaceAll("(1) NAME: {{owner.nameWithRelation}}", "(1) NAME: {{owner.nameWithRelationUpper}}")
-    .replaceAll("(2) NAME: {{owner2.nameWithRelation}}", "(2) NAME: {{owner2.nameWithRelationUpper}}");
+    .replaceAll("(2) NAME: {{owner2.nameWithRelation}}", "(2) NAME: {{owner2.nameWithRelationUpper}}")
+    .replaceAll(
+      '<tr><th>Total Sale Price</th><td><strong>{{plot.priceInrFormatted}}/-*</strong></td><td><strong>{{plot.priceInrFormatted}}/-*</strong></td></tr>',
+      '<tr><th>Total Sale Price</th><td colspan="2"><strong>{{plot.priceInrFormatted}}/-*</strong></td></tr>',
+    );
 }
 
 function transferRecipientTable(alignmentClass: "transfer-recipient-table-centered" | "transfer-recipient-table-left") {

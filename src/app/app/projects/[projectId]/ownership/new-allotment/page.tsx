@@ -7,6 +7,7 @@ import { ActionHint, ActionPageShell } from "../../../action-page-shell";
 import { ProjectAllotmentFlow } from "../../../workflow-action-forms";
 import { ensureProjectLetterTemplates, extractTemplateFieldsFromBody, templateFields } from "@/server/services/document-templates";
 import { listLetterFieldSettings } from "@/server/services/letter-field-settings";
+import { formatShareNumber, resolveJointShareSplit } from "@/lib/allotment-math";
 
 export const dynamic = "force-dynamic";
 
@@ -217,6 +218,11 @@ function buildInitialAllotmentData(
 ) {
   const allottee = recordOf(extra.allottee);
   const secondAllottee = recordOf(extra.secondAllottee);
+  const shareSplit = resolveJointShareSplit({
+    jointAllotteeName: typeof secondAllottee.name === "string" ? secondAllottee.name : "",
+    primaryShare: extra.ownerShare ?? extra.firstAllotteeShare,
+    jointShare: secondAllottee.share ?? secondAllottee.sharePct,
+  });
   const pricing = recordOf(extra.pricing);
   const plotExtra = recordOf(extra.plot);
   const payments = Array.isArray(extra.payments) ? extra.payments.map(recordOf) : [];
@@ -242,8 +248,9 @@ function buildInitialAllotmentData(
       aadhaarNo: typeof secondAllottee.aadhaarNo === "string" ? secondAllottee.aadhaarNo : "",
       panNo: typeof secondAllottee.panNo === "string" ? secondAllottee.panNo : "",
       mobileNo: typeof secondAllottee.mobileNo === "string" ? secondAllottee.mobileNo : "",
-      share: typeof secondAllottee.share === "string" ? secondAllottee.share : "",
+      share: typeof secondAllottee.name === "string" && secondAllottee.name ? formatShareNumber(shareSplit.joint) : "",
     },
+    primaryShare: typeof secondAllottee.name === "string" && secondAllottee.name ? formatShareNumber(shareSplit.primary) : "100",
     allotmentNumber: typeof extra.allotmentNumber === "string"
       ? extra.allotmentNumber
       : typeof extra.historicalDocumentNumber === "string"

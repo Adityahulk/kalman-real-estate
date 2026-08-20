@@ -285,12 +285,13 @@ await exerciseLetterType("registry_status_letter");
     data: {
       extraDetails: {
         ...originalExtra,
+        ownerShare: "60%",
         secondAllottee: {
           name: jointName,
           fatherName: "Surinder Kumar",
           address: "House No. 1750, Lakhi Colony, Ward No. 16, Barnala, Punjab 148101",
           aadhaarNo: "1111 2222 3333",
-          share: "50%",
+          share: "40%",
         },
       },
     },
@@ -309,7 +310,8 @@ await exerciseLetterType("registry_status_letter");
     assert(html.includes(jointName), "joint: second allottee name missing from draft");
     assert(html.includes("s/o Surinder Kumar"), "joint: second allottee relation missing from draft");
     assert(html.includes("<th>Share</th>"), "joint: Share row missing from details table");
-    assert((html.match(/50%/g) ?? []).length >= 2, "joint: 50/50 share split missing");
+    assert(html.includes("60%") && html.includes("40%"), "joint: 60/40 share split missing");
+    assert((html.match(new RegExp(`${Number(allotmentRecord.amountInr ?? plot.priceInr).toLocaleString("en-IN")}/-\\*`, "g")) ?? []).length === 1, "joint: total sale price was duplicated across both allottees");
     assert(html.includes("(2) NAME:") && html.includes(`(2) NAME: ${jointName.toUpperCase()}`), "joint: uppercase second allottee missing from closing signature line");
     assert((html.match(/Please affix/g) ?? []).length >= 4, "joint: expected two photograph boxes on declaration + agreement pages");
     assert(!/\{\{[^}]+\}\}/.test(html), "joint: unresolved {{placeholder}} left in draft");
@@ -321,7 +323,7 @@ await exerciseLetterType("registry_status_letter");
     await assertA4Pages(jointPdfBuffer, "joint allotment initial PDF");
     const pdf = await pdfText(jointPdfBuffer);
     assert(pdf.pageTexts[0]?.includes("Warm Regards"), "joint: first-page sign-off spilled onto another page");
-    for (const needle of [jointName, "Share", "50%", plot.code]) {
+    for (const needle of [jointName, "Share", "60%", "40%", plot.code]) {
       assert(pdf.has(needle), `joint: "${needle}" missing from rendered PDF`);
     }
     console.log(`  ✓ joint PDF contains both allottees and the share split (${pdf.numPages} pages)`);
@@ -431,6 +433,23 @@ await exerciseLetterType("registry_status_letter");
   let documentId;
   const fileIds = [];
   try {
+    const invalidJoint = await request(`/api/v1/ownership/plots/${temporaryPlot.id}/allot`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie },
+      body: JSON.stringify({
+        ownerId,
+        amountInr: 1_250_000,
+        extraDetails: {
+          ownerShare: "60%",
+          secondAllottee: { name: `Joint Allottee ${stamp}`, share: "30%" },
+        },
+      }),
+    });
+    assert(invalidJoint.response.status === 400, `joint math: invalid 90% total should be rejected, got ${invalidJoint.response.status}`);
+    assert(String(invalidJoint.json.error).includes("exactly 100%"), "joint math: invalid total returned an unclear error");
+    const invalidRecordCount = await prisma.ownershipRecord.count({ where: { plotId: temporaryPlot.id, kind: "ALLOTMENT" } });
+    assert(invalidRecordCount === 0, "joint math: invalid share total created an ownership record");
+
     const recorded = await request(`/api/v1/ownership/plots/${temporaryPlot.id}/allot`, {
       method: "POST",
       headers: { "content-type": "application/json", cookie },

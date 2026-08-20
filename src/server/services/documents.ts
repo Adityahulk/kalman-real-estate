@@ -10,6 +10,7 @@ import { createGeneratedFileAsset } from "./files";
 import { buildGeneratedDocumentPdf, buildGeneratedDocumentPdfFromHtml } from "./document-pdf";
 import { createNotification, notifyRoleWithPermission } from "./notifications";
 import { defaultLetterBody, letterTemplateTypeSchema, resolveActiveProjectLetterTemplate } from "./document-templates";
+import { formatSharePercentage, resolveJointShareSplit } from "@/lib/allotment-math";
 
 // Statuses in which a letter still counts as "accepted" for plot-ownership purposes. Approving a
 // letter reconciles the plot to its new owner; the letter then moves on to signature (SENT_FOR_SIGNATURE
@@ -861,10 +862,15 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
   const secondAddressRaw = stringFromKyc(secondAllottee, ["address"]);
   const secondAddress = normalizeAddressInline(secondAddressRaw);
   const hasSecondAllottee = Boolean(secondName);
-  // Share split: explicit values win; a joint allotment defaults to 50/50, a single one to 100%.
-  const ownerShare = stringFromKyc(extraDetails, ["ownerShare", "firstAllotteeShare"])
-    || (hasSecondAllottee ? "50%" : ownership?.sharePct ? `${ownership.sharePct}%` : "100%");
-  const secondShare = stringFromKyc(secondAllottee, ["share", "sharePct"]) || (hasSecondAllottee ? "50%" : "");
+  const shareSplit = resolveJointShareSplit({
+    jointAllotteeName: secondName,
+    primaryShare: extraDetails.ownerShare ?? extraDetails.firstAllotteeShare,
+    jointShare: secondAllottee.share ?? secondAllottee.sharePct,
+  });
+  const ownerShare = hasSecondAllottee
+    ? formatSharePercentage(shareSplit.primary)
+    : ownership?.sharePct ? `${ownership.sharePct}%` : "100%";
+  const secondShare = hasSecondAllottee ? formatSharePercentage(shareSplit.joint) : "";
   // Transfer letters: the seller (transferor) is the most recent prior ownership held by a
   // different owner, and the original allotment letter is the latest issued allotment document
   // for this plot — both are auto-filled so the transfer set matches the signed reference.

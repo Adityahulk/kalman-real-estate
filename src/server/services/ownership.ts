@@ -5,6 +5,7 @@ import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
 import { hasPermission } from "../rbac";
 import { notifyRoleWithPermission } from "./notifications";
+import { resolveJointShareSplit } from "@/lib/allotment-math";
 
 export const ownerSchema = z.object({
   type: z.enum(["INDIVIDUAL", "COMPANY", "SHARED"]),
@@ -69,6 +70,7 @@ export const allotPlotSchema = z.object({
 
 export async function allotPlot(context: RequestContext, plotId: string, input: z.infer<typeof allotPlotSchema>) {
   assertCanPrepareAllotment(context);
+  assertValidAllotmentMath(input);
   const result = await prisma.$transaction(async (tx) => {
     const before = await tx.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
     if (before.currentOwnerId) {
@@ -112,6 +114,7 @@ export async function allotPlot(context: RequestContext, plotId: string, input: 
 
 export async function updateLatestAllotment(context: RequestContext, plotId: string, input: z.infer<typeof allotPlotSchema>) {
   assertCanPrepareAllotment(context);
+  assertValidAllotmentMath(input);
   const result = await prisma.$transaction(async (tx) => {
     const before = await tx.plot.findFirstOrThrow({ where: { id: plotId, tenantId: context.tenantId, archivedAt: null } });
     const recordBefore = await tx.ownershipRecord.findFirst({
@@ -279,6 +282,7 @@ export async function recordHistoricalAllotment(
   input: z.infer<typeof historicalAllotmentSchema>,
 ) {
   assertSuperAdmin(context, "Only a Super Admin can mark an old allotment as completed.");
+  assertValidAllotmentMath(input);
   const result = await prisma.$transaction(async (tx) => {
     const before = await tx.plot.findFirstOrThrow({
       where: { id: plotId, tenantId: context.tenantId, archivedAt: null },
@@ -809,6 +813,54 @@ function throwBadRequest(message: string): never {
   const error = new Error(message);
   error.name = "BadRequestError";
   throw error;
+}
+
+function assertValidAllotmentMath(input: {
+  amountInr?: number;
+  extraDetails?: Record<string, unknown>;
+}) {
+  const extra = jsonRecord(input.extraDetails);
+  const secondAllottee = jsonRecord(extra.secondAllottee ?? extra.jointAllottee ?? extra.coAllottee);
+  const jointName = typeof secondAllottee.name === "string" ? secondAllottee.name : "";
+  const shareSplit = resolveJointShareSplit({
+    jointAllotteeName: jointName,
+    primaryShare: extra.ownerShare ?? extra.firstAllotteeShare,
+    jointShare: secondAllottee.share ?? secondAllottee.sharePct,
+  });
+  if (!shareSplit.valid) throwBadRequest(shareSplit.message ?? "Joint allottee shares are invalid.");
+
+  const pricing = jsonRecord(extra.pricing);
+  const totalPriceKey = ["totalAreaPrice", "totalSalePrice", "totalPrice"].find((key) => Object.prototype.hasOwnProperty.call(pricing, key));
+  const declaredTotal = totalPriceKey ? finiteNonNegative(pricing[totalPriceKey]) : null;
+  if (totalPriceKey && declaredTotal === null) {
+    throwBadRequest("Total sale price must be a valid non-negative number.");
+  }
+  const perUnitKey = ["perUnitPrice", "unitPrice", "pricePerUnit"].find((key) => Object.prototype.hasOwnProperty.call(pricing, key));
+  if (perUnitKey && finiteNonNegative(pricing[perUnitKey]) === null) {
+    throwBadRequest("Per-unit price must be a valid non-negative number.");
+  }
+  if (input.amountInr !== undefined && declaredTotal !== null && Math.abs(input.amountInr - declaredTotal) > 0.01) {
+    throwBadRequest("The ownership amount and total sale price must match.");
+  }
+  const payments = Array.isArray(extra.payments) ? extra.payments.map(jsonRecord) : [];
+  const paymentAmounts = payments.map((payment) => {
+    const amountKey = ["amount", "amountInr"].find((key) => Object.prototype.hasOwnProperty.call(payment, key));
+    return amountKey ? finiteNonNegative(payment[amountKey]) : 0;
+  });
+  if (paymentAmounts.some((amount) => amount === null)) {
+    throwBadRequest("Every payment amount must be a valid non-negative number.");
+  }
+  const paymentTotal = paymentAmounts.reduce<number>((sum, amount) => sum + (amount ?? 0), 0);
+  const saleTotal = declaredTotal ?? input.amountInr ?? null;
+  if (saleTotal !== null && paymentTotal - saleTotal > 0.01) {
+    throwBadRequest("Payment entries cannot exceed the total sale price.");
+  }
+}
+
+function finiteNonNegative(value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
 function jsonRecord(value: unknown): Record<string, unknown> {

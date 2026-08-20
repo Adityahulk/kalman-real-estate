@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, Bold, CheckCircle2, Download, Eye, FileText, Italic, Loader2, Plus, Save, Send, Trash2, Underline, Wand2, X } from "lucide-react";
 import { reflowPages } from "@/lib/editor-page-overflow";
 import { sanitizePastedHtml } from "@/lib/sanitize-pasted-html";
+import { formatShareNumber, formatSharePercentage, resolveJointShareSplit } from "@/lib/allotment-math";
 import { FileUploader } from "@/components/file-uploader";
 
 type ProjectInfo = {
@@ -105,6 +106,7 @@ type InitialAllotmentData = {
     mobileNo: string;
     share: string;
   };
+  primaryShare?: string;
   allotmentNumber?: string;
   selectedAuthorizedPerson: string;
   signatoryRelation?: string;
@@ -266,6 +268,14 @@ export function ProjectAllotmentFlow({
     mobileNo: "",
     share: "",
   });
+  const initialShareSplit = resolveJointShareSplit({
+    jointAllotteeName: initialData?.jointAllottee?.name ?? "",
+    primaryShare: initialData?.primaryShare,
+    jointShare: initialData?.jointAllottee?.share,
+  });
+  const [primaryShare, setPrimaryShare] = useState(
+    initialData?.jointAllottee?.name ? formatShareNumber(initialShareSplit.primary) : "100",
+  );
   const [allotteeDocuments, setAllotteeDocuments] = useState<AllotteeDocumentEntry[]>(
     initialData?.allotteeDocuments?.length ? initialData.allotteeDocuments : [{ kind: "Aadhaar", number: "", files: [], uploadedFiles: [] }],
   );
@@ -306,6 +316,11 @@ export function ProjectAllotmentFlow({
   const calculatedFromUnitPrice = Number(perUnitPrice || 0) * Number(selectedPlot?.areaSqYards || 0);
   const calculatedPrice = Number(totalAreaPrice || 0) || calculatedFromUnitPrice;
   const paymentTotal = paymentEntries.reduce((total, entry) => total + Number(entry.amount || 0), 0);
+  const jointShareSplit = resolveJointShareSplit({
+    jointAllotteeName: jointAllottee.name,
+    primaryShare,
+    jointShare: jointAllottee.share,
+  });
   const restoreKey = `widestate:new-allotment:${projectId}`;
 
   useEffect(() => {
@@ -323,7 +338,7 @@ export function ProjectAllotmentFlow({
     if (!new URLSearchParams(window.location.search).has("restore")) return;
     try {
       const saved = JSON.parse(window.sessionStorage.getItem(restoreKey) ?? "{}") as Partial<{
-        plotId: string; name: string; address: string; phone: string; jointAllottee: InitialAllotmentData["jointAllottee"]; allotmentNumber: string; selectedAuthorizedPerson: string; signatoryRelation: string; authorizationDate: string; totalAreaPrice: string; perUnitPrice: string;
+        plotId: string; name: string; address: string; phone: string; jointAllottee: InitialAllotmentData["jointAllottee"]; primaryShare: string; allotmentNumber: string; selectedAuthorizedPerson: string; signatoryRelation: string; authorizationDate: string; totalAreaPrice: string; perUnitPrice: string;
         paymentEntries: Array<Pick<PaymentEntry, "mode" | "amount" | "reference" | "date" | "bank" | "uploadedFiles">>;
         effectiveAt: string; stamps: StampEntry[]; witnesses: WitnessEntry[]; allotteeDocuments: Array<Pick<AllotteeDocumentEntry, "kind" | "number" | "uploadedFiles">>;
         extraFields: AdditionalFieldEntry[]; letterFields: Record<string, string>; letterFieldUploadedFiles: Record<string, StoredFileRef[]>;
@@ -333,6 +348,7 @@ export function ProjectAllotmentFlow({
       if (saved.address) setAddress(saved.address);
       if (saved.phone) setPhone(saved.phone);
       if (saved.jointAllottee) setJointAllottee(saved.jointAllottee);
+      if (saved.primaryShare) setPrimaryShare(saved.primaryShare);
       if (saved.allotmentNumber) { setAllotmentNumber(saved.allotmentNumber); setAllotmentNumberEdited(true); }
       if (saved.selectedAuthorizedPerson) setSelectedAuthorizedPerson(saved.selectedAuthorizedPerson);
       if (saved.signatoryRelation) setSignatoryRelation(saved.signatoryRelation);
@@ -363,12 +379,31 @@ export function ProjectAllotmentFlow({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!plotId) return;
+    setMessage("");
+    if (!jointShareSplit.valid) {
+      setMessage(jointShareSplit.message ?? "Check the joint allottee share percentages.");
+      return;
+    }
+    if ((totalAreaPrice && (!Number.isFinite(Number(totalAreaPrice)) || Number(totalAreaPrice) < 0))
+      || (perUnitPrice && (!Number.isFinite(Number(perUnitPrice)) || Number(perUnitPrice) < 0))) {
+      setMessage("Total price and per-unit price must be valid non-negative numbers.");
+      return;
+    }
+    if (paymentEntries.some((entry) => entry.amount && (!Number.isFinite(Number(entry.amount)) || Number(entry.amount) < 0))) {
+      setMessage("Every payment amount must be a valid non-negative number.");
+      return;
+    }
+    if (calculatedPrice > 0 && paymentTotal > calculatedPrice) {
+      setMessage(`Payment entries cannot exceed the total price. Payments are INR ${paymentTotal.toLocaleString("en-IN")} against INR ${calculatedPrice.toLocaleString("en-IN")}.`);
+      return;
+    }
     const restorePayload = {
       plotId,
       name,
       address,
       phone,
       jointAllottee,
+      primaryShare,
       allotmentNumber,
       selectedAuthorizedPerson,
       signatoryRelation,
@@ -388,7 +423,6 @@ export function ProjectAllotmentFlow({
     };
     if (typeof window !== "undefined") window.sessionStorage.setItem(restoreKey, JSON.stringify(restorePayload));
     setLoading(true);
-    setMessage("");
     const ownerPayload = {
       type: "INDIVIDUAL",
       name,
@@ -518,6 +552,7 @@ export function ProjectAllotmentFlow({
 
       const extraDetails = {
         allotmentNumber: allotmentNumber || undefined,
+        ownerShare: jointAllottee.name ? formatSharePercentage(jointShareSplit.primary) : "100%",
         plot: selectedPlot ? {
           code: selectedPlot.code,
           areaSqYards: selectedPlot.areaSqYards,
@@ -541,7 +576,7 @@ export function ProjectAllotmentFlow({
               aadhaarNo: jointAllottee.aadhaarNo || undefined,
               panNo: jointAllottee.panNo || undefined,
               mobileNo: jointAllottee.mobileNo || undefined,
-              share: jointAllottee.share || undefined,
+              share: formatSharePercentage(jointShareSplit.joint),
             }
           : undefined,
         firm: {
@@ -781,13 +816,29 @@ export function ProjectAllotmentFlow({
             <div className="mt-1 text-xs text-slate-500">Fill this only for a joint allotment. The letter will use the two-allottee format with both names, addresses, and the share split.</div>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
-            <label><span className="label">Name</span><input className="input" value={jointAllottee.name} onChange={(event) => setJointAllottee((current) => ({ ...current, name: event.target.value }))} /></label>
+            <label><span className="label">Name</span><input className="input" value={jointAllottee.name} onChange={(event) => {
+              const nextName = event.target.value;
+              if (!jointAllottee.name.trim() && nextName.trim()) {
+                setPrimaryShare("50");
+                setJointAllottee((current) => ({ ...current, name: nextName, share: current.share || "50" }));
+              } else {
+                if (jointAllottee.name.trim() && !nextName.trim()) setPrimaryShare("100");
+                setJointAllottee((current) => ({ ...current, name: nextName }));
+              }
+            }} /></label>
             <label><span className="label">Father&#39;s / spouse&#39;s name</span><input className="input" value={jointAllottee.fatherName} onChange={(event) => setJointAllottee((current) => ({ ...current, fatherName: event.target.value }))} /></label>
             <label className="md:col-span-2"><span className="label">Address</span><textarea className="input min-h-20" value={jointAllottee.address} onChange={(event) => setJointAllottee((current) => ({ ...current, address: event.target.value }))} /></label>
             <label><span className="label">Aadhaar No.</span><input className="input" value={jointAllottee.aadhaarNo} onChange={(event) => setJointAllottee((current) => ({ ...current, aadhaarNo: event.target.value }))} /></label>
             <label><span className="label">PAN No.</span><input className="input" value={jointAllottee.panNo} onChange={(event) => setJointAllottee((current) => ({ ...current, panNo: event.target.value }))} /></label>
             <label><span className="label">Mobile No.</span><input className="input" value={jointAllottee.mobileNo} onChange={(event) => setJointAllottee((current) => ({ ...current, mobileNo: event.target.value }))} /></label>
-            <label><span className="label">Share <span className="font-normal text-slate-400">(e.g. 50%)</span></span><input className="input" value={jointAllottee.share} onChange={(event) => setJointAllottee((current) => ({ ...current, share: event.target.value }))} /></label>
+            {jointAllottee.name.trim() ? <>
+              <label><span className="label">Primary allottee share (%)</span><input className="input" type="number" min="0.01" max="99.99" step="0.01" value={primaryShare} onChange={(event) => setPrimaryShare(event.target.value)} /></label>
+              <label><span className="label">Joint allottee share (%)</span><input className="input" type="number" min="0.01" max="99.99" step="0.01" value={jointAllottee.share} onChange={(event) => setJointAllottee((current) => ({ ...current, share: event.target.value }))} /></label>
+              <div className={`md:col-span-2 rounded-lg px-3 py-2 text-sm ${jointShareSplit.valid ? "bg-emerald-50 text-emerald-800" : "bg-rose-50 text-rose-700"}`}>
+                Share total: <strong>{formatShareNumber(jointShareSplit.total)}%</strong> {jointShareSplit.valid ? "(valid)" : `- ${jointShareSplit.message}`}
+                {jointShareSplit.valid && calculatedPrice > 0 ? <span> · Primary value: INR {(calculatedPrice * jointShareSplit.primary / 100).toLocaleString("en-IN")} · Joint value: INR {(calculatedPrice * jointShareSplit.joint / 100).toLocaleString("en-IN")}</span> : null}
+              </div>
+            </> : null}
           </div>
         </div>
       </FormSection>
