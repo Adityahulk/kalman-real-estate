@@ -16,10 +16,11 @@ export default async function OwnershipPage(
   const session = await requirePagePermission("ownership.view");
 
   const [projects, plots] = await Promise.all([
-    prisma.project.findMany({ where: { tenantId: session.tenantId }, orderBy: { name: "asc" } }),
+    prisma.project.findMany({ where: { tenantId: session.tenantId, ...(Array.isArray(session.projectIds) ? { id: { in: session.projectIds } } : {}) }, orderBy: { name: "asc" } }),
     prisma.plot.findMany({
       where: {
         tenantId: session.tenantId,
+        ...(Array.isArray(session.projectIds) ? { projectId: { in: session.projectIds } } : {}),
         archivedAt: null,
         ...(searchParams.projectId ? { projectId: searchParams.projectId } : {}),
         ...(searchParams.status ? { status: searchParams.status as PlotStatus } : {}),

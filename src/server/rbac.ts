@@ -259,6 +259,11 @@ export function normalizePermissions(value: unknown): Permission[] | undefined {
 }
 
 export function hasPermission(role: Role, permission: Permission, customPermissions?: Permission[]) {
+  // Platform and firm super-admin accounts must never be down-scoped by a stale or accidentally
+  // attached custom role. Their built-in role is the authority used by both page and API checks.
+  if (role === Role.SUPER_ADMIN || role === Role.PLATFORM_ADMIN) {
+    return permissionsByRole[role].includes(permission);
+  }
   return (customPermissions ?? permissionsByRole[role] ?? []).includes(permission);
 }
 

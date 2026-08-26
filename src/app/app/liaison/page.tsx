@@ -10,10 +10,10 @@ export const dynamic = "force-dynamic";
 export default async function LiaisonPage() {
   const session = await requirePagePermission("liaison.view");
 
-  const context = { tenantId: session.tenantId, userId: session.id, role: session.role };
+  const context = { tenantId: session.tenantId, userId: session.id, role: session.role, projectIds: session.projectIds };
   const [approvals, projects] = await Promise.all([
     listApprovals(context),
-    prisma.project.findMany({ where: { tenantId: session.tenantId }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    prisma.project.findMany({ where: { tenantId: session.tenantId, ...(Array.isArray(session.projectIds) ? { id: { in: session.projectIds } } : {}) }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
   ]);
 
   return (

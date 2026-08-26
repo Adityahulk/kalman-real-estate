@@ -12,8 +12,23 @@ export default async function DocumentsPage() {
   const canApprove = hasPermission(session.role, "documents.approve", session.permissions);
   const canArchive = hasPermission(session.role, "records.restore", session.permissions);
 
+  const allowedPlots = Array.isArray(session.projectIds)
+    ? await prisma.plot.findMany({
+        where: { tenantId: session.tenantId, projectId: { in: session.projectIds }, archivedAt: null },
+        select: { id: true },
+      })
+    : null;
   const documents = await prisma.generatedDocument.findMany({
-    where: { tenantId: session.tenantId, archivedAt: null },
+    where: {
+      tenantId: session.tenantId,
+      archivedAt: null,
+      ...(allowedPlots ? {
+        OR: [
+          { recordType: "Plot", recordId: { in: allowedPlots.map((plot) => plot.id) } },
+          { recordType: "Project", recordId: { in: session.projectIds ?? [] } },
+        ],
+      } : {}),
+    },
     orderBy: { createdAt: "desc" },
     take: 50,
   });

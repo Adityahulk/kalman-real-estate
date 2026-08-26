@@ -12,6 +12,8 @@ export type SessionUser = {
   role: Role;
   email: string;
   permissions?: Permission[];
+  /** null means every project in the selected firm; an array is an explicit project scope. */
+  projectIds?: string[] | null;
 };
 
 export function hasPortfolioFirmAccess(role: Role) {
@@ -46,6 +48,34 @@ export async function resolveSessionTenantId(input: {
     select: { id: true },
   });
   return membership ? input.selectedTenantId : "__unselected__";
+}
+
+export async function resolveUserProjectIds(input: {
+  userId: string;
+  tenantId: string;
+  userTenantId: string | null;
+  role: Role;
+}): Promise<string[] | null> {
+  if (hasPortfolioFirmAccess(input.role)) return null;
+
+  const membership = await prisma.userFirmMembership.findUnique({
+    where: { userId_tenantId: { userId: input.userId, tenantId: input.tenantId } },
+    select: {
+      allProjects: true,
+      user: {
+        select: {
+          projectMemberships: {
+            where: { tenantId: input.tenantId },
+            select: { projectId: true },
+          },
+        },
+      },
+    },
+  });
+  // Existing direct-tenant accounts predate scoped memberships and retain full firm access.
+  if (!membership) return input.userTenantId === input.tenantId ? null : [];
+  if (membership.allProjects) return null;
+  return membership.user.projectMemberships.map((item) => item.projectId);
 }
 
 export async function verifySessionToken(token?: string): Promise<SessionUser | null> {
@@ -86,12 +116,21 @@ export async function getSessionUser() {
     userTenantId: user.tenantId,
     role: user.role,
   });
+  const projectIds = tenantId === "__unselected__"
+    ? []
+    : await resolveUserProjectIds({
+        userId: user.id,
+        tenantId,
+        userTenantId: user.tenantId,
+        role: user.role,
+      });
   return {
     id: user.id,
     tenantId,
     role: user.role,
     email: user.email,
     permissions: normalizePermissions(user.customRole?.permissions),
+    projectIds,
   };
 }
 

@@ -10,7 +10,11 @@ export default async function MarketingPage() {
   const session = await requireAnyPagePermission(["marketing.manage", "marketing.execute"]);
 
   const tasks = await prisma.marketingTask.findMany({
-    where: { tenantId: session.tenantId, archivedAt: null },
+    where: {
+      tenantId: session.tenantId,
+      archivedAt: null,
+      ...(Array.isArray(session.projectIds) ? { projectId: { in: session.projectIds } } : {}),
+    },
     include: { media: true, comments: true, project: true },
     orderBy: { updatedAt: "desc" },
   });

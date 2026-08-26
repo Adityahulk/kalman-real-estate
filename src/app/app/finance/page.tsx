@@ -10,8 +10,8 @@ export default async function FinancePage() {
   const session = await requirePagePermission("finance.view");
 
   const [projects, boq, invoices, insights] = await Promise.all([
-    prisma.project.findMany({ where: { tenantId: session.tenantId }, orderBy: { name: "asc" } }),
-    prisma.bOQItem.findMany({ where: { tenantId: session.tenantId }, include: { project: true }, orderBy: { updatedAt: "desc" } }),
+    prisma.project.findMany({ where: { tenantId: session.tenantId, ...(Array.isArray(session.projectIds) ? { id: { in: session.projectIds } } : {}) }, orderBy: { name: "asc" } }),
+    prisma.bOQItem.findMany({ where: { tenantId: session.tenantId, ...(Array.isArray(session.projectIds) ? { projectId: { in: session.projectIds } } : {}) }, include: { project: true }, orderBy: { updatedAt: "desc" } }),
     prisma.invoice.findMany({ where: { tenantId: session.tenantId }, orderBy: { createdAt: "desc" }, take: 12 }),
     prisma.costInsight.findMany({ where: { tenantId: session.tenantId }, orderBy: { createdAt: "desc" }, take: 12 }),
   ]);

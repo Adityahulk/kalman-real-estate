@@ -15,6 +15,7 @@ export default async function ProjectsPage(props: { searchParams: Promise<{ q?: 
   const projects = await prisma.project.findMany({
     where: {
       tenantId: session.tenantId,
+      ...(Array.isArray(session.projectIds) ? { id: { in: session.projectIds } } : {}),
       ...(q ? { OR: [{ name: { contains: q, mode: "insensitive" } }, { city: { contains: q, mode: "insensitive" } }] } : {}),
       ...(city ? { city: { contains: city, mode: "insensitive" } } : {}),
     },
@@ -36,10 +37,10 @@ export default async function ProjectsPage(props: { searchParams: Promise<{ q?: 
             Search projects, open the main workspace, share project details, and export plot ownership reports.
           </p>
         </div>
-        <Link className="btn-primary" href="/app/projects/new">
+        {!Array.isArray(session.projectIds) ? <Link className="btn-primary" href="/app/projects/new">
           <Plus size={17} />
           New project
-        </Link>
+        </Link> : null}
       </div>
 
       <form className="mt-6 grid gap-3 rounded-xl border border-slate-200 bg-white p-4 md:grid-cols-[1fr_220px_auto]">

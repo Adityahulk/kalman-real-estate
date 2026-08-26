@@ -13,7 +13,13 @@ export default async function MarketingProjectDetailPage(props: { params: Promis
   const session = await requireAnyPagePermission(["marketing.manage", "marketing.execute"]);
 
   const task = await prisma.marketingTask.findFirst({
-    where: { id: params.taskId, tenantId: session.tenantId, status: "APPROVED", archivedAt: null },
+    where: {
+      id: params.taskId,
+      tenantId: session.tenantId,
+      status: "APPROVED",
+      archivedAt: null,
+      ...(Array.isArray(session.projectIds) ? { projectId: { in: session.projectIds } } : {}),
+    },
     include: { media: true },
   });
 

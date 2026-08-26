@@ -20,6 +20,7 @@
     "worker:reminders": "tsx src/workers/reminder-worker.ts",
     "test:smoke": "node tests/smoke.mjs",
     "test:letters": "node tests/letters.mjs",
+    "test:users": "node tests/users-access.mjs",
     "start": "next start",
     "cap:sync": "cap sync",
     "cap:android": "cap run android",

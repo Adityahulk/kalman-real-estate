@@ -30,6 +30,16 @@ const roleEnum = z.nativeEnum(Role).refine((role) => ASSIGNABLE_ROLES.includes(r
   message: "That role cannot be assigned here.",
 });
 
+const firmAssignmentSchema = z.object({
+  tenantId: z.string().min(1),
+  allProjects: z.boolean().default(true),
+  projectIds: z.array(z.string().min(1)).default([]),
+}).superRefine((assignment, context) => {
+  if (!assignment.allProjects && assignment.projectIds.length === 0) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["projectIds"], message: "Select at least one project, or allow all projects in this firm." });
+  }
+});
+
 export const createUserSchema = z
   .object({
     name: z.string().min(1),
@@ -42,6 +52,7 @@ export const createUserSchema = z
     designationId: z.string().optional().nullable(),
     profileData: z.record(z.unknown()).optional(),
     password: z.string().min(6),
+    firmAssignments: z.array(firmAssignmentSchema).min(1).optional(),
   })
   .refine((value) => Boolean(value.email) || Boolean(value.loginId), {
     message: "Provide an email or a login ID.",
@@ -60,6 +71,7 @@ export const updateUserSchema = z.object({
   profileData: z.record(z.unknown()).optional(),
   status: z.nativeEnum(UserStatus).optional(),
   reassignToId: z.string().optional().nullable(),
+  firmAssignments: z.array(firmAssignmentSchema).min(1).optional(),
 });
 
 export const resetPasswordSchema = z.object({
@@ -68,7 +80,12 @@ export const resetPasswordSchema = z.object({
 
 export async function listUsers(context: RequestContext) {
   const users = await prisma.user.findMany({
-    where: { tenantId: context.tenantId },
+    where: {
+      OR: [
+        { tenantId: context.tenantId },
+        { firmMemberships: { some: { tenantId: context.tenantId } } },
+      ],
+    },
     select: {
       id: true,
       name: true,
@@ -86,16 +103,37 @@ export async function listUsers(context: RequestContext) {
       customRole: { select: { id: true, name: true, permissions: true } },
       department: { select: { id: true, name: true } },
       designation: { select: { id: true, name: true } },
+      firmMemberships: {
+        select: { tenantId: true, role: true, allProjects: true, tenant: { select: { name: true } } },
+        orderBy: { tenant: { name: "asc" } },
+      },
+      projectMemberships: {
+        select: { tenantId: true, projectId: true, project: { select: { name: true } } },
+        orderBy: { project: { name: "asc" } },
+      },
     },
     orderBy: { createdAt: "asc" },
   });
-  const [customRoles, departments, designations, userFields] = await Promise.all([
+  const canManagePortfolio = context.role === Role.SUPER_ADMIN || context.role === Role.PLATFORM_ADMIN || context.role === Role.BUILDER_OWNER;
+  const [customRoles, departments, designations, userFields, firms] = await Promise.all([
     prisma.customRole.findMany({ where: { tenantId: context.tenantId }, orderBy: { name: "asc" } }),
     prisma.department.findMany({ where: { tenantId: context.tenantId }, orderBy: { name: "asc" } }),
     prisma.designation.findMany({ where: { tenantId: context.tenantId }, orderBy: { name: "asc" } }),
     prisma.userFieldDefinition.findMany({ where: { tenantId: context.tenantId }, orderBy: { createdAt: "asc" } }),
+    prisma.tenant.findMany({
+      where: canManagePortfolio ? undefined : { id: context.tenantId },
+      select: {
+        id: true,
+        name: true,
+        projects: { where: { status: "ACTIVE" }, select: { id: true, name: true }, orderBy: { name: "asc" } },
+      },
+      orderBy: { name: "asc" },
+    }),
   ]);
-  return { users, roles: ASSIGNABLE_ROLES, customRoles, departments, designations, userFields };
+  const roles = context.role === Role.SUPER_ADMIN || context.role === Role.PLATFORM_ADMIN
+    ? ASSIGNABLE_ROLES
+    : ASSIGNABLE_ROLES.filter((role) => role !== Role.SUPER_ADMIN);
+  return { users, roles, customRoles, departments, designations, userFields, firms };
 }
 
 export async function createUser(context: RequestContext, input: z.infer<typeof createUserSchema>) {
@@ -116,10 +154,12 @@ export async function createUser(context: RequestContext, input: z.infer<typeof 
   }
 
   const organization = await resolveOrganization(context, input);
+  assertRoleCanBeAssigned(context, organization.role);
+  const assignments = await resolveFirmAssignments(context, input.firmAssignments);
   const passwordHash = await bcrypt.hash(input.password, 12);
   const user = await prisma.user.create({
     data: {
-      tenantId: context.tenantId,
+      tenantId: assignments.find((assignment) => assignment.tenantId === context.tenantId)?.tenantId ?? assignments[0].tenantId,
       email: resolvedEmail,
       loginId,
       passwordHash,
@@ -131,7 +171,12 @@ export async function createUser(context: RequestContext, input: z.infer<typeof 
       designationId: organization.designationId,
       profileData: (input.profileData ?? {}) as Prisma.InputJsonValue,
       status: UserStatus.ACTIVE,
-      firmMemberships: { create: { tenantId: context.tenantId, role: organization.role } },
+      firmMemberships: {
+        create: assignments.map((assignment) => ({ tenantId: assignment.tenantId, role: organization.role, allProjects: assignment.allProjects })),
+      },
+      projectMemberships: {
+        create: assignments.flatMap((assignment) => assignment.projectIds.map((projectId) => ({ tenantId: assignment.tenantId, projectId }))),
+      },
     },
     select: { id: true, name: true, email: true, loginId: true, role: true, customRoleId: true, departmentId: true, designationId: true, profileData: true, status: true },
   });
@@ -145,7 +190,9 @@ export async function createUser(context: RequestContext, input: z.infer<typeof 
 }
 
 export async function updateUser(context: RequestContext, id: string, input: z.infer<typeof updateUserSchema>) {
-  const before = await prisma.user.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  const before = await prisma.user.findFirstOrThrow({
+    where: { id, OR: [{ tenantId: context.tenantId }, { firmMemberships: { some: { tenantId: context.tenantId } } }] },
+  });
   // Guard against locking yourself out or demoting the account you are signed in as by accident.
   if (id === context.userId && input.status === UserStatus.DISABLED) {
     const error = new Error("You cannot disable your own account.");
@@ -170,9 +217,29 @@ export async function updateUser(context: RequestContext, id: string, input: z.i
     departmentId: input.departmentId === undefined ? before.departmentId : input.departmentId,
     designationId: input.designationId === undefined ? before.designationId : input.designationId,
   });
-  const user = await prisma.user.update({
-    where: { id },
-    data: {
+  const assignments = input.firmAssignments
+    ? await resolveFirmAssignments(context, input.firmAssignments)
+    : null;
+  assertRoleCanBeAssigned(context, organization.role);
+  if (id === context.userId && assignments && !assignments.some((assignment) => assignment.tenantId === context.tenantId)) {
+    const error = new Error("You cannot remove your own access to the firm you are currently using.");
+    error.name = "BadRequestError";
+    throw error;
+  }
+  const user = await prisma.$transaction(async (tx) => {
+    if (assignments) {
+      await tx.userProjectMembership.deleteMany({ where: { userId: id } });
+      await tx.userFirmMembership.deleteMany({ where: { userId: id } });
+      await tx.userFirmMembership.createMany({
+        data: assignments.map((assignment) => ({ userId: id, tenantId: assignment.tenantId, role: organization.role, allProjects: assignment.allProjects })),
+      });
+      const projectAssignments = assignments.flatMap((assignment) => assignment.projectIds.map((projectId) => ({ userId: id, tenantId: assignment.tenantId, projectId })));
+      if (projectAssignments.length) await tx.userProjectMembership.createMany({ data: projectAssignments });
+    }
+    return tx.user.update({
+      where: { id },
+      data: {
+      tenantId: assignments ? (assignments.find((assignment) => assignment.tenantId === context.tenantId)?.tenantId ?? assignments[0].tenantId) : undefined,
       name: input.name,
       email: input.email?.toLowerCase().trim(),
       loginId: input.loginId === undefined ? undefined : input.loginId || null,
@@ -183,14 +250,15 @@ export async function updateUser(context: RequestContext, id: string, input: z.i
       designationId: organization.designationId,
       profileData: input.profileData as Prisma.InputJsonValue | undefined,
       status: input.status ?? before.status,
-    },
-    select: { id: true, name: true, email: true, loginId: true, phone: true, role: true, customRoleId: true, departmentId: true, designationId: true, profileData: true, status: true },
+      },
+      select: { id: true, name: true, email: true, loginId: true, phone: true, role: true, customRoleId: true, departmentId: true, designationId: true, profileData: true, status: true },
+    });
   });
   if (crmWorkload?.total && input.reassignToId) await reassignCrmWorkload(context, id, input.reassignToId, crmWorkload.leads);
   // Keep the firm-membership role in sync with the primary role so RBAC stays consistent.
-  if (organization.role !== before.role) {
+  if (!assignments && organization.role !== before.role) {
     await prisma.userFirmMembership.updateMany({
-      where: { userId: id, tenantId: context.tenantId },
+      where: { userId: id },
       data: { role: organization.role },
     });
   }
@@ -202,6 +270,57 @@ export async function updateUser(context: RequestContext, id: string, input: z.i
     after: user as unknown as Prisma.InputJsonValue,
   });
   return user;
+}
+
+type ResolvedFirmAssignment = { tenantId: string; allProjects: boolean; projectIds: string[] };
+
+async function resolveFirmAssignments(
+  context: RequestContext,
+  requested: z.infer<typeof firmAssignmentSchema>[] | undefined,
+): Promise<ResolvedFirmAssignment[]> {
+  const assignments = requested?.length
+    ? requested
+    : [{ tenantId: context.tenantId, allProjects: true, projectIds: [] }];
+  const uniqueTenantIds = [...new Set(assignments.map((assignment) => assignment.tenantId))];
+  if (uniqueTenantIds.length !== assignments.length) {
+    const error = new Error("Each firm can only be assigned once.");
+    error.name = "BadRequestError";
+    throw error;
+  }
+  const canManagePortfolio = context.role === Role.SUPER_ADMIN || context.role === Role.PLATFORM_ADMIN || context.role === Role.BUILDER_OWNER;
+  if (!canManagePortfolio && uniqueTenantIds.some((tenantId) => tenantId !== context.tenantId)) {
+    const error = new Error("You can only assign users to the firm you are currently managing.");
+    error.name = "ForbiddenError";
+    throw error;
+  }
+  const tenants = await prisma.tenant.findMany({
+    where: { id: { in: uniqueTenantIds } },
+    select: { id: true, projects: { select: { id: true } } },
+  });
+  if (tenants.length !== uniqueTenantIds.length) {
+    const error = new Error("One or more selected firms no longer exist.");
+    error.name = "BadRequestError";
+    throw error;
+  }
+  const projectIdsByTenant = new Map(tenants.map((tenant) => [tenant.id, new Set(tenant.projects.map((project) => project.id))]));
+  return assignments.map((assignment) => {
+    const projectIds = assignment.allProjects ? [] : [...new Set(assignment.projectIds)];
+    const allowedProjectIds = projectIdsByTenant.get(assignment.tenantId)!;
+    if (projectIds.some((projectId) => !allowedProjectIds.has(projectId))) {
+      const error = new Error("A selected project does not belong to its assigned firm.");
+      error.name = "BadRequestError";
+      throw error;
+    }
+    return { tenantId: assignment.tenantId, allProjects: assignment.allProjects, projectIds };
+  });
+}
+
+function assertRoleCanBeAssigned(context: RequestContext, role: Role) {
+  if (role === Role.SUPER_ADMIN && context.role !== Role.SUPER_ADMIN && context.role !== Role.PLATFORM_ADMIN) {
+    const error = new Error("Only a Super Admin can grant Super Admin access.");
+    error.name = "ForbiddenError";
+    throw error;
+  }
 }
 
 async function activeCrmWorkload(tenantId: string, userId: string) {
@@ -241,7 +360,9 @@ export async function deleteUser(context: RequestContext, id: string) {
     error.name = "BadRequestError";
     throw error;
   }
-  const before = await prisma.user.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  const before = await prisma.user.findFirstOrThrow({
+    where: { id, OR: [{ tenantId: context.tenantId }, { firmMemberships: { some: { tenantId: context.tenantId } } }] },
+  });
   const crmWorkload = await activeCrmWorkload(context.tenantId, id);
   if (crmWorkload.total) {
     const error = new Error("This user has active CRM work. Use Deactivate and select a replacement employee first.");

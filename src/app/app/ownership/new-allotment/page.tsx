@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export default async function GlobalNewAllotmentPage() {
   const session = await requirePagePermission("documents.generate");
   const projects = await prisma.project.findMany({
-    where: { tenantId: session.tenantId },
+    where: { tenantId: session.tenantId, ...(Array.isArray(session.projectIds) ? { id: { in: session.projectIds } } : {}) },
     orderBy: { updatedAt: "desc" },
     include: { _count: { select: { plots: true } } },
   });

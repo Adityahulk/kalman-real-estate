@@ -17,7 +17,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     }),
     prisma.tenant.findUnique({ where: { id: session.tenantId }, select: { name: true, logoDataUrl: true } }),
     prisma.project.findMany({
-      where: { tenantId: session.tenantId },
+      where: {
+        tenantId: session.tenantId,
+        ...(Array.isArray(session.projectIds) ? { id: { in: session.projectIds } } : {}),
+      },
       orderBy: { updatedAt: "desc" },
       select: { id: true, name: true, city: true },
     }),
@@ -37,7 +40,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       canViewLiaison={hasPermission(session.role, "liaison.view", session.permissions)}
       access={{
         projects: hasPermission(session.role, "projects.view", session.permissions),
-        createProjects: hasPermission(session.role, "projects.manage", session.permissions),
+        createProjects: hasPermission(session.role, "projects.manage", session.permissions) && !Array.isArray(session.projectIds),
         ownership: hasPermission(session.role, "ownership.view", session.permissions),
         development: hasPermission(session.role, "development.view", session.permissions),
         marketing: hasPermission(session.role, "marketing.manage", session.permissions)

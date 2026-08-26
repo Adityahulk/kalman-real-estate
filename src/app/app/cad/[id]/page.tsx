@@ -8,7 +8,7 @@ export default async function CadEntryPage(props: { params: Promise<{ id: string
   const params = await props.params;
   const session = await requireAnyPagePermission(["cad.view", "cad.review"]);
   const cadFile = await prisma.cadFile.findFirst({
-    where: { id: params.id, tenantId: session.tenantId },
+    where: { id: params.id, tenantId: session.tenantId, ...(Array.isArray(session.projectIds) ? { projectId: { in: session.projectIds } } : {}) },
     select: { format: true },
   });
   if (!cadFile) notFound();

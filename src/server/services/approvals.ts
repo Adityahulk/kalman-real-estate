@@ -1,6 +1,6 @@
 import { AuditAction, Prisma } from "@prisma/client";
 import { z } from "zod";
-import { RequestContext } from "../api";
+import { assertProjectAccess, RequestContext } from "../api";
 import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
 import { notifyRoleWithPermission } from "./notifications";
@@ -35,6 +35,7 @@ export async function listApprovals(context: RequestContext, opts?: { includeArc
   const approvals = await prisma.approvalDocument.findMany({
     where: {
       tenantId: context.tenantId,
+      ...(Array.isArray(context.projectIds) ? { OR: [{ projectId: null }, { projectId: { in: context.projectIds } }] } : {}),
       ...(opts?.includeArchived ? {} : { status: "ACTIVE" }),
     },
     orderBy: [{ type: "asc" }, { createdAt: "desc" }],
@@ -53,6 +54,7 @@ export async function listApprovals(context: RequestContext, opts?: { includeArc
 }
 
 export async function createApproval(context: RequestContext, input: z.infer<typeof createApprovalSchema>) {
+  if (input.projectId) assertProjectAccess(context, input.projectId);
   if (input.fileAssetId) await assertFile(context, input.fileAssetId);
   const created = await prisma.approvalDocument.create({
     data: {
@@ -83,6 +85,8 @@ export async function createApproval(context: RequestContext, input: z.infer<typ
 // Supersede an approval with a newer version: archive the old, create version+1 chained to it.
 export async function addApprovalVersion(context: RequestContext, id: string, input: z.infer<typeof newVersionSchema>) {
   const current = await prisma.approvalDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  if (current.projectId) assertProjectAccess(context, current.projectId);
+  if (input.projectId) assertProjectAccess(context, input.projectId);
   if (current.status !== "ACTIVE") {
     const error = new Error("This approval has already been superseded.");
     error.name = "BadRequestError";
@@ -131,6 +135,7 @@ export async function addApprovalVersion(context: RequestContext, id: string, in
 
 export async function getApprovalHistory(context: RequestContext, id: string) {
   const doc = await prisma.approvalDocument.findFirstOrThrow({ where: { id, tenantId: context.tenantId } });
+  if (doc.projectId) assertProjectAccess(context, doc.projectId);
   // Walk backwards through the supersede chain to assemble the full version history.
   const chain = [doc];
   let cursor = doc;

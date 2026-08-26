@@ -22,11 +22,15 @@ type ManagedUser = {
   customRole: { id: string; name: string } | null;
   department: { id: string; name: string } | null;
   designation: { id: string; name: string } | null;
+  firmMemberships: Array<{ tenantId: string; role: string; allProjects: boolean; tenant: { name: string } }>;
+  projectMemberships: Array<{ tenantId: string; projectId: string; project: { name: string } }>;
 };
 type CustomRole = { id: string; name: string; baseRole: string; departmentId: string | null; designationId: string | null };
 type Department = { id: string; name: string };
 type Designation = { id: string; name: string; departmentId: string };
 type UserField = { id: string; label: string; key: string; type: "TEXT" | "IMAGE" | "DOCUMENT"; required: boolean };
+type FirmOption = { id: string; name: string; projects: Array<{ id: string; name: string }> };
+type FirmAssignment = { tenantId: string; allProjects: boolean; projectIds: string[] };
 
 function roleLabel(role: string) {
   return role.replaceAll("_", " ").toLowerCase().replace(/\b\w/g, (character) => character.toUpperCase());
@@ -41,6 +45,8 @@ export function UsersManager({
   userFields,
   currentUserId,
   isSuperAdmin,
+  firms,
+  activeFirmId,
 }: {
   initialUsers: ManagedUser[];
   roles: string[];
@@ -50,6 +56,8 @@ export function UsersManager({
   userFields: UserField[];
   currentUserId: string;
   isSuperAdmin: boolean;
+  firms: FirmOption[];
+  activeFirmId: string;
 }) {
   const router = useRouter();
   const [users, setUsers] = useState(initialUsers);
@@ -69,6 +77,9 @@ export function UsersManager({
   const [password, setPassword] = useState("");
   const [profileData, setProfileData] = useState<Record<string, ProfileValue>>({});
   const [profileFiles, setProfileFiles] = useState<Record<string, File | null>>({});
+  const [firmAssignments, setFirmAssignments] = useState<FirmAssignment[]>([
+    { tenantId: activeFirmId, allProjects: true, projectIds: [] },
+  ]);
   const [creating, setCreating] = useState(false);
   const filteredDesignations = useMemo(
     () => designations.filter((item) => !departmentId || item.departmentId === departmentId),
@@ -90,7 +101,7 @@ export function UsersManager({
       const response = await fetch("/api/v1/users", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name, email, loginId, phone, role, customRoleId: customRoleId || null, departmentId: departmentId || null, designationId: designationId || null, password, profileData }),
+        body: JSON.stringify({ name, email, loginId, phone, role, customRoleId: customRoleId || null, departmentId: departmentId || null, designationId: designationId || null, password, profileData, firmAssignments }),
       });
       const body = await response.json().catch(() => null);
       if (!response.ok) throw new Error(body?.error ?? "Could not create user.");
@@ -122,6 +133,7 @@ export function UsersManager({
   function resetCreateForm() {
     setName(""); setEmail(""); setLoginId(""); setPhone(""); setPassword("");
     setCustomRoleId(""); setDepartmentId(""); setDesignationId(""); setProfileData({}); setProfileFiles({});
+    setFirmAssignments([{ tenantId: activeFirmId, allProjects: true, projectIds: [] }]);
   }
 
   async function patchUser(id: string, patch: Record<string, unknown>) {
@@ -201,6 +213,11 @@ export function UsersManager({
     setDesignationId(user.designationId ?? "");
     setProfileData(user.profileData ?? {});
     setProfileFiles({});
+    setFirmAssignments(user.firmMemberships.map((membership) => ({
+      tenantId: membership.tenantId,
+      allProjects: membership.allProjects,
+      projectIds: user.projectMemberships.filter((project) => project.tenantId === membership.tenantId).map((project) => project.projectId),
+    })));
     setExpandedId(user.id);
   }
 
@@ -212,7 +229,7 @@ export function UsersManager({
         const file = profileFiles[field.key];
         if (file) nextProfile[field.key] = await uploadProfileFile(user.id, field.key, file);
       }
-      await patchUser(user.id, { name, email: email || user.email, loginId: loginId || null, phone, role, customRoleId: customRoleId || null, departmentId: departmentId || null, designationId: designationId || null, profileData: nextProfile });
+      await patchUser(user.id, { name, email: email || user.email, loginId: loginId || null, phone, role, customRoleId: customRoleId || null, departmentId: departmentId || null, designationId: designationId || null, profileData: nextProfile, firmAssignments });
       setEditingId(null);
       setMessage({ kind: "success", text: `${name}'s profile was updated.` });
       resetCreateForm();
@@ -240,8 +257,11 @@ export function UsersManager({
           <label><span className="label">Custom role</span><select className="input" value={customRoleId} onChange={(event) => { const id = event.target.value; setCustomRoleId(id); const selected = customRoles.find((item) => item.id === id); if (selected) { setRole(selected.baseRole); if (selected.departmentId) setDepartmentId(selected.departmentId); if (selected.designationId) setDesignationId(selected.designationId); } }}><option value="">Use standard role</option>{customRoles.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <label><span className="label">Standard role</span><select className="input" value={role} disabled={Boolean(customRoleId)} onChange={(event) => setRole(event.target.value)}>{roles.map((item) => <option key={item} value={item}>{roleLabel(item)}</option>)}</select></label>
           <TextInput label="Temporary password" value={password} onChange={setPassword} type="text" required />
+          <div className="md:col-span-2 xl:col-span-3">
+            <FirmAccessEditor firms={firms} assignments={firmAssignments} onChange={setFirmAssignments} />
+          </div>
           {userFields.map((field) => <ProfileField key={field.id} field={field} value={profileData[field.key]} file={profileFiles[field.key]} onValue={(value) => setProfileData((current) => ({ ...current, [field.key]: value }))} onFile={(file) => setProfileFiles((current) => ({ ...current, [field.key]: file }))} />)}
-          <div className="md:col-span-2 xl:col-span-3"><button className="btn-primary w-fit" disabled={creating || !name || (!email && !loginId) || password.length < 6}>{creating ? <Loader2 className="animate-spin" size={16} /> : <Plus size={16} />}Create user</button></div>
+          <div className="md:col-span-2 xl:col-span-3"><button className="btn-primary w-fit" disabled={creating || !name || (!email && !loginId) || password.length < 6 || !validAssignments(firmAssignments)}>{creating ? <Loader2 className="animate-spin" size={16} /> : <Plus size={16} />}Create user</button></div>
         </form>
       </section>
 
@@ -272,8 +292,11 @@ export function UsersManager({
                         <SelectInput label="Designation" value={designationId} onChange={setDesignationId} options={filteredDesignations} empty="Select designation" />
                         <label><span className="label">Custom role</span><select className="input" value={customRoleId} onChange={(event) => setCustomRoleId(event.target.value)}><option value="">Use standard role</option>{customRoles.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
                         <label><span className="label">Standard role</span><select className="input" value={role} disabled={Boolean(customRoleId)} onChange={(event) => setRole(event.target.value)}>{roles.map((item) => <option key={item} value={item}>{roleLabel(item)}</option>)}</select></label>
+                        <div className="md:col-span-2 xl:col-span-3">
+                          <FirmAccessEditor firms={firms} assignments={firmAssignments} onChange={setFirmAssignments} />
+                        </div>
                         {userFields.map((field) => <ProfileField key={field.id} field={field} value={profileData[field.key]} file={profileFiles[field.key]} onValue={(value) => setProfileData((current) => ({ ...current, [field.key]: value }))} onFile={(file) => setProfileFiles((current) => ({ ...current, [field.key]: file }))} />)}
-                        <div className="flex gap-2 md:col-span-2 xl:col-span-3"><button className="btn-primary" disabled={busyId === user.id} onClick={() => void saveEdit(user)}><Save size={15} /> Save profile</button><button className="btn-outline" onClick={() => { setEditingId(null); resetCreateForm(); }}><X size={15} /> Cancel</button></div>
+                        <div className="flex gap-2 md:col-span-2 xl:col-span-3"><button className="btn-primary" disabled={busyId === user.id || !validAssignments(firmAssignments)} onClick={() => void saveEdit(user)}><Save size={15} /> Save profile</button><button className="btn-outline" onClick={() => { setEditingId(null); resetCreateForm(); }}><X size={15} /> Cancel</button></div>
                       </div>
                     ) : (
                       <>
@@ -284,6 +307,15 @@ export function UsersManager({
                           <ProfileItem label="Department" value={user.department?.name || "Not assigned"} />
                           <ProfileItem label="Designation" value={user.designation?.name || "Not assigned"} />
                           <ProfileItem label="Role" value={user.customRole?.name ?? roleLabel(user.role)} />
+                          <div className="sm:col-span-2 lg:col-span-3">
+                            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Firm and project access</div>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {user.firmMemberships.map((membership) => {
+                                const projects = user.projectMemberships.filter((project) => project.tenantId === membership.tenantId);
+                                return <span key={membership.tenantId} className="rounded-md border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700"><strong>{membership.tenant.name}</strong><span className="ml-1 text-slate-500">· {membership.allProjects ? "All projects" : projects.map((project) => project.project.name).join(", ") || "No projects"}</span></span>;
+                              })}
+                            </div>
+                          </div>
                           {userFields.map((field) => <ProfileItem key={field.id} label={field.label} value={user.profileData?.[field.key]} />)}
                           <ProfileItem label="Last login" value={user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : "Never signed in"} />
                         </div>
@@ -305,6 +337,70 @@ export function UsersManager({
       </section>
     </div>
   );
+}
+
+function FirmAccessEditor({ firms, assignments, onChange }: { firms: FirmOption[]; assignments: FirmAssignment[]; onChange: (value: FirmAssignment[]) => void }) {
+  function toggleFirm(tenantId: string) {
+    const exists = assignments.some((assignment) => assignment.tenantId === tenantId);
+    onChange(exists
+      ? assignments.filter((assignment) => assignment.tenantId !== tenantId)
+      : [...assignments, { tenantId, allProjects: true, projectIds: [] }]);
+  }
+  function updateAssignment(tenantId: string, patch: Partial<FirmAssignment>) {
+    onChange(assignments.map((assignment) => assignment.tenantId === tenantId ? { ...assignment, ...patch } : assignment));
+  }
+  return (
+    <fieldset className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+      <legend className="px-1 text-sm font-semibold text-navy-900">Firm and project access</legend>
+      <p className="mb-3 text-xs leading-5 text-slate-500">Choose every firm this user can open. For each firm, allow all colonies or only selected colonies.</p>
+      <div className="grid gap-3 lg:grid-cols-2">
+        {firms.map((firm) => {
+          const assignment = assignments.find((item) => item.tenantId === firm.id);
+          return (
+            <div key={firm.id} className={`rounded-lg border p-3 transition ${assignment ? "border-navy-300 bg-white shadow-sm" : "border-slate-200 bg-white/60"}`}>
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-navy-900">
+                <input type="checkbox" checked={Boolean(assignment)} onChange={() => toggleFirm(firm.id)} />
+                {firm.name}
+              </label>
+              {assignment ? (
+                <div className="mt-3 border-t border-slate-100 pt-3">
+                  <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-slate-700">
+                    <input type="checkbox" checked={assignment.allProjects} onChange={(event) => updateAssignment(firm.id, { allProjects: event.target.checked, projectIds: [] })} />
+                    Access every project in this firm
+                  </label>
+                  {!assignment.allProjects ? (
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {firm.projects.map((project) => (
+                        <label key={project.id} className="flex cursor-pointer items-center gap-2 rounded-md border border-slate-200 px-2.5 py-2 text-xs text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={assignment.projectIds.includes(project.id)}
+                            onChange={(event) => updateAssignment(firm.id, {
+                              projectIds: event.target.checked
+                                ? [...assignment.projectIds, project.id]
+                                : assignment.projectIds.filter((id) => id !== project.id),
+                            })}
+                          />
+                          {project.name}
+                        </label>
+                      ))}
+                      {!firm.projects.length ? <p className="text-xs text-amber-700">This firm has no active projects.</p> : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+      {!assignments.length ? <p className="mt-3 text-xs font-medium text-rose-700">Select at least one firm.</p> : null}
+      {assignments.some((assignment) => !assignment.allProjects && !assignment.projectIds.length) ? <p className="mt-3 text-xs font-medium text-rose-700">Select at least one project for each restricted firm.</p> : null}
+    </fieldset>
+  );
+}
+
+function validAssignments(assignments: FirmAssignment[]) {
+  return assignments.length > 0 && assignments.every((assignment) => assignment.allProjects || assignment.projectIds.length > 0);
 }
 
 function TextInput({ label, value, onChange, type = "text", required = false }: { label: string; value: string; onChange: (value: string) => void; type?: string; required?: boolean }) {

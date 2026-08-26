@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 export default async function LegacyCadPage() {
   const session = await requirePagePermission("cad.view");
   const project = await prisma.project.findFirst({
-    where: { tenantId: session.tenantId },
+    where: { tenantId: session.tenantId, ...(Array.isArray(session.projectIds) ? { id: { in: session.projectIds } } : {}) },
     orderBy: { updatedAt: "desc" },
     select: { id: true },
   });

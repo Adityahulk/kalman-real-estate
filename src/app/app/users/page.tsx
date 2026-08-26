@@ -40,6 +40,8 @@ export default async function UsersPage() {
         userFields={data.userFields}
         currentUserId={session.id}
         isSuperAdmin={session.role === "SUPER_ADMIN"}
+        firms={data.firms}
+        activeFirmId={session.tenantId}
       />
     </main>
   );

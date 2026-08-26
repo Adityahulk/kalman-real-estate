@@ -2,7 +2,9 @@
 const nextConfig = {
   output: "standalone",
   outputFileTracingRoot: process.cwd(),
-  serverExternalPackages: ["@napi-rs/canvas", "sharp", "pdfjs-dist", "puppeteer"],
+  // Keep server-only runtimes out of the Next bundle. In particular, BullMQ contains an optional
+  // Valkey transport that Webpack otherwise tries to resolve even though this app uses ioredis.
+  serverExternalPackages: ["@napi-rs/canvas", "sharp", "pdfjs-dist", "puppeteer", "bullmq", "ioredis"],
   outputFileTracingIncludes: {
     "/api/**/*": [
       "./node_modules/sharp/**/*",
