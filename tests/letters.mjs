@@ -67,6 +67,8 @@ async function request(path, init = {}) {
     'font-family: "WideState Calibri"',
     "color: #111827 !important",
     ".letter-paper-editor .transfer-recipient-table",
+    ".letter-paper-editor .agreement-page .pricing-table",
+    "margin: 8px 0 4px 52px",
   ]) {
     assert(slice.includes(needle), `print CSS slice lost parity rule: ${needle}`);
   }

@@ -1,10 +1,30 @@
 "use client";
 
-import { FormEvent, Suspense, useState } from "react";
+import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Building2, Loader2, LockKeyhole, UserRound } from "lucide-react";
 import { registerForPush, storeSessionToken } from "@/lib/native";
+
+const REMEMBERED_IDENTIFIER_KEY = "widestate-remembered-login";
+
+async function storeBrowserCredential(identifier: string, password: string) {
+  if (!globalThis.window?.isSecureContext || !navigator.credentials?.store) return;
+  const PasswordCredentialConstructor = (
+    globalThis.window as Window & {
+      PasswordCredential?: new (data: { id: string; name: string; password: string }) => Credential;
+    }
+  ).PasswordCredential;
+  if (!PasswordCredentialConstructor) return;
+
+  try {
+    await navigator.credentials.store(
+      new PasswordCredentialConstructor({ id: identifier, name: identifier, password }),
+    );
+  } catch {
+    // Password managers may decline storage. The normal browser autofill flow remains available.
+  }
+}
 
 export default function LoginPage() {
   return (
@@ -22,6 +42,18 @@ function LoginForm() {
   const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    try {
+      const rememberedIdentifier = globalThis.localStorage.getItem(REMEMBERED_IDENTIFIER_KEY);
+      if (rememberedIdentifier) {
+        setIdentifier(rememberedIdentifier);
+        setRememberMe(true);
+      }
+    } catch {
+      // Storage may be disabled by browser privacy settings; login still works normally.
+    }
+  }, []);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -46,6 +78,17 @@ function LoginForm() {
     await storeSessionToken(payload?.data?.token);
     void registerForPush();
 
+    try {
+      if (rememberMe) {
+        globalThis.localStorage.setItem(REMEMBERED_IDENTIFIER_KEY, identifier.trim());
+        await storeBrowserCredential(identifier.trim(), password);
+      } else {
+        globalThis.localStorage.removeItem(REMEMBERED_IDENTIFIER_KEY);
+      }
+    } catch {
+      // Remember-me storage is optional and must never prevent a successful login.
+    }
+
     router.push(search.get("next") ?? "/firms");
     router.refresh();
   }
@@ -60,7 +103,7 @@ function LoginForm() {
           <span className="text-sm font-semibold uppercase tracking-wide">WIDESTATE OS</span>
         </Link>
 
-        <form onSubmit={submit} className="rounded-xl border border-slate-200 bg-white p-6 shadow-soft sm:p-8">
+        <form autoComplete="on" onSubmit={submit} className="rounded-xl border border-slate-200 bg-white p-6 shadow-soft sm:p-8">
             <h1 className="text-center text-2xl font-semibold text-navy-950">Sign in</h1>
             <p className="mt-2 text-center text-sm text-slate-500">Access your property workspace.</p>
 
@@ -68,7 +111,15 @@ function LoginForm() {
               <span className="label">Email or User ID</span>
               <span className="relative block">
                 <UserRound className="pointer-events-none absolute left-3 top-2.5 text-slate-400" size={17} />
-                <input className="input pl-10" type="text" autoComplete="username" value={identifier} onChange={(event) => setIdentifier(event.target.value)} />
+                <input
+                  id="username"
+                  name="username"
+                  className="input pl-10"
+                  type="text"
+                  autoComplete="username"
+                  value={identifier}
+                  onChange={(event) => setIdentifier(event.target.value)}
+                />
               </span>
             </label>
 
@@ -78,6 +129,8 @@ function LoginForm() {
                 <LockKeyhole className="pointer-events-none absolute left-3 top-2.5 text-slate-400" size={17} />
                 <input
                   className="input pl-10"
+                  id="current-password"
+                  name="password"
                   type="password"
                   autoComplete="current-password"
                   value={password}
