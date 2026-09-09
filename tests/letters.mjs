@@ -581,6 +581,8 @@ await exerciseLetterType("registry_status_letter");
   assert(owner.response.status === 201, "allotment correction: owner creation failed");
   const ownerId = owner.json.data.id;
   let documentId;
+  let replacementTemplateId;
+  let previousActiveTemplateIds = [];
   const fileIds = [];
   try {
     const invalidJoint = await request(`/api/v1/ownership/plots/${temporaryPlot.id}/allot`, {
@@ -624,6 +626,32 @@ await exerciseLetterType("registry_status_letter");
     });
     assert(drafted.response.status === 201, `allotment correction: draft failed (${drafted.json.error ?? drafted.response.status})`);
     documentId = drafted.json.data.document.id;
+    const originalTemplateId = drafted.json.data.document.templateId;
+    const originalTemplate = await prisma.documentTemplate.findUniqueOrThrow({ where: { id: originalTemplateId } });
+    previousActiveTemplateIds = (
+      await prisma.documentTemplate.findMany({
+        where: { tenantId: plot.tenantId, projectId: plot.projectId, type: "allotment_letter", active: true },
+        select: { id: true },
+      })
+    ).map((template) => template.id);
+    const replacementTemplate = await prisma.$transaction(async (tx) => {
+      await tx.documentTemplate.updateMany({
+        where: { tenantId: plot.tenantId, projectId: plot.projectId, type: "allotment_letter", active: true },
+        data: { active: false },
+      });
+      return tx.documentTemplate.create({
+        data: {
+          tenantId: plot.tenantId,
+          projectId: plot.projectId,
+          name: `Refresh regression ${stamp}`,
+          type: "allotment_letter",
+          body: originalTemplate.body,
+          variables: originalTemplate.variables ?? undefined,
+          active: true,
+        },
+      });
+    });
+    replacementTemplateId = replacementTemplate.id;
 
     const rendered = await request(`/api/v1/documents/${documentId}/render`, { method: "POST", headers: { cookie } });
     assert(rendered.response.status === 200, `allotment correction: render failed (${rendered.json.error ?? rendered.response.status})`);
@@ -656,6 +684,7 @@ await exerciseLetterType("registry_status_letter");
     assert(refreshed.json.data.document.status === "DRAFT", "allotment correction: refreshed letter is not a draft");
     assert(refreshed.json.data.document.fileAssetId === null, "allotment correction: stale PDF remained active");
     assert(refreshed.json.data.document.number === `TEST-REVISED/${stamp}`, "allotment correction: revised letter number was not saved");
+    assert(refreshed.json.data.document.templateId === replacementTemplateId, "allotment correction: refresh did not use the newest active template");
     const revisions = await prisma.generatedDocumentRevision.findMany({ where: { documentId } });
     assert(revisions.length === 1, `allotment correction: expected one preserved PDF revision, found ${revisions.length}`);
     assert(revisions[0].baseFileId === firstFileId, "allotment correction: revision does not point to the previous PDF");
@@ -663,13 +692,28 @@ await exerciseLetterType("registry_status_letter");
       where: { plotId: temporaryPlot.id, kind: "ALLOTMENT", cancelledAt: null },
     });
     assert(ownershipCount === 1, `allotment correction: expected one allotment record, found ${ownershipCount}`);
-    console.log("  ✓ generated PDF preserved, same allotment and letter reopened as an editable draft");
+    console.log("  ✓ generated PDF preserved and the same letter reopened with the newest active template");
   } finally {
     if (documentId) {
       await prisma.generatedDocumentRevision.deleteMany({ where: { documentId } });
       await prisma.generatedDocument.deleteMany({ where: { id: documentId } });
     }
     await prisma.auditEvent.deleteMany({ where: { entityId: { in: [temporaryPlot.id, documentId].filter(Boolean) } } });
+    if (replacementTemplateId) {
+      await prisma.$transaction(async (tx) => {
+        await tx.documentTemplate.delete({ where: { id: replacementTemplateId } });
+        await tx.documentTemplate.updateMany({
+          where: { tenantId: plot.tenantId, projectId: plot.projectId, type: "allotment_letter", active: true },
+          data: { active: false },
+        });
+        if (previousActiveTemplateIds.length) {
+          await tx.documentTemplate.updateMany({
+            where: { id: { in: previousActiveTemplateIds } },
+            data: { active: true },
+          });
+        }
+      });
+    }
     await prisma.ownershipRecord.deleteMany({ where: { plotId: temporaryPlot.id } });
     await prisma.fileAsset.deleteMany({ where: { id: { in: fileIds.filter(Boolean) } } });
     await prisma.plot.delete({ where: { id: temporaryPlot.id } });

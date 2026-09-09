@@ -9,7 +9,11 @@ import { generatedDocumentStorageKey, putGeneratedObject } from "../storage";
 import { createGeneratedFileAsset } from "./files";
 import { buildGeneratedDocumentPdf, buildGeneratedDocumentPdfFromHtml } from "./document-pdf";
 import { createNotification, notifyRoleWithPermission } from "./notifications";
-import { defaultLetterBody, letterTemplateTypeSchema, resolveActiveProjectLetterTemplate } from "./document-templates";
+import {
+  defaultLetterBody,
+  letterTemplateTypeSchema,
+  resolveActiveProjectLetterTemplate,
+} from "./document-templates";
 import { formatSharePercentage, resolveJointShareSplit } from "@/lib/allotment-math";
 
 // Statuses in which a letter still counts as "accepted" for plot-ownership purposes. Approving a
@@ -248,7 +252,6 @@ export async function refreshDocumentDraft(
   const draft = await buildDocumentDraftContent(context, {
     type: parsedType,
     recordId: before.recordId,
-    templateId: parsedType === before.type ? before.templateId ?? undefined : undefined,
     data: input.data,
     documentNumber: requestedNumber,
     documentDate: before.createdAt,
@@ -315,6 +318,8 @@ async function buildDocumentDraftContent(
     where: { id: input.recordId, tenantId: context.tenantId, archivedAt: null },
     select: { projectId: true },
   });
+  // Refreshes intentionally omit templateId, so corrected form data is rebuilt with the newest
+  // active template while retaining the existing document, number, ownership link, and revisions.
   const template = await resolveActiveProjectLetterTemplate(
     context.tenantId,
     plot.projectId,
