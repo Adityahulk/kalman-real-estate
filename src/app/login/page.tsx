@@ -19,6 +19,7 @@ function LoginForm() {
   const search = useSearchParams();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -30,7 +31,7 @@ function LoginForm() {
     const response = await fetch("/api/v1/auth/login", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ identifier, password }),
+      body: JSON.stringify({ identifier, password, rememberMe }),
     });
     const payload = await response.json();
 
@@ -83,6 +84,16 @@ function LoginForm() {
                   onChange={(event) => setPassword(event.target.value)}
                 />
               </span>
+            </label>
+
+            <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm text-slate-600">
+              <input
+                className="h-4 w-4 rounded border-slate-300 text-navy-900 focus:ring-navy-700"
+                type="checkbox"
+                checked={rememberMe}
+                onChange={(event) => setRememberMe(event.target.checked)}
+              />
+              Remember me on this device
             </label>
 
             {error ? <div className="mt-4 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</div> : null}

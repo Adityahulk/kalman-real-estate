@@ -300,6 +300,11 @@ export async function restoreFileAsset(context: RequestContext, id: string) {
   const before = await prisma.fileAsset.findFirstOrThrow({
     where: { id, tenantId: context.tenantId, deletedAt: { not: null } },
   });
+  if (before.deleteReason === "Replaced by the authoritative signed ownership letter") {
+    const error = new Error("This file was superseded by a signed ownership letter and cannot be restored.");
+    error.name = "BadRequestError";
+    throw error;
+  }
   const file = await prisma.fileAsset.update({
     where: { id },
     data: { deletedAt: null, deletedById: null, deleteReason: null },

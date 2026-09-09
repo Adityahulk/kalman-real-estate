@@ -330,6 +330,7 @@ model Tenant {
   userFieldDefinitions  UserFieldDefinition[]
   projectFileFields     ProjectFileField[]
   letterFieldCategories LetterFieldCategory[]
+  archiveDismissals     ArchiveDismissal[]
 }
 
 model User {
@@ -359,6 +360,7 @@ model User {
   firmCustomFields        FirmCustomField[]
   createdAuditEvents      AuditEvent[]            @relation("AuditActor")
   createdOwnershipRecords OwnershipRecord[]       @relation("OwnershipRecordCreator")
+  archiveDismissals       ArchiveDismissal[]      @relation("ArchiveDismissalActor")
 
   @@index([tenantId, role])
   @@index([customRoleId])
@@ -1337,6 +1339,22 @@ model AuditEvent {
 
   @@index([tenantId, entityType, entityId, createdAt])
   @@index([tenantId, archivedAt])
+}
+
+model ArchiveDismissal {
+  id             String   @id @default(cuid())
+  tenantId       String
+  recordType     String
+  recordId       String
+  archiveVersion DateTime
+  clearedById    String?
+  clearedAt      DateTime @default(now())
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  clearedBy User?  @relation("ArchiveDismissalActor", fields: [clearedById], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, recordType, recordId, archiveVersion])
+  @@index([tenantId, clearedAt])
 }
 
 model Notification {

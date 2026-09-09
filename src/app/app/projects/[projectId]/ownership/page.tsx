@@ -156,7 +156,12 @@ export default async function ProjectOwnershipPage(
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredPlots.map((plot) => {
-                const latestDocument = documentStates.get(plot.id)?.latestDocument ?? null;
+                const documentState = documentStates.get(plot.id);
+                const latestDocument = documentState?.latestDocument ?? null;
+                const pendingSignedOwnership = Boolean(
+                  !plot.currentOwnerId
+                  && documentState?.history.some((document) => document.signed && (document.kind === "ALLOTMENT" || document.kind === "TRANSFER")),
+                );
                 const development = plot.checklistItems.length
                   ? Math.round(plot.checklistItems.reduce((total, item) => total + item.progressPct, 0) / plot.checklistItems.length)
                   : null;
@@ -169,7 +174,7 @@ export default async function ProjectOwnershipPage(
                     ownerName={plot.currentOwner?.name ?? firm.name}
                     area={`${plot.areaSqYards?.toString() ?? (plot.areaSqft ? String(Number(plot.areaSqft) / 9) : "-")} sq yd`}
                     development={development}
-                    allotmentStatus={plot.status === "COMPANY_OWNED" ? "Available for allotment" : plot.status.replaceAll("_", " ").toLowerCase().replace(/^\w/, (letter) => letter.toUpperCase())}
+                    allotmentStatus={pendingSignedOwnership ? "Allotted - details required" : plot.status === "COMPANY_OWNED" ? "Available for allotment" : plot.status.replaceAll("_", " ").toLowerCase().replace(/^\w/, (letter) => letter.toUpperCase())}
                     document={latestDocument ? {
                       id: latestDocument.generatedDocumentId,
                       status: latestDocument.status,

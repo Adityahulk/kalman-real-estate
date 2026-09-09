@@ -5,6 +5,7 @@ import { writeAuditEvent } from "../audit";
 import { prisma } from "../db";
 import { sortByPlotCode } from "@/lib/plot-code-sort";
 import { ensureProjectLetterTemplates } from "./document-templates";
+import { getPlotDocumentStates } from "./plot-documents";
 
 export const createProjectSchema = z.object({
   name: z.string().min(2),
@@ -250,6 +251,7 @@ export async function getProjectReportCsv(context: RequestContext, projectId: st
     _count: true,
   });
   const documentCountByPlot = new Map(documentCounts.map((item) => [item.ownerId, item._count]));
+  const documentStates = await getPlotDocumentStates(context.tenantId, sortedPlots.map((plot) => plot.id));
   const linkedDocumentIds = sortedPlots
     .flatMap((plot) => plot.ownershipRecords.map((record) => record.documentId))
     .filter((id): id is string => Boolean(id));
@@ -265,22 +267,26 @@ export async function getProjectReportCsv(context: RequestContext, projectId: st
     ["Project", project.name],
     ["City", project.city],
     [],
-    ["Plot Number", "Date of Allotment", "Owner Name / Company Status", "Letter Number", "Registry Status", "Document Count", "Value INR"],
+    ["Plot Number", "Date of Allotment", "Owner Name / Company Status", "Letter Number", "Plot Status", "Document Count"],
     ...sortedPlots.map((plot) => {
       const allotment = plot.ownershipRecords.find((record) => record.kind === "ALLOTMENT");
-      const latestOwnership = [...plot.ownershipRecords].reverse()[0];
-      const latestLetterNumber = [...plot.ownershipRecords]
+      const latestStateDocument = documentStates.get(plot.id)?.history.find(
+        (document) => document.kind === "ALLOTMENT" || document.kind === "TRANSFER",
+      );
+      const plotStatus = plot.status === "COMPANY_OWNED" && latestStateDocument?.signed
+        ? `${latestStateDocument.kind === "TRANSFER" ? "Transferred" : "Allotted"} - details required`
+        : plot.status.replaceAll("_", " ").toLowerCase().replace(/^\w/, (letter) => letter.toUpperCase());
+      const latestLetterNumber = latestStateDocument?.number ?? [...plot.ownershipRecords]
         .reverse()
         .map((record) => record.documentId ? letterNumberById.get(record.documentId) : "")
-        .find(Boolean) ?? "";
+        .find(Boolean) ?? (latestStateDocument?.signed ? `SIGNED-${plot.code}` : "");
       return [
         plot.code,
         allotment?.effectiveAt.toISOString().slice(0, 10) ?? "",
         plot.currentOwner?.name ?? "With Company",
         latestLetterNumber,
-        plot.registryRecords[0]?.status ?? "Not started",
+        plotStatus,
         String(documentCountByPlot.get(plot.id) ?? 0),
-        String(Number(latestOwnership?.amountInr ?? plot.priceInr ?? 0)),
       ];
     }),
   ];

@@ -86,6 +86,41 @@ assert(cookie, "session cookie missing");
 const plot = await prisma.plot.findFirstOrThrow({ where: { code: "A-101" } });
 const stamp = `${Date.now()}-${randomUUID().slice(0, 6)}`;
 
+async function createLetterFixture(type, suffix = type) {
+  if (!type.includes("allotment") && !type.includes("transfer")) return { plot, cleanup: async () => {} };
+  const fixturePlot = await prisma.plot.create({
+    data: { tenantId: plot.tenantId, projectId: plot.projectId, code: `LETTER-${suffix}-${randomUUID().slice(0, 6)}`, areaSqYards: 250, priceInr: 1_250_000 },
+  });
+  const owners = await Promise.all([
+    prisma.owner.create({ data: { tenantId: plot.tenantId, type: "INDIVIDUAL", name: `Letter Owner ${suffix}`, address: "Barnala, Punjab" } }),
+    prisma.owner.create({ data: { tenantId: plot.tenantId, type: "INDIVIDUAL", name: `Letter Buyer ${suffix}`, address: "Barnala, Punjab" } }),
+  ]);
+  const transfer = type.includes("transfer");
+  if (transfer) await prisma.plot.update({ where: { id: fixturePlot.id }, data: { currentOwnerId: owners[0].id, status: "ALLOTTED" } });
+  await prisma.ownershipRecord.create({
+    data: {
+      tenantId: plot.tenantId,
+      plotId: fixturePlot.id,
+      ownerId: transfer ? owners[1].id : owners[0].id,
+      kind: transfer ? "TRANSFER" : "ALLOTMENT",
+      amountInr: 1_250_000,
+      sharePct: 100,
+      createdById: (await prisma.user.findFirstOrThrow({ where: { email: "owner@saldhaland.example" }, select: { id: true } })).id,
+    },
+  });
+  return {
+    plot: fixturePlot,
+    cleanup: async () => {
+      await prisma.generatedDocumentRevision.deleteMany({ where: { document: { recordId: fixturePlot.id } } });
+      await prisma.generatedDocument.deleteMany({ where: { recordId: fixturePlot.id, recordType: "Plot" } });
+      await prisma.ownershipRecord.deleteMany({ where: { plotId: fixturePlot.id } });
+      await prisma.fileAsset.deleteMany({ where: { ownerType: "Plot", ownerId: fixturePlot.id } });
+      await prisma.plot.delete({ where: { id: fixturePlot.id } });
+      await prisma.owner.deleteMany({ where: { id: { in: owners.map((owner) => owner.id) } } });
+    },
+  };
+}
+
 // pdfjs-dist text extraction (legacy build works under Node without a worker thread).
 async function pdfText(buffer) {
   const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
@@ -163,6 +198,8 @@ function expectedInPdf(marker) {
 }
 
 async function exerciseLetterType(type) {
+  const fixture = await createLetterFixture(type);
+  const letterPlot = fixture.plot;
   const marker = `${type.split("_")[0].toUpperCase()}-${stamp}`;
   console.log(`\n■ ${type}`);
 
@@ -170,7 +207,7 @@ async function exerciseLetterType(type) {
   const created = await request("/api/v1/documents/drafts", {
     method: "POST",
     headers: { "content-type": "application/json", cookie },
-    body: JSON.stringify({ type, recordType: "Plot", recordId: plot.id }),
+    body: JSON.stringify({ type, recordType: "Plot", recordId: letterPlot.id }),
   });
   assert(created.response.status === 201, `${type}: draft creation failed (${created.json.error ?? created.response.status})`);
   const doc = created.json.data.document;
@@ -178,7 +215,7 @@ async function exerciseLetterType(type) {
   assert(html.length > 500, `${type}: draft HTML is implausibly small (${html.length} chars)`);
   assert(/data-(ambey|letter)-page/.test(html), `${type}: draft lost its paged template structure`);
   assert(!/\{\{[^}]+\}\}/.test(html), `${type}: unresolved {{placeholder}} left in draft HTML`);
-  assert(html.includes(plot.code), `${type}: plot code missing from draft`);
+  assert(html.includes(letterPlot.code), `${type}: plot code missing from draft`);
   console.log(`  ✓ draft created (${html.length} chars, missing vars: ${created.json.data.missingVariables?.length ?? 0})`);
 
   // 2. Render the untouched draft — the default template itself must produce a valid PDF.
@@ -189,7 +226,7 @@ async function exerciseLetterType(type) {
   await assertA4Pages(firstPdfBuffer, `${type} initial PDF`);
   const firstPdf = await pdfText(firstPdfBuffer);
   assert(firstPdf.numPages >= 1, `${type}: rendered PDF has no pages`);
-  assert(firstPdf.has(plot.code), `${type}: plot code missing from rendered PDF text`);
+  assert(firstPdf.has(letterPlot.code), `${type}: plot code missing from rendered PDF text`);
   if (type === "allotment_letter") {
     assert(firstPdf.pageTexts[0]?.includes("Warm Regards"), "allotment_letter: first-page sign-off spilled onto another page");
   }
@@ -228,6 +265,7 @@ async function exerciseLetterType(type) {
   // 5. Cleanup so repeated runs don't pile up drafts.
   const del = await request(`/api/v1/documents/${doc.id}`, { method: "DELETE", headers: { cookie } });
   assert(del.response.status === 200, `${type}: cleanup delete failed`);
+  await fixture.cleanup();
 }
 
 await exerciseLetterType("allotment_letter");
@@ -243,7 +281,7 @@ await exerciseLetterType("registry_status_letter");
   const created = await request("/api/v1/documents/drafts", {
     method: "POST",
     headers: { "content-type": "application/json", cookie },
-    body: JSON.stringify({ type: "allotment_letter", recordType: "Plot", recordId: plot.id }),
+    body: JSON.stringify({ type: "registry_status_letter", recordType: "Plot", recordId: plot.id }),
   });
   assert(created.response.status === 201, "edge: draft creation failed");
   const emptySave = await request(`/api/v1/documents/${created.json.data.document.id}/draft`, {
@@ -274,8 +312,10 @@ await exerciseLetterType("registry_status_letter");
 // the draft structure and in the rendered PDF.
 {
   console.log("\n■ allotment_letter (joint / partnership variant)");
+  const fixture = await createLetterFixture("allotment_letter_joint", `JOINT-${stamp}`);
+  const jointPlot = fixture.plot;
   const allotmentRecord = await prisma.ownershipRecord.findFirstOrThrow({
-    where: { plotId: plot.id, kind: "ALLOTMENT" },
+    where: { plotId: jointPlot.id, kind: "ALLOTMENT" },
     orderBy: [{ createdAt: "desc" }],
   });
   const originalExtra = allotmentRecord.extraDetails ?? {};
@@ -301,7 +341,7 @@ await exerciseLetterType("registry_status_letter");
     const created = await request("/api/v1/documents/drafts", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ type: "allotment_letter_joint", recordType: "Plot", recordId: plot.id }),
+      body: JSON.stringify({ type: "allotment_letter_joint", recordType: "Plot", recordId: jointPlot.id }),
     });
     assert(created.response.status === 201, `joint: draft creation failed (${created.json.error ?? created.response.status})`);
     const doc = created.json.data.document;
@@ -311,7 +351,7 @@ await exerciseLetterType("registry_status_letter");
     assert(html.includes("s/o Surinder Kumar"), "joint: second allottee relation missing from draft");
     assert(html.includes("<th>Share</th>"), "joint: Share row missing from details table");
     assert(html.includes("60%") && html.includes("40%"), "joint: 60/40 share split missing");
-    assert((html.match(new RegExp(`${Number(allotmentRecord.amountInr ?? plot.priceInr).toLocaleString("en-IN")}/-\\*`, "g")) ?? []).length === 1, "joint: total sale price was duplicated across both allottees");
+    assert((html.match(new RegExp(`${Number(allotmentRecord.amountInr ?? jointPlot.priceInr).toLocaleString("en-IN")}/-\\*`, "g")) ?? []).length === 1, "joint: total sale price was duplicated across both allottees");
     assert(html.includes("(2) NAME:") && html.includes(`(2) NAME: ${jointName.toUpperCase()}`), "joint: uppercase second allottee missing from closing signature line");
     assert((html.match(/Please affix/g) ?? []).length >= 4, "joint: expected two photograph boxes on declaration + agreement pages");
     assert(!/\{\{[^}]+\}\}/.test(html), "joint: unresolved {{placeholder}} left in draft");
@@ -323,17 +363,14 @@ await exerciseLetterType("registry_status_letter");
     await assertA4Pages(jointPdfBuffer, "joint allotment initial PDF");
     const pdf = await pdfText(jointPdfBuffer);
     assert(pdf.pageTexts[0]?.includes("Warm Regards"), "joint: first-page sign-off spilled onto another page");
-    for (const needle of [jointName, "Share", "60%", "40%", plot.code]) {
+    for (const needle of [jointName, "Share", "60%", "40%", jointPlot.code]) {
       assert(pdf.has(needle), `joint: "${needle}" missing from rendered PDF`);
     }
     console.log(`  ✓ joint PDF contains both allottees and the share split (${pdf.numPages} pages)`);
 
     await request(`/api/v1/documents/${doc.id}`, { method: "DELETE", headers: { cookie } });
   } finally {
-    await prisma.ownershipRecord.update({
-      where: { id: allotmentRecord.id },
-      data: { extraDetails: originalExtra },
-    });
+    await fixture.cleanup();
   }
 }
 
@@ -351,6 +388,7 @@ await exerciseLetterType("registry_status_letter");
       recordId: plot.id,
       data: {},
       number: `SIGNED-TRANSFER-${stamp}`,
+      editableHtml: "<section><p>Generated working copy that must be locked after signature.</p></section>",
     },
   });
   const createSignedFile = (suffix, ownerId = plot.id) => prisma.fileAsset.create({
@@ -370,6 +408,21 @@ await exerciseLetterType("registry_status_letter");
     },
   });
   const wrongPlotFile = await createSignedFile("wrong-plot", "another-plot");
+  const generatedFile = await prisma.fileAsset.create({
+    data: {
+      tenantId: plot.tenantId,
+      storageKey: `test/${stamp}/generated-transfer.pdf`,
+      storageProvider: "LOCAL",
+      fileName: "generated-transfer.pdf",
+      mimeType: "application/pdf",
+      sizeBytes: 1024,
+      visibility: "OWNER_VISIBLE",
+      documentType: "TRANSFER_LETTER",
+      ownerType: "Plot",
+      ownerId: plot.id,
+    },
+  });
+  await prisma.generatedDocument.update({ where: { id: document.id }, data: { fileAssetId: generatedFile.id } });
   const firstSignedFile = await createSignedFile("first");
   const replacementSignedFile = await createSignedFile("replacement");
   try {
@@ -388,6 +441,13 @@ await exerciseLetterType("registry_status_letter");
     assert(signed.response.status === 200, `transfer signed copy: upload failed (${signed.json.error ?? signed.response.status})`);
     assert(signed.json.data.status === "SIGNED", "transfer signed copy: document was not marked SIGNED");
     assert(signed.json.data.signedFileAssetId === firstSignedFile.id, "transfer signed copy: uploaded file was not linked");
+    const locked = await prisma.generatedDocument.findUniqueOrThrow({ where: { id: document.id } });
+    const hiddenGeneratedFile = await prisma.fileAsset.findUniqueOrThrow({ where: { id: generatedFile.id } });
+    assert(locked.fileAssetId === firstSignedFile.id, "transfer signed copy: signed file did not become the authoritative download");
+    assert(locked.editableHtml === null, "transfer signed copy: editable draft remained accessible after signing");
+    assert(hiddenGeneratedFile.deletedAt, "transfer signed copy: generated PDF was not archived after signing");
+    const restoreSuperseded = await request(`/api/v1/files/${generatedFile.id}/restore`, { method: "POST", headers: { cookie } });
+    assert(restoreSuperseded.response.status === 400, "transfer signed copy: superseded generated PDF could be restored");
 
     const replaced = await request(`/api/v1/documents/${document.id}/sign`, {
       method: "POST",
@@ -396,11 +456,99 @@ await exerciseLetterType("registry_status_letter");
     });
     assert(replaced.response.status === 200, `transfer signed copy: replacement failed (${replaced.json.error ?? replaced.response.status})`);
     assert(replaced.json.data.signedFileAssetId === replacementSignedFile.id, "transfer signed copy: replacement file was not linked");
+    const supersededSignedFile = await prisma.fileAsset.findUniqueOrThrow({ where: { id: firstSignedFile.id } });
+    assert(supersededSignedFile.deletedAt, "transfer signed copy: previous signed file was not archived after replacement");
     console.log("  ✓ approved transfer becomes signed and its signed copy can be replaced safely");
   } finally {
     await prisma.auditEvent.deleteMany({ where: { entityType: "GeneratedDocument", entityId: document.id } });
     await prisma.generatedDocument.delete({ where: { id: document.id } });
-    await prisma.fileAsset.deleteMany({ where: { id: { in: [wrongPlotFile.id, firstSignedFile.id, replacementSignedFile.id] } } });
+    await prisma.fileAsset.deleteMany({ where: { id: { in: [wrongPlotFile.id, generatedFile.id, firstSignedFile.id, replacementSignedFile.id] } } });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Importing an old signed allotment must establish the same immutable ownership state as a
+// letter generated and signed in the app. The next legal event is a transfer, never another
+// allotment edit or allotment letter.
+{
+  console.log("\n■ historical signed allotment becomes authoritative ownership");
+  const superLogin = await request("/api/v1/auth/login", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ identifier: "Dakshdod", password: "252008" }),
+  });
+  assert(superLogin.response.status === 201, "historical signed allotment: Super Admin login failed");
+  const superCookie = superLogin.cookie?.split(";")[0];
+  const historicalPlot = await prisma.plot.create({
+    data: { tenantId: plot.tenantId, projectId: plot.projectId, code: `HIST-${stamp}`, areaSqYards: 180 },
+  });
+  const signedFile = await prisma.fileAsset.create({
+    data: {
+      tenantId: plot.tenantId,
+      storageKey: `test/${stamp}/historical-allotment.pdf`,
+      storageProvider: "LOCAL",
+      fileName: `historical-allotment-${stamp}.pdf`,
+      mimeType: "application/pdf",
+      sizeBytes: 2048,
+      visibility: "OWNER_VISIBLE",
+      documentType: "ALLOTMENT_LETTER",
+      documentNo: `OLD/${stamp}`,
+      ownerType: "Plot",
+      ownerId: historicalPlot.id,
+      categoryKey: "signed-allotment-letter",
+    },
+  });
+  let historicalOwnerId;
+  let transferBuyerId;
+  try {
+    const imported = await request(`/api/v1/ownership/plots/${historicalPlot.id}/historical-allotment`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: superCookie },
+      body: JSON.stringify({
+        type: "INDIVIDUAL",
+        name: `Historical Owner ${stamp}`,
+        fileAssetId: signedFile.id,
+        documentNumber: `OLD/${stamp}`,
+        sharePct: 100,
+      }),
+    });
+    assert(imported.response.status === 200, `historical signed allotment: import failed (${imported.json.error ?? imported.response.status})`);
+    historicalOwnerId = imported.json.data.owner.id;
+    const storedPlot = await prisma.plot.findUniqueOrThrow({ where: { id: historicalPlot.id } });
+    assert(storedPlot.status === "ALLOTTED" && storedPlot.currentOwnerId === historicalOwnerId, "historical signed allotment: plot was not marked allotted");
+    assert(imported.json.data.document.status === "SIGNED" && imported.json.data.document.fileAssetId === signedFile.id, "historical signed allotment: signed file is not authoritative");
+
+    const blockedEdit = await request(`/api/v1/ownership/plots/${historicalPlot.id}/allot`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json", cookie: superCookie },
+      body: JSON.stringify({ ownerId: historicalOwnerId, sharePct: 100 }),
+    });
+    assert(blockedEdit.response.status === 400, "historical signed allotment: completed allotment remained editable");
+    const blockedDraft = await request("/api/v1/documents/drafts", {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: superCookie },
+      body: JSON.stringify({ type: "allotment_letter", recordType: "Plot", recordId: historicalPlot.id }),
+    });
+    assert(blockedDraft.response.status === 400, "historical signed allotment: a second allotment letter could be created");
+
+    const buyer = await prisma.owner.create({ data: { tenantId: plot.tenantId, type: "INDIVIDUAL", name: `Historical Buyer ${stamp}` } });
+    transferBuyerId = buyer.id;
+    const transfer = await request(`/api/v1/ownership/plots/${historicalPlot.id}/transfer`, {
+      method: "POST",
+      headers: { "content-type": "application/json", cookie: superCookie },
+      body: JSON.stringify({ buyerOwnerId: buyer.id, sharePct: 100 }),
+    });
+    assert(transfer.response.status === 200, "historical signed allotment: next transfer could not be started");
+    console.log("  ✓ signed import marks allotted, locks allotment, and permits only the next transfer");
+  } finally {
+    await prisma.generatedDocumentRevision.deleteMany({ where: { document: { recordId: historicalPlot.id } } });
+    await prisma.generatedDocument.deleteMany({ where: { recordType: "Plot", recordId: historicalPlot.id } });
+    await prisma.ownershipRecord.deleteMany({ where: { plotId: historicalPlot.id } });
+    await prisma.fileAsset.deleteMany({ where: { ownerType: "Plot", ownerId: historicalPlot.id } });
+    await prisma.plot.delete({ where: { id: historicalPlot.id } });
+    if (transferBuyerId) await prisma.owner.delete({ where: { id: transferBuyerId } }).catch(() => undefined);
+    if (historicalOwnerId) await prisma.owner.delete({ where: { id: historicalOwnerId } }).catch(() => undefined);
+    await prisma.auditEvent.deleteMany({ where: { entityType: "Plot", entityId: historicalPlot.id } });
   }
 }
 
@@ -620,15 +768,6 @@ await exerciseLetterType("registry_status_letter");
   });
   const sellerOwner = await prisma.owner.findFirstOrThrow({ where: { id: sellerOwnership.ownerId ?? undefined } });
 
-  // The "original allotment letter" reference: a live allotment draft with a number.
-  const allotmentDoc = await request("/api/v1/documents/drafts", {
-    method: "POST",
-    headers: { "content-type": "application/json", cookie },
-    body: JSON.stringify({ type: "allotment_letter", recordType: "Plot", recordId: plot.id }),
-  });
-  assert(allotmentDoc.response.status === 201, "transfer wiring: allotment draft creation failed");
-  const originalNumber = allotmentDoc.json.data.document.number;
-
   // Simulate a completed sale: a TRANSFER ownership record to a new buyer.
   const buyer = await prisma.owner.create({
     data: {
@@ -711,7 +850,6 @@ await exerciseLetterType("registry_status_letter");
 
     await request(`/api/v1/documents/${created.json.data.document.id}`, { method: "DELETE", headers: { cookie } });
   } finally {
-    await request(`/api/v1/documents/${allotmentDoc.json.data.document.id}`, { method: "DELETE", headers: { cookie } });
     await prisma.ownershipRecord.delete({ where: { id: transferRecord.id } }).catch(() => undefined);
     await prisma.fileAsset.delete({ where: { id: transferKycFile.id } }).catch(() => undefined);
     await prisma.owner.delete({ where: { id: buyer.id } }).catch(() => undefined);
@@ -726,8 +864,10 @@ await exerciseLetterType("registry_status_letter");
 // allotment types, not switched off entirely).
 {
   console.log("\n■ transfer_letter must not leak the allotment's KYC photos");
+  const fixture = await createLetterFixture("allotment_letter", `PHOTO-${stamp}`);
+  const photoPlot = fixture.plot;
   const allotmentRecord = await prisma.ownershipRecord.findFirstOrThrow({
-    where: { plotId: plot.id, kind: "ALLOTMENT" },
+    where: { plotId: photoPlot.id, kind: "ALLOTMENT" },
     orderBy: [{ createdAt: "desc" }],
   });
   const originalExtra = allotmentRecord.extraDetails ?? {};
@@ -753,13 +893,14 @@ await exerciseLetterType("registry_status_letter");
       },
     },
   });
+  let transferBuyerId;
 
   try {
     // Sanity check: the allotment letter itself DOES still pick up the KYC photo.
     const allotmentDraft = await request("/api/v1/documents/drafts", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ type: "allotment_letter", recordType: "Plot", recordId: plot.id }),
+      body: JSON.stringify({ type: "allotment_letter", recordType: "Plot", recordId: photoPlot.id }),
     });
     assert(allotmentDraft.response.status === 201, "photo-leak: allotment draft creation failed");
     const allotmentHtml = allotmentDraft.json.data.document.editableHtml ?? "";
@@ -767,12 +908,27 @@ await exerciseLetterType("registry_status_letter");
     await request(`/api/v1/documents/${allotmentDraft.json.data.document.id}`, { method: "DELETE", headers: { cookie } });
     console.log("  ✓ allotment letter still attaches its own KYC photo (feature intact)");
 
-    // The actual bug: with no TRANSFER ownership record yet, the transfer draft must NOT inherit
-    // the allotment's KYC photo.
+    // Move the fixture into the next valid ownership event, then verify that transfer output does
+    // not inherit the original allottee's KYC attachment.
+    await prisma.plot.update({ where: { id: photoPlot.id }, data: { currentOwnerId: allotmentRecord.ownerId, status: "ALLOTTED" } });
+    const transferBuyer = await prisma.owner.create({
+      data: { tenantId: allotmentRecord.tenantId, type: "INDIVIDUAL", name: `Photo Transfer Buyer ${stamp}` },
+    });
+    transferBuyerId = transferBuyer.id;
+    await prisma.ownershipRecord.create({
+      data: {
+        tenantId: allotmentRecord.tenantId,
+        plotId: photoPlot.id,
+        ownerId: transferBuyer.id,
+        kind: "TRANSFER",
+        sharePct: 100,
+        createdById: allotmentRecord.createdById,
+      },
+    });
     const transferDraft = await request("/api/v1/documents/drafts", {
       method: "POST",
       headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ type: "transfer_letter", recordType: "Plot", recordId: plot.id }),
+      body: JSON.stringify({ type: "transfer_letter", recordType: "Plot", recordId: photoPlot.id }),
     });
     assert(transferDraft.response.status === 201, "photo-leak: transfer draft creation failed");
     const transferHtml = transferDraft.json.data.document.editableHtml ?? "";
@@ -781,8 +937,9 @@ await exerciseLetterType("registry_status_letter");
     await request(`/api/v1/documents/${transferDraft.json.data.document.id}`, { method: "DELETE", headers: { cookie } });
     console.log("  ✓ transfer letter no longer inherits the allotment's KYC photo");
   } finally {
-    await prisma.ownershipRecord.update({ where: { id: allotmentRecord.id }, data: { extraDetails: originalExtra } });
     await prisma.fileAsset.delete({ where: { id: kycFile.id } }).catch(() => undefined);
+    await fixture.cleanup();
+    if (transferBuyerId) await prisma.owner.delete({ where: { id: transferBuyerId } }).catch(() => undefined);
   }
 }
 

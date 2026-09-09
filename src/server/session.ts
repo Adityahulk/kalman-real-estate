@@ -14,6 +14,7 @@ export type SessionUser = {
   permissions?: Permission[];
   /** null means every project in the selected firm; an array is an explicit project scope. */
   projectIds?: string[] | null;
+  rememberMe?: boolean;
 };
 
 export function hasPortfolioFirmAccess(role: Role) {
@@ -89,6 +90,7 @@ export async function verifySessionToken(token?: string): Promise<SessionUser | 
       tenantId: String(payload.tenantId),
       role: payload.role as Role,
       email: String(payload.email),
+      rememberMe: payload.rememberMe === true,
     };
   } catch {
     return null;
@@ -131,6 +133,7 @@ export async function getSessionUser() {
     email: user.email,
     permissions: normalizePermissions(user.customRole?.permissions),
     projectIds,
+    rememberMe: tokenUser.rememberMe,
   };
 }
 
@@ -140,9 +143,10 @@ export async function createSessionToken(user: SessionUser) {
     tenantId: user.tenantId,
     role: user.role,
     email: user.email,
+    rememberMe: Boolean(user.rememberMe),
   })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime("12h")
+    .setExpirationTime(user.rememberMe ? "30d" : "12h")
     .sign(secret);
 }

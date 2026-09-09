@@ -66,6 +66,14 @@ assert(login.response.status === 201, "builder login failed");
 const cookie = login.cookie?.split(";")[0];
 assert(cookie, "session cookie missing");
 
+const rememberedLogin = await request("/api/v1/auth/login", {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ email: "owner@saldhaland.example", password: "Kalman@12345", rememberMe: true }),
+});
+assert(rememberedLogin.response.status === 201, "remember-me login failed");
+assert(/Max-Age=2592000/i.test(rememberedLogin.cookie ?? ""), "remember-me cookie is not persistent for 30 days");
+
 const me = await request("/api/v1/auth/me", { headers: { cookie } });
 assert(me.json.data?.tenant?.name === "Saldha Land Developers", "tenant session failed");
 
@@ -83,7 +91,9 @@ const projectReportText = await projectReport.text();
 assert(
   projectReportText.includes("Plot Number")
     && projectReportText.includes("Owner Name / Company Status")
-    && projectReportText.includes("Letter Number"),
+    && projectReportText.includes("Letter Number")
+    && projectReportText.includes("Plot Status")
+    && !projectReportText.includes("Value INR"),
   "project report is missing ownership or letter-number columns",
 );
 
@@ -179,22 +189,31 @@ assert(doc.json.data?.document?.fileAssetId, "document PDF file missing");
 const generatedLetterFile = await prisma.fileAsset.findUniqueOrThrow({ where: { id: doc.json.data.document.fileAssetId } });
 assert(generatedLetterFile.documentType === "ALLOTMENT_LETTER", "generated allotment letter was not typed");
 
+const draftOwner = await prisma.owner.create({
+  data: { tenantId, type: "INDIVIDUAL", name: `Smoke Draft Owner ${stamp}` },
+});
+const draftPlot = await prisma.plot.create({
+  data: { tenantId, projectId: project.id, code: `SMOKE-DRAFT-${stamp}`, areaSqYards: 200 },
+});
+await prisma.ownershipRecord.create({
+  data: { tenantId, plotId: draftPlot.id, ownerId: draftOwner.id, kind: "ALLOTMENT", sharePct: 100, createdById: me.json.data.id },
+});
 const draft = await request("/api/v1/documents/drafts", {
   method: "POST",
   headers: { "content-type": "application/json", cookie },
   body: JSON.stringify({
     type: "allotment_letter",
     recordType: "Plot",
-    recordId: plot.id,
+    recordId: draftPlot.id,
   }),
 });
 assert(draft.response.status === 201, "letter draft creation failed");
-assert(draft.json.data?.document?.editableHtml?.includes(plot.code), "letter draft did not include plot data");
+assert(draft.json.data?.document?.editableHtml?.includes(draftPlot.code), "letter draft did not include plot data");
 const draftId = draft.json.data.document.id;
 const draftSave = await request(`/api/v1/documents/${draftId}/draft`, {
   method: "PATCH",
   headers: { "content-type": "application/json", cookie },
-  body: JSON.stringify({ editableHtml: `<h1>Smoke Allotment</h1><p>Plot ${plot.code} editable draft for smoke verification.</p>` }),
+  body: JSON.stringify({ editableHtml: `<h1>Smoke Allotment</h1><p>Plot ${draftPlot.code} editable draft for smoke verification.</p>` }),
 });
 assert(draftSave.response.status === 200, "letter draft save failed");
 const draftRender = await request(`/api/v1/documents/${draftId}/render`, {
@@ -203,6 +222,12 @@ const draftRender = await request(`/api/v1/documents/${draftId}/render`, {
 });
 assert(draftRender.response.status === 200, "letter draft render failed");
 assert(draftRender.json.data?.document?.fileAssetId, "rendered letter file missing");
+await prisma.generatedDocumentRevision.deleteMany({ where: { documentId: draftId } });
+await prisma.generatedDocument.delete({ where: { id: draftId } });
+await prisma.ownershipRecord.deleteMany({ where: { plotId: draftPlot.id } });
+await prisma.fileAsset.deleteMany({ where: { ownerType: "Plot", ownerId: draftPlot.id } });
+await prisma.plot.delete({ where: { id: draftPlot.id } });
+await prisma.owner.delete({ where: { id: draftOwner.id } });
 
 const download = await fetch(`${baseUrl}/api/v1/files/${doc.json.data.document.fileAssetId}/download`, {
   headers: { cookie },
@@ -680,6 +705,34 @@ assert(childPublish.json.data.checklistItems.length === 1, "plot CAD did not cre
 
 const notifications = await request("/api/v1/notifications", { headers: { cookie } });
 assert(notifications.response.status === 200, "notification list failed");
+
+const archivedAt = new Date();
+const archivedTask = await prisma.marketingTask.create({
+  data: {
+    tenantId,
+    projectId: project.id,
+    title: `Archive cleanup ${stamp}`,
+    brief: "Verify that archive cleanup hides records without deleting them.",
+    archivedAt,
+    archivedById: me.json.data.id,
+    archiveReason: "Smoke test",
+  },
+});
+const clearArchive = await request("/api/v1/archive/clear", {
+  method: "POST",
+  headers: { "content-type": "application/json", cookie },
+  body: JSON.stringify({
+    mode: "selected",
+    items: [{ recordType: "MarketingTask", recordId: archivedTask.id, archiveVersion: archivedAt.toISOString() }],
+  }),
+});
+assert(clearArchive.response.status === 200, "archive selected cleanup failed");
+assert(clearArchive.json.data?.clearedCount === 1, "archive selected cleanup did not clear the selected record");
+assert(await prisma.marketingTask.findUnique({ where: { id: archivedTask.id } }), "archive cleanup permanently deleted the legal record");
+assert(await prisma.archiveDismissal.findFirst({ where: { tenantId, recordType: "MarketingTask", recordId: archivedTask.id } }), "archive cleanup did not persist the view dismissal");
+await prisma.archiveDismissal.deleteMany({ where: { tenantId, recordType: "MarketingTask", recordId: archivedTask.id } });
+await prisma.marketingTask.delete({ where: { id: archivedTask.id } });
+await prisma.auditEvent.deleteMany({ where: { tenantId, entityType: "ArchiveView", entityId: tenantId, createdAt: { gte: archivedAt } } });
 
 await prisma.$disconnect();
 console.log("Smoke tests passed");

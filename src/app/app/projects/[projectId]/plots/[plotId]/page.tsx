@@ -81,10 +81,12 @@ export default async function ProjectPlotWorkspacePage(
   const pendingHistoricalFiles = [...oldDocumentFiles, ...signedOwnershipFiles]
     .filter((file, index, files) => files.findIndex((candidate) => candidate.id === file.id) === index)
     .filter((file) => !linkedOwnershipFileIds.has(file.id));
+  const standaloneSignedFiles = signedOwnershipFiles.filter((file) => !linkedOwnershipFileIds.has(file.id));
   const latestPlotMapFile = plotMapFiles[0] ?? null;
   const latestPlotCadPreviewId = workspace.childCadFiles.find((file) => file.analysis?.previewArtifactKey)?.id ?? null;
   const registryDocuments = workspace.plotFiles.filter((file) => file.documentType === "REGISTRY_RECEIPT" || file.documentType === "REGISTRY_DEED");
   const ownershipLetters = workspace.generatedDocuments.filter((document) => document.type.includes("allotment") || document.type.includes("transfer"));
+  const workingGeneratedLetters = workspace.generatedDocuments.filter((document) => document.status !== "SIGNED");
   const latestSignedLetterUploadTargetId = ownershipLetters
     .filter((document) => document.fileAssetId && ["APPROVED", "SENT_FOR_SIGNATURE", "SIGNED"].includes(document.status))
     .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0]?.id ?? null;
@@ -109,11 +111,17 @@ export default async function ProjectPlotWorkspacePage(
     ? Math.round(plot.checklistItems.reduce((total, item) => total + item.progressPct, 0) / plot.checklistItems.length)
     : 0;
   const developmentStatus = developmentPct === 0 ? "Not started" : developmentPct >= 100 ? "Finished" : "In progress";
-  const allotmentStatus = plot.currentOwnerId ? "Allotted" : "Not allotted";
   const acceptedTransferCount = await acceptedTransferCountForPlot(session.tenantId, plot.id);
   const transferLimitReached = acceptedTransferCount >= firm.maxTransfersPerPlot;
   const documentState = workspace.documentState;
   const latestDocument = documentState?.latestDocument ?? null;
+  const signedOwnershipLocked = Boolean(documentState?.history.some(
+    (document) => (document.kind === "ALLOTMENT" || document.kind === "TRANSFER") && document.signed,
+  ));
+  const pendingSignedSetup = !plot.currentOwnerId
+    ? pendingHistoricalFiles.find((file) => file.categoryKey === "signed-allotment-letter") ?? null
+    : null;
+  const allotmentStatus = plot.currentOwnerId ? "Allotted" : pendingSignedSetup ? "Allotted - details required" : "Not allotted";
   const latestDocumentHref = latestDocument?.fileAssetId
     ? `/api/v1/files/${latestDocument.fileAssetId}/download?disposition=inline&proxy=1`
     : latestDocument?.generatedDocumentId
@@ -132,7 +140,7 @@ export default async function ProjectPlotWorkspacePage(
           </div>
           <h1 className="mt-1 text-3xl font-semibold tracking-tight">{plot.code}</h1>
           <p className="mt-2 text-sm leading-6 text-slate-600">
-            {plot.currentOwner?.name ?? firm.name} · {plot.status.replaceAll("_", " ")} · {plot.areaSqYards?.toString() ?? (plot.areaSqft ? String(Number(plot.areaSqft) / 9) : "-")} sq yd
+            {plot.currentOwner?.name ?? firm.name} · {pendingSignedSetup ? "ALLOTTED - DETAILS REQUIRED" : plot.status.replaceAll("_", " ")} · {plot.areaSqYards?.toString() ?? (plot.areaSqft ? String(Number(plot.areaSqft) / 9) : "-")} sq yd
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -159,7 +167,7 @@ export default async function ProjectPlotWorkspacePage(
         </div>
         <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
           <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Plot status</div>
-          <div className="mt-1 font-semibold text-navy-950">{plot.status.replaceAll("_", " ")}</div>
+          <div className="mt-1 font-semibold text-navy-950">{pendingSignedSetup ? "ALLOTTED - DETAILS REQUIRED" : plot.status.replaceAll("_", " ")}</div>
         </div>
         <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
           <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Latest document</div>
@@ -245,6 +253,7 @@ export default async function ProjectPlotWorkspacePage(
               <div className="overflow-x-auto rounded-lg border border-slate-200">
                 <OwnershipLetterRows
                   documents={ownershipLetters}
+                  standaloneSignedFiles={standaloneSignedFiles}
                   plotId={plot.id}
                   latestSignedLetterUploadTargetId={latestSignedLetterUploadTargetId}
                   signedByDocumentNo={latestSignedByDocumentNo}
@@ -272,15 +281,15 @@ export default async function ProjectPlotWorkspacePage(
               </div>
             </AccordionRow>
 
-            <AccordionRow label="Actions" value={plot.currentOwnerId ? "Transfer or registry" : "New allotment"}>
+            <AccordionRow label="Actions" value={plot.currentOwnerId ? "Transfer or registry" : pendingSignedSetup ? "Complete signed allotment setup" : "New allotment"}>
               <div className="flex flex-wrap gap-2">
-                {((!plot.currentOwnerId && canGenerateDocuments) || (plot.currentOwnerId && canManageOwnership && !transferLimitReached)) ? <Link className="btn-primary justify-center" href={plot.currentOwnerId ? `/app/projects/${plot.projectId}/plots/${plot.id}/transfer` : `/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}`}>
+                {((!plot.currentOwnerId && canGenerateDocuments) || (plot.currentOwnerId && canManageOwnership && !transferLimitReached)) ? <Link className="btn-primary justify-center" href={plot.currentOwnerId ? `/app/projects/${plot.projectId}/plots/${plot.id}/transfer` : pendingSignedSetup ? `/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}&historical=1&historicalFileId=${pendingSignedSetup.id}` : `/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}`}>
                   <GitBranch size={17} />
-                  + {plot.currentOwnerId ? "New transfer" : "New allotment"}
+                  + {plot.currentOwnerId ? "New transfer" : pendingSignedSetup ? "Complete signed allotment setup" : "New allotment"}
                 </Link> : null}
                 {plot.currentOwnerId && transferLimitReached ? <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">Transfer limit reached. Registry is the only next ownership action.</div> : null}
                 {plot.currentOwnerId && canManageOwnership ? <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/plots/${plot.id}/registry/update`}><Upload size={17} />{registryDocuments.length ? "+ New registry" : "Upload registry"}</Link> : null}
-                {latestAllotmentRecord && canGenerateDocuments ? <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}&edit=1`}><Pencil size={17} />Allotment details</Link> : null}
+                {latestAllotmentRecord && canGenerateDocuments && !signedOwnershipLocked ? <Link className="btn-outline justify-center" href={`/app/projects/${plot.projectId}/ownership/new-allotment?plotId=${plot.id}&edit=1`}><Pencil size={17} />Allotment details</Link> : null}
                 {registryDocuments.length ? <Link className="btn-outline justify-center" href={`?tab=registry`}><Landmark size={17} />View registry</Link> : null}
                 <Link className="btn-outline justify-center" href={`?tab=documents`}><FileText size={17} />Documents</Link>
                 <Link className="btn-outline justify-center" href={`?tab=history`}><History size={17} />History</Link>
@@ -300,6 +309,7 @@ export default async function ProjectPlotWorkspacePage(
             </div>
             <OwnershipLetterRows
               documents={ownershipLetters}
+              standaloneSignedFiles={standaloneSignedFiles}
               plotId={plot.id}
               latestSignedLetterUploadTargetId={latestSignedLetterUploadTargetId}
               signedByDocumentNo={latestSignedByDocumentNo}
@@ -422,7 +432,7 @@ export default async function ProjectPlotWorkspacePage(
             <div className="card p-5">
               <h2 className="mb-4 font-semibold">Generated letters</h2>
               <div className="space-y-3">
-                {workspace.generatedDocuments.map((document) => {
+                {workingGeneratedLetters.map((document) => {
                   const signedByNumber = document.number ? latestSignedByDocumentNo.get(document.number) : null;
                   const signedFileAssetId = document.signedFileAssetId && availableSignedFileIds.has(document.signedFileAssetId)
                     ? document.signedFileAssetId
@@ -461,7 +471,7 @@ export default async function ProjectPlotWorkspacePage(
                     </div>
                   );
                 })}
-                {!workspace.generatedDocuments.length ? <Empty label="No letters generated yet." /> : null}
+                {!workingGeneratedLetters.length ? <Empty label="No working generated letters. Signed copies are shown above." /> : null}
               </div>
             </div>
           </div>
@@ -840,6 +850,7 @@ function OwnerHistoryRows({
 
 function OwnershipLetterRows({
   documents,
+  standaloneSignedFiles,
   plotId,
   latestSignedLetterUploadTargetId,
   signedByDocumentNo,
@@ -847,6 +858,7 @@ function OwnershipLetterRows({
   canUploadSigned,
 }: {
   documents: Awaited<ReturnType<typeof getPlotWorkspace>>["generatedDocuments"];
+  standaloneSignedFiles: Awaited<ReturnType<typeof getPlotWorkspace>>["plotFiles"];
   plotId: string;
   latestSignedLetterUploadTargetId: string | null;
   signedByDocumentNo: Map<string, Awaited<ReturnType<typeof getPlotWorkspace>>["plotFiles"][number]>;
@@ -872,8 +884,8 @@ function OwnershipLetterRows({
                 <td className="whitespace-nowrap px-4 py-3">{document.createdAt.toLocaleDateString("en-IN")}</td>
                 <td className="px-4 py-3">
                   <div className="flex flex-wrap items-center gap-2">
-                    {document.fileAssetId ? (
-                      <a className="btn-outline h-8 w-8 px-0 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`} title="Download generated PDF" aria-label="Download generated PDF">
+                    {document.fileAssetId && !signedFileAssetId ? (
+                      <a className="btn-outline h-8 w-8 px-0 text-xs" href={`/api/v1/files/${document.fileAssetId}/download`} title={signedFileAssetId ? "Download signed PDF" : "Download generated PDF"} aria-label={signedFileAssetId ? "Download signed PDF" : "Download generated PDF"}>
                         <Download size={14} />
                       </a>
                     ) : <span className="text-slate-500">PDF not generated</span>}
@@ -897,9 +909,21 @@ function OwnershipLetterRows({
               </tr>
             );
           })}
+          {standaloneSignedFiles.map((file) => (
+            <tr key={file.id}>
+              <td className="px-4 py-3 font-medium">{file.documentNo ?? file.fileName.replace(/\.[^.]+$/, "")}</td>
+              <td className="px-4 py-3">SIGNED · DETAILS REQUIRED</td>
+              <td className="whitespace-nowrap px-4 py-3">{(file.documentDate ?? file.createdAt).toLocaleDateString("en-IN")}</td>
+              <td className="px-4 py-3">
+                <a className="btn-outline h-8 w-8 px-0 text-xs" href={`/api/v1/files/${file.id}/download?disposition=inline&proxy=1`} target="_blank" rel="noreferrer" title="View signed copy" aria-label="View signed copy">
+                  <Eye size={14} />
+                </a>
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
-      {!documents.length ? <div className="bg-white p-4 text-sm text-slate-500">No allotment or transfer letters yet.</div> : null}
+      {!documents.length && !standaloneSignedFiles.length ? <div className="bg-white p-4 text-sm text-slate-500">No allotment or transfer letters yet.</div> : null}
     </>
   );
 }

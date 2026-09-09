@@ -210,6 +210,7 @@ export async function selectFirm(user: SessionUser, tenantId: string) {
     tenantId,
     role: user.role,
     email: user.email,
+    rememberMe: user.rememberMe,
   });
   return { token, firm: firm ?? selectedTenant };
 }

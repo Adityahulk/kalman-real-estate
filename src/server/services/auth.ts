@@ -2,7 +2,7 @@ import bcrypt from "bcryptjs";
 import { prisma } from "../db";
 import { createSessionToken } from "../session";
 
-export async function login(identifier: string, password: string) {
+export async function login(identifier: string, password: string, rememberMe = false) {
   const trimmed = identifier.trim();
   // A user can sign in with their email (case-insensitive) or their login ID. Login IDs
   // are matched case-insensitively too so "Dakshdod" and "dakshdod" both work.
@@ -30,6 +30,7 @@ export async function login(identifier: string, password: string) {
     tenantId: user.tenantId ?? "__unselected__",
     role: user.role,
     email: user.email,
+    rememberMe,
   });
 
   await prisma.user.update({
@@ -39,6 +40,7 @@ export async function login(identifier: string, password: string) {
 
   return {
     token,
+    rememberMe,
     user: {
       id: user.id,
       tenantId: user.tenantId,

@@ -124,6 +124,19 @@ export async function updateLatestAllotment(context: RequestContext, plotId: str
     if (!recordBefore) {
       throwBadRequest("No allotment record exists for this plot yet.");
     }
+    const signedAllotment = await tx.fileAsset.findFirst({
+      where: {
+        tenantId: context.tenantId,
+        ownerType: "Plot",
+        ownerId: plotId,
+        categoryKey: "signed-allotment-letter",
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (signedAllotment) {
+      throwBadRequest("This allotment has a signed letter and is permanently locked. Create a transfer for the next owner.");
+    }
     if (recordBefore.documentId) {
       const linkedDocument = await tx.generatedDocument.findFirst({
         where: { id: recordBefore.documentId, tenantId: context.tenantId, archivedAt: null },

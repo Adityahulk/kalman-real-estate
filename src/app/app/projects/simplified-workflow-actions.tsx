@@ -211,7 +211,8 @@ export function PlotDocumentUploadPanel({ plotId }: { plotId: string }) {
       ownerType="Plot"
       ownerId={plotId}
       defaultVisibility="OWNER_VISIBLE"
-      defaultDocumentType="ALLOTMENT_LETTER"
+      defaultDocumentType="OTHER"
+      excludeOwnershipLetters
       title="Upload plot document"
     />
   );

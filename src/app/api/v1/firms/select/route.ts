@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
       sameSite: "lax",
       secure: secureCookie,
       path: "/",
-      maxAge: 60 * 60 * 12,
+      ...(session.rememberMe ? { maxAge: 60 * 60 * 24 * 30 } : {}),
     });
     return response;
   } catch (error) {

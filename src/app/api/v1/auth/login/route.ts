@@ -12,6 +12,7 @@ const schema = z
     identifier: z.string().min(1).optional(),
     email: z.string().min(1).optional(),
     password: z.string().min(1),
+    rememberMe: z.boolean().default(false),
   })
   .refine((value) => Boolean(value.identifier || value.email), {
     message: "Email or User ID is required",
@@ -21,7 +22,7 @@ const schema = z
 export async function POST(request: NextRequest) {
   try {
     const input = await parseJson(request, schema);
-    const result = await login((input.identifier ?? input.email)!, input.password);
+    const result = await login((input.identifier ?? input.email)!, input.password, input.rememberMe);
     const response = NextResponse.json({ ok: true, data: result }, { status: 201 });
     const forwardedProto = request.headers.get("x-forwarded-proto");
     const isHttps = forwardedProto === "https" || request.nextUrl.protocol === "https:";
@@ -33,7 +34,7 @@ export async function POST(request: NextRequest) {
       sameSite: "lax",
       secure: secureCookie,
       path: "/",
-      maxAge: 60 * 60 * 12,
+      ...(input.rememberMe ? { maxAge: 60 * 60 * 24 * 30 } : {}),
     });
     return response;
   } catch (error) {

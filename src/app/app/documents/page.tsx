@@ -22,6 +22,7 @@ export default async function DocumentsPage() {
     where: {
       tenantId: session.tenantId,
       archivedAt: null,
+      status: { not: "SIGNED" },
       ...(allowedPlots ? {
         OR: [
           { recordType: "Plot", recordId: { in: allowedPlots.map((plot) => plot.id) } },
@@ -46,7 +47,7 @@ export default async function DocumentsPage() {
       <div className="mb-6">
         <h1 className="text-3xl font-semibold tracking-tight">Documents</h1>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-          Archive of generated letters and approvals. Create, upload, and edit plot documents from the plot workspace so each file stays attached to the correct plot history.
+          Working drafts and approvals. Once a signed copy is uploaded, the generated copy is replaced and the signed letter remains in the plot document history.
         </p>
       </div>
       <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4">

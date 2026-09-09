@@ -262,6 +262,7 @@ export function OwnershipDocumentUpload({
   fixedCategoryKey,
   defaultNotes = "",
   hideDocumentType = false,
+  excludeOwnershipLetters = false,
 }: {
   ownerType: "Plot" | "Owner" | "RegistryRecord";
   ownerId: string;
@@ -271,6 +272,7 @@ export function OwnershipDocumentUpload({
   fixedCategoryKey?: string;
   defaultNotes?: string;
   hideDocumentType?: boolean;
+  excludeOwnershipLetters?: boolean;
 }) {
   const [documentType, setDocumentType] = useState<RealEstateDocumentType>(defaultDocumentType);
   const [documentNo, setDocumentNo] = useState("");
@@ -290,7 +292,9 @@ export function OwnershipDocumentUpload({
           <label>
             <span className="label">Document type</span>
             <select className="input" value={documentType} onChange={(event) => setDocumentType(event.target.value as RealEstateDocumentType)}>
-              {ownershipDocumentTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
+              {ownershipDocumentTypes
+                .filter((type) => !excludeOwnershipLetters || !["ALLOTMENT_LETTER", "TRANSFER_LETTER"].includes(type.value))
+                .map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
             </select>
           </label>
         ) : null}
@@ -381,7 +385,7 @@ export function HistoricalOwnershipDocumentUpload({
           </select>
         </label>
         <label>
-          <span className="label">Letter number / reference</span>
+          <span className="label">Letter number / reference (optional)</span>
           <input className="input" value={documentNo} onChange={(event) => setDocumentNo(event.target.value)} />
         </label>
         <label>

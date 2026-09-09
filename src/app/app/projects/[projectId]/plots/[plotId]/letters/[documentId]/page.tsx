@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { requirePagePermission } from "@/server/page-auth";
 import { prisma } from "@/server/db";
 import { hasPermission } from "@/server/rbac";
@@ -22,6 +22,9 @@ export default async function LetterStudioPage(
     }),
   ]);
   if (!plot || !document) notFound();
+  if (document.status === "SIGNED" && document.signedFileAssetId) {
+    redirect(`/api/v1/files/${document.signedFileAssetId}/download?disposition=inline&proxy=1`);
+  }
   const missingVariables = extractMissingVariables(document.data);
   const returnTo = safeReturnTo(searchParams.returnTo, plot.projectId);
 

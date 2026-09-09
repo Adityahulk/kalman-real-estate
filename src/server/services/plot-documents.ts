@@ -271,7 +271,7 @@ function resolvePlotDocumentState(
       plotId: plot.id,
       kind,
       label: documentLabel(file),
-      number: file.documentNo,
+      number: file.documentNo ?? file.fileName.replace(/\.[^.]+$/, ""),
       documentDate: file.documentDate ?? file.createdAt,
       ownerId: relatedOwnership?.ownerId ?? plot.currentOwnerId,
       ownerName: relatedOwnership?.owner?.name ?? plot.currentOwnerName,

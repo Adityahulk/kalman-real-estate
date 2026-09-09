@@ -47,6 +47,66 @@ function ownershipLetterLabel(type: string) {
   return "Document";
 }
 
+function ownershipLetterKind(type: string) {
+  const normalized = type.toLowerCase();
+  if (normalized.includes("transfer")) return OwnershipKind.TRANSFER;
+  if (normalized.includes("allotment")) return OwnershipKind.ALLOTMENT;
+  return null;
+}
+
+function signedCategoryForDocument(type: string) {
+  return ownershipLetterKind(type) === OwnershipKind.TRANSFER
+    ? "signed-transfer-letter"
+    : "signed-allotment-letter";
+}
+
+async function assertOwnershipDraftCanBeCreated(context: RequestContext, input: {
+  type: string;
+  recordType: string;
+  recordId: string;
+}) {
+  const kind = ownershipLetterKind(input.type);
+  if (!kind || input.recordType !== "Plot") return;
+
+  const plot = await prisma.plot.findFirstOrThrow({
+    where: { id: input.recordId, tenantId: context.tenantId, archivedAt: null },
+    select: { currentOwnerId: true },
+  });
+  if (kind === OwnershipKind.ALLOTMENT) {
+    const signedAllotment = await prisma.fileAsset.findFirst({
+      where: {
+        tenantId: context.tenantId,
+        ownerType: "Plot",
+        ownerId: input.recordId,
+        categoryKey: "signed-allotment-letter",
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (plot.currentOwnerId || signedAllotment) {
+      throwBadRequest("This plot already has a completed allotment. Its signed ownership record is locked; create a transfer instead.");
+    }
+  }
+
+  const pendingRecord = await prisma.ownershipRecord.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      plotId: input.recordId,
+      kind,
+      documentId: null,
+      cancelledAt: null,
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!pendingRecord) {
+    throwBadRequest(
+      kind === OwnershipKind.TRANSFER
+        ? "Record the transfer details before creating its letter."
+        : "Record the allotment details before creating its letter.",
+    );
+  }
+}
+
 export const generateDocumentSchema = z.object({
   templateId: z.string().optional(),
   type: z.string().min(2),
@@ -73,6 +133,7 @@ export const refreshDocumentDraftSchema = z.object({
 });
 
 export async function generateDocument(context: RequestContext, input: z.infer<typeof generateDocumentSchema>) {
+  await assertOwnershipDraftCanBeCreated(context, input);
   const count = await prisma.generatedDocument.count({ where: { tenantId: context.tenantId, type: input.type } });
   const document = await prisma.generatedDocument.create({
     data: {
@@ -127,6 +188,7 @@ export async function generateDocument(context: RequestContext, input: z.infer<t
 }
 
 export async function createDocumentDraft(context: RequestContext, input: z.infer<typeof createDocumentDraftSchema>) {
+  await assertOwnershipDraftCanBeCreated(context, input);
   const count = await prisma.generatedDocument.count({ where: { tenantId: context.tenantId, type: input.type } });
   const fallbackNumber = `${input.type.toUpperCase()}-${new Date().getFullYear()}-${String(count + 1).padStart(5, "0")}`;
   // A user-supplied number (e.g. TBS/AH/2026/006 from the allotment form) is used verbatim.
@@ -575,15 +637,45 @@ export async function signDocument(context: RequestContext, id: string, input: z
     error.name = "BadRequestError";
     throw error;
   }
-  const document = await prisma.generatedDocument.update({
-    where: { id, tenantId: context.tenantId },
-    data: {
-      status: DocumentStatus.SIGNED,
-      signedById: context.userId,
-      signedAt: new Date(),
-      signedFileAssetId: input.signedFileAssetId,
-    },
+  const signedAt = new Date();
+  const obsoleteFileIds = [current.fileAssetId, current.signedFileAssetId]
+    .filter((fileId): fileId is string => Boolean(fileId) && fileId !== input.signedFileAssetId);
+  const document = await prisma.$transaction(async (tx) => {
+    await tx.fileAsset.update({
+      where: { id: input.signedFileAssetId },
+      data: {
+        categoryKey: signedCategoryForDocument(current.type),
+        documentType: ownershipLetterKind(current.type) === OwnershipKind.TRANSFER ? "TRANSFER_LETTER" : "ALLOTMENT_LETTER",
+        documentNo: current.number,
+        documentDate: current.finalizedAt ?? current.createdAt,
+        visibility: FileVisibility.OWNER_VISIBLE,
+      },
+    });
+    if (obsoleteFileIds.length) {
+      await tx.fileAsset.updateMany({
+        where: { tenantId: context.tenantId, id: { in: obsoleteFileIds }, deletedAt: null },
+        data: {
+          deletedAt: signedAt,
+          deletedById: context.userId,
+          deleteReason: "Replaced by the authoritative signed ownership letter",
+        },
+      });
+    }
+    return tx.generatedDocument.update({
+      where: { id, tenantId: context.tenantId },
+      data: {
+        status: DocumentStatus.SIGNED,
+        signedById: context.userId,
+        signedAt,
+        signedFileAssetId: input.signedFileAssetId,
+        fileAssetId: input.signedFileAssetId,
+        editableHtml: null,
+        editableLayout: Prisma.DbNull,
+        finalizedAt: signedAt,
+      },
+    });
   });
+  await reconcilePlotOwnershipForDocument(context, document);
   await writeAuditEvent(context, {
     action: AuditAction.SIGN,
     entityType: "GeneratedDocument",
@@ -1102,7 +1194,7 @@ async function buildPlotDocumentSnapshot(context: RequestContext, plotId: string
     "today": new Date().toLocaleDateString("en-IN"),
     "todayDots": formatDateDots(new Date()),
     "rera.number": plot.project.reraNumber ?? "",
-    "stamp.amount": "50",
+    "stamp.amount": "100",
     "stamp.estampNo": stampNo(0) || eStampNumber,
     "stamp.date": stampDateDots(0) || eStampDateDots || formatDateDots(new Date()),
     "stamp.2.estampNo": stampNo(1),
