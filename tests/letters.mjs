@@ -82,6 +82,7 @@ async function request(path, init = {}) {
     ".letter-paper-editor .agreement-page p.center",
     ".letter-paper-editor .agreement-page h2:has(+ .regulatory-note)",
     "padding-left: 90px",
+    "margin-top: 62px",
   ]) {
     assert(slice.includes(needle), `print CSS slice lost parity rule: ${needle}`);
   }
