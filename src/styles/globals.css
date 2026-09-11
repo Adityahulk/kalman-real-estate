@@ -147,6 +147,27 @@
   font-size: 17.3px;
   line-height: 1.25;
 }
+/* Printed page numbers are part of the canonical sheet, so they appear in Set Your Letters,
+   Edit Draft, PDF preview, downloads, and printouts at the same physical position. */
+.letter-paper-editor [data-template="ambey-allotment"] section[data-ambey-page]::after,
+.letter-paper-editor [data-letter-template="transfer-letter"] section[data-letter-page]::after {
+  position: absolute;
+  right: 0;
+  bottom: 28px;
+  left: 0;
+  z-index: 1;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1;
+  pointer-events: none;
+}
+.letter-paper-editor [data-template="ambey-allotment"] section[data-ambey-page]::after {
+  content: "Page " attr(data-ambey-page);
+}
+.letter-paper-editor [data-letter-template="transfer-letter"] section[data-letter-page]::after {
+  content: "Page " attr(data-letter-page);
+}
 /* Legal letters are monochrome on every surface. The important rule also neutralizes colour
    carried in pasted Word content or an older saved template, while preserving bold, underline,
    font size, spacing, and editable-field highlighting. */
@@ -366,6 +387,24 @@
 .letter-paper-editor .agreement-page h2 {
   margin-bottom: 20px;
   font-size: 1em;
+  text-align: left;
+}
+.letter-paper-editor .agreement-page .agreement-document-title,
+.letter-paper-editor .agreement-page h2:has(+ .regulatory-note) {
+  text-align: center;
+  text-transform: uppercase;
+}
+.letter-paper-editor .agreement-page .agreement-section-title {
+  text-align: left;
+  text-transform: uppercase;
+  text-underline-offset: 3px;
+}
+/* The agreement paragraph rule is intentionally justified and appears later than `.center`.
+   Pin legal dividers at a higher specificity so BETWEEN and AND remain truly centered. */
+.letter-paper-editor .agreement-page p.center,
+.letter-paper-editor .agreement-page .agreement-divider {
+  text-align: center;
+  text-align-last: center;
 }
 .letter-paper-editor .agreement-page table {
   margin: 12px 0 14px;
@@ -636,10 +675,11 @@
   vertical-align: top;
 }
 .letter-paper-editor .signature-lines td:first-child {
-  width: 72%;
+  width: 62%;
 }
 .letter-paper-editor .signature-lines td:last-child {
-  width: 28%;
+  width: 38%;
+  padding-left: 90px;
   text-align: right;
 }
 .letter-paper-editor .witness-table td:first-child {

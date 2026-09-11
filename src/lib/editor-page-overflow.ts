@@ -215,7 +215,8 @@ export const reflowPagesBrowserSource = `(function (rootOrSelector, opts) {
       var isReferenceBreak = block.classList && block.classList.contains("reference-page-break")
         || /^AND\\s*WHEREAS\\s*The\\s*Firm\\s*by\\s*virtue/i.test(referenceText)
         || /^DETAILS\\s*OF\\s*PRICING\\s*:/i.test(referenceText)
-        || /^6\\s*\\.\\s*ESSENCE\\s*OF\\s*THE\\s*AGREEMENT/i.test(referenceText);
+        || /^6\\s*\\.\\s*ESSENCE\\s*OF\\s*THE\\s*AGREEMENT/i.test(referenceText)
+        || /^13\\s*\\.\\s*TRANSFER\\s*OF\\s*OWNERSHIP\\s*OF\\s*THE\\s*SAID\\s*COLONY/i.test(referenceText);
       if (isReferenceBreak && contentKids(current).length) {
         current = createAfter(current);
       }

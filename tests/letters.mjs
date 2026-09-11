@@ -19,8 +19,9 @@
 // Puppeteer (`npx puppeteer browsers install chrome` or system chromium).
 
 import { PrismaClient } from "@prisma/client";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 
 for (const file of [".env.local", ".env"]) {
   if (!existsSync(file)) continue;
@@ -35,6 +36,13 @@ for (const file of [".env.local", ".env"]) {
 
 const baseUrl = process.env.SMOKE_BASE_URL ?? "http://localhost:3000";
 const prisma = new PrismaClient();
+
+function saveQaPdf(name, buffer) {
+  const directory = process.env.LETTER_QA_DIR;
+  if (!directory) return;
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, `${name}.pdf`), buffer);
+}
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -69,6 +77,11 @@ async function request(path, init = {}) {
     ".letter-paper-editor .transfer-recipient-table",
     ".letter-paper-editor .agreement-page .pricing-table",
     "margin: 8px 0 4px 52px",
+    'content: "Page " attr(data-ambey-page)',
+    'content: "Page " attr(data-letter-page)',
+    ".letter-paper-editor .agreement-page p.center",
+    ".letter-paper-editor .agreement-page h2:has(+ .regulatory-note)",
+    "padding-left: 90px",
   ]) {
     assert(slice.includes(needle), `print CSS slice lost parity rule: ${needle}`);
   }
@@ -225,12 +238,21 @@ async function exerciseLetterType(type) {
   assert(firstRender.response.status === 200, `${type}: initial render failed (${firstRender.json.error ?? firstRender.response.status})`);
   const firstFileId = firstRender.json.data.document.fileAssetId;
   const firstPdfBuffer = await downloadPdf(firstFileId);
+  saveQaPdf(type, firstPdfBuffer);
   await assertA4Pages(firstPdfBuffer, `${type} initial PDF`);
   const firstPdf = await pdfText(firstPdfBuffer);
   assert(firstPdf.numPages >= 1, `${type}: rendered PDF has no pages`);
   assert(firstPdf.has(letterPlot.code), `${type}: plot code missing from rendered PDF text`);
   if (type === "allotment_letter") {
     assert(firstPdf.pageTexts[0]?.includes("Warm Regards"), "allotment_letter: first-page sign-off spilled onto another page");
+    const clause13Page = firstPdf.pageTexts.findIndex((text) => text.includes("TRANSFER OF OWNERSHIP OF THE SAID COLONY"));
+    assert(clause13Page >= 0, "allotment_letter: clause 13 is missing from the PDF");
+    assert(!firstPdf.pageTexts[clause13Page].includes("LAWS OF LNDIA"), "allotment_letter: clause 13 did not start on a new page");
+  }
+  if (type === "allotment_letter" || type === "allotment_letter_joint" || type === "transfer_letter") {
+    for (let pageIndex = 0; pageIndex < firstPdf.numPages; pageIndex += 1) {
+      assert(firstPdf.pageTexts[pageIndex]?.includes(`Page ${pageIndex + 1}`), `${type}: footer is missing page number ${pageIndex + 1}`);
+    }
   }
   console.log(`  ✓ template render ok (${firstPdf.numPages} pages)`);
 
@@ -362,6 +384,7 @@ await exerciseLetterType("registry_status_letter");
     const render = await request(`/api/v1/documents/${doc.id}/render`, { method: "POST", headers: { cookie } });
     assert(render.response.status === 200, `joint: render failed (${render.json.error ?? render.response.status})`);
     const jointPdfBuffer = await downloadPdf(render.json.data.document.fileAssetId);
+    saveQaPdf("allotment_letter_joint", jointPdfBuffer);
     await assertA4Pages(jointPdfBuffer, "joint allotment initial PDF");
     const pdf = await pdfText(jointPdfBuffer);
     assert(pdf.pageTexts[0]?.includes("Warm Regards"), "joint: first-page sign-off spilled onto another page");

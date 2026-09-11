@@ -289,10 +289,13 @@ async function renderWithBrowser(browser: Browser, bodyHtml: string): Promise<Bu
     let sections = await measureSections();
     const sectionOverflows = (section: (typeof sections)[number]) => section.contentBottom > section.contentLimit + 1;
 
-    // Preserve every valid saved sheet exactly. Only legacy/stale drafts with real overflow are
-    // normalized, using the same paginator as both browser editors. This repairs direct API saves and
-    // old drafts without re-packing intentional blank/manual pages that already fit on A4.
-    if (sections.some(sectionOverflows)) {
+    // Agreement sheets are a continuous legal document. Both visual editors always run the shared
+    // paginator, so the PDF must do the same even when each stale/template-authored sheet technically
+    // fits. This keeps forced legal boundaries (for example clause 13) and the final page count equal
+    // on screen and in the downloaded PDF. Non-agreement letters retain their authored pages unless
+    // real overflow requires normalization.
+    const hasAgreementPages = await page.evaluate(() => Boolean(document.querySelector('section[data-reflow="agreement"]')));
+    if (hasAgreementPages || sections.some(sectionOverflows)) {
       // The visual editors reflow once immediately and again after the browser's next layout frame
       // (fonts/images and moved blocks can alter wrapping). Mirror that settle cycle here. A single
       // synchronous pass could move the final controls to page 6, then measure page 5 before its

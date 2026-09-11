@@ -68,14 +68,14 @@ export function ambeyAllotmentTemplate() {
 </section>
 
 <section data-ambey-page="5" data-top="760" class="agreement-page" data-reflow="agreement">
-<h2><u>{{firm.nameUpper}}, {{firm.address}}</u><br>PLOT BUYERS' AGREEMENT {{project.nameUpper}}</h2>
+<h2 class="agreement-document-title"><u>{{firm.nameUpper}}, {{firm.address}}</u><br>PLOT BUYERS' AGREEMENT {{project.nameUpper}}</h2>
 <p class="regulatory-note"><em><u>This residential Housing Project has been approved by issuing the License to Develop Colony by The Competent Authority cum Additional Deputy Commissioner (General), {{project.city}}, vide License No. BNL-UDC-2025/344 dated 13.03.2025 and also approved by issuing the License to Develop Colony by Municipal Corporation, {{project.city}}, vide License No. 235/B dated 22.04.2026. Further said colony has been approved by Punjab Real Estate Regulatory Authority (RERA) vide Registration No. PBREAR-BNL06-PR1384-062026 dated 11.06.2026.</u></em></p>
 <p class="center stamp-line">(Stamp Duty Rs. {{stamp.amount}} having E-Stamp No. {{stamp.3.estampNo}} dated {{stamp.3.date}})</p>
 <p class="agreement-opening">THIS AGREEMENT made at {{agreement.place}} on this {{ownership.effectiveDayOrdinal}} day of {{ownership.effectiveMonth}}, {{ownership.effectiveYear}}.</p>
-<p class="center">BETWEEN</p>
+<p class="center agreement-divider">BETWEEN</p>
 <p class="agreement-party"><strong>{{firm.nameUpper}}**</strong>, {{firm.address}} (hereinafter referred to as the 'Firm', which expression shall unless excluded by or repugnant to the subject or context be deemed to include its executors and authorized vide its permitted assigns) through it's duly Authorized Signatory vide authority letter dated {{firm.signatory.authorizationDate}} of the One Part;</p>
 <p class="agreement-note"><em>**M/s. {{firm.name}}, {{firm.address}} a partnership firm duly registered under the Indian Partnership Act, 1932 acting through its partner {{firm.signatory.name}} {{firm.signatory.relation}} authorized vide authority letter dated {{firm.signatory.authorizationDate}}.</em></p>
-<p class="center">AND</p>
+<p class="center agreement-divider">AND</p>
 <div class="photo-box right-mid framed-photo">Please affix<br>photograph of<br>allottee /<br>purchaser</div>
 <p class="buyer-block"><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.addressMultilineHtml}}</u><br><u>Aadhaar No. {{owner.aadhaarNo}}</u><br><u>Pan No. {{owner.panNo}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>
 <p class="buyer-note"><em>(hereinafter referred to as the *Allottee' which expression shall, unless excluded by or repugnant to the subject or context be deemed to include his/their heirs, executors, administrators, legal representatives, nominees, and assigns of the Other Part.</em></p>
@@ -85,7 +85,7 @@ export function ambeyAllotmentTemplate() {
 
 <section data-ambey-page="6" data-top="760" class="agreement-page" data-reflow="agreement">
 <p><strong>AND WHEREAS</strong> the Said Colony is proposed to be set up in accordance with the terms and conditions of the said licenses and layout plan presently approved by competent authority and as may be approved in future by the competent authority.</p>
-<h2>ALLOTTEE’S REPRESENTATIONS</h2>
+<h2 class="agreement-section-title"><u>ALLOTTEE’S REPRESENTATIONS</u></h2>
 <p><strong>AND WHEREAS</strong> the Allottee has applied for purchase and the firm has agreed to sell to the Allottee Plot bearing no. {{plot.code}} and measuring {{plot.areaSqyd}} (Sq yds. approx.) in the Said Colony and on the terms and conditions appearing hereinafter.</p>
 <p><strong>AND WHEREAS</strong> the Allottee hereby confirm(s) and represent(s) that he/they is/are executing this Agreement with the full knowledge that the demarcation and zoning plans for the Said Plot/Said Colony may further be changed and substituted by other layout plan (s) as and when sanctioned / approved by the Competent Authority in which event the number of the Said Plot, its location, size as provisionally allotted to the Allottee may change and be substituted by a new number, location, size etc.; to which the Allottee has/have confirmed that he/they shall have no objection having been informed of this eventuality. The Allottee also agrees to abide by the terms and conditions of this Agreement including those relating to payment of Total Price, Govt. Charges including other charges and other amounts including delayed interest, taxes, etc. as laid down herein.</p>
 <p><strong>AND WHEREAS</strong> the Allottee represents and confirms that the Allottee has satisfied himself about the competence of the Firm to execute this Agreement, seen all relevant documents, title deeds, License(s), approved layout plan etc., and has also familiarized himself / herself with the dimensions and other details of the said plot and also understood all limitations and obligations of the Firm and the Allottee in respect thereof and the Allottee has confirmed that his investigations are completed in all respects.</p>
@@ -153,7 +153,7 @@ export function ambeyAllotmentTemplate() {
 <section data-ambey-page="13" data-top="760" class="agreement-page" data-reflow="agreement">
 <p class="subclause-item"><span class="subclause-label">(b)</span><span class="subclause-text">First allottee is bound to pay transfer fee of Rs, 5,100/- for first transfer to the firm. Second allottee is bound to pay transfer fee of Rs. 11,000/- to firm for second transfer and third allottee is bound pay the transfer fee of Rs. 21,000/- to firm for third transfer.</span></p>
 <p class="clause-block"><span class="clause-heading"><span class="clause-heading-number"><strong>12.</strong></span><span class="clause-heading-text"><strong>LAWS OF LNDIA</strong></span></span><span class="clause-body">The rights and obligations of the parties under or arising out of this Agreement shall be construed and enforced in accordance with the laws of India.</span></p>
-<p class="clause-block"><span class="clause-heading"><span class="clause-heading-number"><strong>13.</strong></span><span class="clause-heading-text"><strong>TRANSFER OF OWNERSHIP OF THE SAID COLONY</strong></span></span><span class="clause-body">The Allottee agrees that the Firm shall have the right to transfer ownership of the Said Colony in whole or in parts to any other entity such as any partnership firm, body corporate(s) whether incorporated or not, association or agency by way of sale/ disposal /or any other arrangement as may be decided by the Firm without any intimation, written or otherwise to the Allottee and the Allottee shall not raise any objection in this regard.</span></p>
+<p class="clause-block reference-page-break"><span class="clause-heading"><span class="clause-heading-number"><strong>13.</strong></span><span class="clause-heading-text"><strong>TRANSFER OF OWNERSHIP OF THE SAID COLONY</strong></span></span><span class="clause-body">The Allottee agrees that the Firm shall have the right to transfer ownership of the Said Colony in whole or in parts to any other entity such as any partnership firm, body corporate(s) whether incorporated or not, association or agency by way of sale/ disposal /or any other arrangement as may be decided by the Firm without any intimation, written or otherwise to the Allottee and the Allottee shall not raise any objection in this regard.</span></p>
 <p class="clause-block"><span class="clause-heading"><span class="clause-heading-number"><strong>14.</strong></span><span class="clause-heading-text"><strong>RIGHT TO AMEND TERMS AND CONDITIONS</strong></span></span><span class="clause-body">The Allottee agrees and understands that the terms and conditions of the Agreement may be modified / amended by the Firm in accordance with any directions/order of any court of law, Governmental Authority, in compliance with applicable law and such amendment shall be binding on the Allottee. The Firm further reserves the right to correct, modify, amend or change all the annexure attached to this Agreement and also annexure which are indicated to be tentative at any time prior to the execution of the Sale Deed of the Said Plot.</span></p>
 <p class="clause-block"><span class="clause-heading"><span class="clause-heading-number"><strong>15.</strong></span><span class="clause-heading-text"><strong>DISPUTE RESOLUTION BY ARBITRATION</strong></span></span><span class="clause-body">All or any disputes arising out or touching upon or in relation to the terms of this Agreement including the interpretation and validity of the terms thereof and the respective rights and obligations of the parties shall be settled amicably by mutual discussion failing which the same shall be settled through arbitration. The arbitration proceedings shall be governed by Arbitration and Conciliation Act, 1996 or any statutory amendments/modifications thereof for the time being in force. The arbitration proceedings shall be appointed be held at an appropriate location at {{project.city}} by a Sole Arbitrator who shall be appointed by the firm. The Allottee hereby confirms that the Allottee shall have no objection to such appointment by the firm and have any doubts about the impartiality of sole arbitrator, appointed by the firm.</span></p>
 </section>
@@ -262,7 +262,7 @@ export function ambeyAllotmentJointTemplate() {
 <p class="buyer-block"><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.addressMultilineHtml}}</u><br><u>Aadhaar No. {{owner.aadhaarNo}}</u><br><u>Pan No. {{owner.panNo}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>`,
     `<div class="photo-box right-mid framed-photo">Please affix<br>photograph of<br>allottee /<br>purchaser</div>
 <p class="buyer-block"><u>{{owner.nameWithRelation}}</u><br><u>Resident of {{owner.addressMultilineHtml}}</u><br><u>Aadhaar No. {{owner.aadhaarNo}}</u><br><u>Pan No. {{owner.panNo}}</u><br><u>Mobile No. {{owner.mobileNo}}</u></p>
-<p class="center">and</p>
+<p class="center agreement-divider">AND</p>
 <div class="photo-box right-mid framed-photo">Please affix<br>photograph of<br>allottee /<br>purchaser</div>
 <p class="buyer-block"><u>{{owner2.nameWithRelation}}</u><br><u>Resident of {{owner2.addressMultilineHtml}}</u><br><u>Aadhaar No. {{owner2.aadhaarNo}}</u><br><u>Pan No. {{owner2.panNo}}</u><br><u>Mobile No. {{owner2.mobileNo}}</u></p>`,
   );
@@ -281,6 +281,21 @@ export function ambeyAllotmentJointTemplate() {
 // the signature rows; the approved format requires both allottee names in capitals.
 export function upgradeAllotmentTemplateBody(body: string) {
   return body
+    .replaceAll(
+      "<h2><u>{{firm.nameUpper}}, {{firm.address}}</u><br>PLOT BUYERS' AGREEMENT {{project.nameUpper}}</h2>",
+      "<h2 class=\"agreement-document-title\"><u>{{firm.nameUpper}}, {{firm.address}}</u><br>PLOT BUYERS' AGREEMENT {{project.nameUpper}}</h2>",
+    )
+    .replaceAll('<p class="center">BETWEEN</p>', '<p class="center agreement-divider">BETWEEN</p>')
+    .replaceAll('<p class="center">AND</p>', '<p class="center agreement-divider">AND</p>')
+    .replaceAll('<p class="center">and</p>', '<p class="center agreement-divider">AND</p>')
+    .replaceAll(
+      '<h2>ALLOTTEE’S REPRESENTATIONS</h2>',
+      '<h2 class="agreement-section-title"><u>ALLOTTEE’S REPRESENTATIONS</u></h2>',
+    )
+    .replaceAll(
+      '<p class="clause-block"><span class="clause-heading"><span class="clause-heading-number"><strong>13.</strong></span><span class="clause-heading-text"><strong>TRANSFER OF OWNERSHIP OF THE SAID COLONY</strong></span>',
+      '<p class="clause-block reference-page-break"><span class="clause-heading"><span class="clause-heading-number"><strong>13.</strong></span><span class="clause-heading-text"><strong>TRANSFER OF OWNERSHIP OF THE SAID COLONY</strong></span>',
+    )
     .replaceAll("(1) NAME: {{owner.nameWithRelation}}", "(1) NAME: {{owner.nameWithRelationUpper}}")
     .replaceAll("(2) NAME: {{owner2.nameWithRelation}}", "(2) NAME: {{owner2.nameWithRelationUpper}}")
     .replaceAll(
