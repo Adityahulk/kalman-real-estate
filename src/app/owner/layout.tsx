@@ -1,8 +1,13 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Building2, LogOut } from "lucide-react";
 import { prisma } from "@/server/db";
 import { getSessionUser } from "@/server/session";
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false, noarchive: true, nosnippet: true },
+};
 
 export default async function OwnerLayout({ children }: { children: React.ReactNode }) {
   const session = await getSessionUser();

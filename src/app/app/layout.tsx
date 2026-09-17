@@ -1,9 +1,14 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { getSessionUser } from "@/server/session";
 import { prisma } from "@/server/db";
 import { hasPermission } from "@/server/rbac";
 import { firmsForUser } from "@/server/services/firms";
 import { AppShell } from "./app-shell";
+
+export const metadata: Metadata = {
+  robots: { index: false, follow: false, noarchive: true, nosnippet: true },
+};
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await getSessionUser();

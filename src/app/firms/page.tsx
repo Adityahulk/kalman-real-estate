@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { Building2 } from "lucide-react";
 import { prisma } from "@/server/db";
@@ -6,6 +7,11 @@ import { getSessionUser } from "@/server/session";
 import { FirmSelector } from "./firm-selector";
 
 export const dynamic = "force-dynamic";
+
+export const metadata: Metadata = {
+  title: "Select Firm",
+  robots: { index: false, follow: false, noarchive: true, nosnippet: true },
+};
 
 export default async function FirmsPage() {
   const session = await getSessionUser();

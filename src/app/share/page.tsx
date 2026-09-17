@@ -1,10 +1,12 @@
+import type { Metadata } from "next";
 import { prisma } from "@/server/db";
 import { createFileShareToken, decodeFileBundleToken } from "@/server/file-share";
 
 export const dynamic = "force-dynamic";
 
-export const metadata = {
+export const metadata: Metadata = {
   title: "Shared files",
+  robots: { index: false, follow: false, noarchive: true, nosnippet: true },
 };
 
 function publicDownloadHref(fileId: string, expiresAtSeconds: number) {

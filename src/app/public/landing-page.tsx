@@ -149,6 +149,13 @@ const faqs = [
   ["Are training and ongoing support included?", "Implementation includes team onboarding and training. Ongoing support and expansion are planned according to the selected engagement."],
 ];
 
+const regionalCoverage = [
+  ["Punjab", "Builder ERP and real estate CRM for plotted colonies, residential projects and multi-project developers across Punjab."],
+  ["Bathinda", "Plot inventory, lead follow-up, customer documents, allotments and construction visibility for Bathinda real estate teams."],
+  ["Barnala", "Ownership, allotment letters, transfers, registry records and project operations for builders working in and around Barnala."],
+  ["Hyderabad", "Multi-project CRM, inventory, approvals, engineering progress and management reporting for growing Hyderabad developers."],
+] as const;
+
 type LandingPageProps = {
   whatsappNumber: string;
   salesEmail: string;
@@ -203,8 +210,8 @@ export function LandingPage({ whatsappNumber, salesEmail, currentYear }: Landing
         <div className="relative mx-auto flex min-h-[720px] max-w-[1440px] items-start px-4 pb-12 pt-20 sm:min-h-[780px] sm:px-6 sm:pb-44 lg:px-8 lg:pt-28">
           <div className="max-w-3xl">
             <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1.5 text-xs font-medium text-slate-100"><ShieldCheck size={14} /> Real estate technology, configured around your operations</div>
-            <h1 className="mt-7 text-4xl font-semibold leading-[1.08] sm:text-5xl lg:text-6xl">Run every real estate project from one intelligent operating system.</h1>
-            <p className="mt-6 max-w-2xl text-base leading-7 text-slate-200 sm:text-lg">Bring project planning, clickable site maps, plot ownership, documents, construction progress, sales CRM, costs, teams and customer services into one connected platform built around the way your company operates.</p>
+            <h1 className="mt-7 text-4xl font-semibold leading-[1.08] sm:text-5xl lg:text-6xl">Real estate builder software for every project, plot and customer.</h1>
+            <p className="mt-6 max-w-2xl text-base leading-7 text-slate-200 sm:text-lg">Bring sales CRM, plot inventory, clickable site maps, ownership, allotment letters, documents, construction progress, costs and customer services into one connected platform for builders in Punjab, Bathinda, Barnala and Hyderabad.</p>
             <div className="mt-8 flex flex-col gap-3 sm:flex-row">
               <a className="btn-gold h-12 px-6" href="#book-demo" onClick={() => trackLandingEvent({ name: "cta_click", location: "hero", detail: { action: "book_demo" } })}>Book a Demo <ArrowRight size={17} /></a>
               <a className="btn h-12 border border-white/25 bg-white/10 px-6 text-white hover:bg-white/15" href={whatsappHref} target="_blank" rel="noreferrer" onClick={() => trackLandingEvent({ name: "cta_click", location: "hero", detail: { action: whatsappConfigured ? "whatsapp" : "email" } })}><MessageCircle size={17} /> {whatsappConfigured ? "Talk to Us on WhatsApp" : "Talk to Sales"}</a>
@@ -322,6 +329,28 @@ export function LandingPage({ whatsappNumber, salesEmail, currentYear }: Landing
             <div><div className="text-xs font-semibold uppercase tracking-wider text-gold-700">Credibility without theatre</div><h3 className="mt-3 text-2xl font-semibold">Proof should come from working systems and accountable delivery.</h3></div>
             <div className="grid gap-3 sm:grid-cols-2">
               {credibilityPoints.map(([Icon, title, copy]) => <div key={title} className="rounded-md border border-slate-200 bg-white p-5"><Icon size={19} className="text-navy-700" /><h4 className="mt-3 font-semibold">{title}</h4><p className="mt-1 text-sm leading-6 text-slate-600">{copy}</p></div>)}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="regional-coverage-title" className="border-b border-slate-200 bg-white">
+        <div className="mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8">
+          <div className="grid gap-10 lg:grid-cols-[0.75fr_1.25fr] lg:items-start">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wider text-gold-700">Regional implementation</div>
+              <h2 id="regional-coverage-title" className="mt-3 text-3xl font-semibold leading-tight text-navy-950 sm:text-4xl">Real estate software for builders in Punjab and Hyderabad.</h2>
+              <p className="mt-4 text-sm leading-7 text-slate-600 sm:text-base">WIDESTATE OS is configured around each builder’s projects, approvals, document formats and team structure. Remote and guided implementation supports companies operating across Punjab and Hyderabad, with focused workflows for plotted developments in Bathinda and Barnala.</p>
+              <a className="mt-6 inline-flex items-center gap-2 font-semibold text-navy-700" href="#book-demo">Discuss your projects <ArrowRight size={17} /></a>
+            </div>
+            <div className="grid border border-slate-200 sm:grid-cols-2">
+              {regionalCoverage.map(([region, copy], index) => (
+                <article key={region} className={`p-6 ${index % 2 ? "border-t border-slate-200 sm:border-l sm:border-t-0" : index ? "border-t border-slate-200" : ""} ${index === 3 ? "sm:border-t" : ""}`}>
+                  <div className="flex items-center gap-2 text-sm font-semibold text-gold-700"><Map size={17} /> {region}</div>
+                  <h3 className="mt-3 text-lg font-semibold">Real estate operations in {region}</h3>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">{copy}</p>
+                </article>
+              ))}
             </div>
           </div>
         </div>
