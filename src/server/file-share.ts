@@ -1,7 +1,20 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
 const shareSecret = process.env.JWT_SECRET ?? "development-secret-change-me";
 const defaultShareTtlSeconds = 60 * 60 * 24 * 30;
+export const fileShareBundleSize = 10;
+
+export function createShortFileShareId() {
+  return randomBytes(12).toString("base64url");
+}
+
+export function splitFileShareIds(fileIds: string[], size = fileShareBundleSize) {
+  const groups: string[][] = [];
+  for (let index = 0; index < fileIds.length; index += size) {
+    groups.push(fileIds.slice(index, index + size));
+  }
+  return groups;
+}
 
 export function createFileShareToken(fileId: string, expiresAtSeconds = Math.floor(Date.now() / 1000) + defaultShareTtlSeconds) {
   return {
@@ -28,11 +41,9 @@ function signFileShare(fileId: string, expiresAtSeconds: number) {
     .digest("hex");
 }
 
-// --- Bundle sharing -------------------------------------------------------
-// A bundle lets several files be shared with ONE short link instead of pasting
-// one long signed URL per file (which overflows WhatsApp's text= limit and
-// breaks auto-linking). The link is stateless: the file ids + expiry + HMAC are
-// encoded into the URL, so no database row is needed.
+// --- Legacy bundle sharing ------------------------------------------------
+// Keep decoding the original stateless links so previously shared URLs continue
+// to work. New bundles are stored server-side and use a short random id.
 
 // Sorting makes the signature order-independent, so re-selecting the same files
 // in a different order still verifies.

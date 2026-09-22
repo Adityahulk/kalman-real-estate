@@ -3,6 +3,7 @@
 import { isNative } from "@/lib/native";
 
 export type ShareableFile = { id: string; fileName: string; mimeType?: string };
+export type FileBundleShareLink = { url: string; count: number };
 
 // WhatsApp's URL API accepts text only. To send an attachment, the file must be passed to the
 // platform share sheet. This works in supported browsers and in both Capacitor mobile shells.
@@ -25,30 +26,39 @@ export async function shareFiles(files: ShareableFile[], title = "Shared files")
   }
 }
 
-export async function createDirectShareLinks(files: ShareableFile[]): Promise<string[]> {
-  return Promise.all(files.map(async (file) => {
-    const response = await fetch(`/api/v1/files/${file.id}/share`);
-    const body = await response.json().catch(() => null);
-    if (!response.ok || !body?.data?.url) throw new Error(body?.error ?? "Could not create a direct download link.");
-    return body.data.url as string;
-  }));
-}
-
-/** Creates one public download page for a selection, keeping WhatsApp messages short and clickable. */
-export async function createFileBundleShareLink(files: ShareableFile[]): Promise<string> {
+/** Creates short public pages in groups of 10 so large selections remain easy to share. */
+export async function createFileBundleShareLinks(files: ShareableFile[]): Promise<FileBundleShareLink[]> {
   const response = await fetch("/api/v1/files/share-bundle", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ fileIds: files.map((file) => file.id) }),
   });
   const body = await response.json().catch(() => null);
-  if (!response.ok || !body?.data?.url) throw new Error(body?.error ?? "Could not create a secure download link.");
+  const rawLinks = Array.isArray(body?.data?.links)
+    ? body.data.links
+    : body?.data?.url
+      ? [{ url: body.data.url, count: files.length }]
+      : [];
+  if (!response.ok || !rawLinks.length) throw new Error(body?.error ?? "Could not create secure download links.");
 
-  const url = new URL(body.data.url as string);
-  if (url.protocol !== "https:" || isLocalHost(url.hostname)) {
-    throw new Error("WhatsApp links require the app to be served from its public HTTPS URL. Configure PUBLIC_APP_URL on the deployed app.");
-  }
-  return url.toString();
+  return rawLinks.map((item: { url?: unknown; count?: unknown }) => {
+    if (typeof item.url !== "string") throw new Error("The server returned an invalid share link.");
+    const url = new URL(item.url);
+    if (url.protocol !== "https:" || isLocalHost(url.hostname)) {
+      throw new Error("Shared links require the app to be served from its public HTTPS URL. Configure PUBLIC_APP_URL on the deployed app.");
+    }
+    return { url: url.toString(), count: Number(item.count) || 1 };
+  });
+}
+
+export function formatFileBundleShareMessage(links: FileBundleShareLink[], totalFiles: number) {
+  const fileLabel = `${totalFiles} file${totalFiles === 1 ? "" : "s"} shared with you`;
+  if (links.length === 1) return `${fileLabel}:\n${links[0].url}`;
+
+  const parts = links.map((link, index) => (
+    `Part ${index + 1} (${link.count} file${link.count === 1 ? "" : "s"}): ${link.url}`
+  ));
+  return `${fileLabel} in ${links.length} secure links:\n${parts.join("\n")}`;
 }
 
 /** WhatsApp supports text URLs, not browser-side file attachments. Use this only for public links. */

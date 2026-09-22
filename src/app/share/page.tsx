@@ -26,9 +26,9 @@ function ShareShell({ title, message }: { title: string; message: string }) {
   );
 }
 
-export default async function SharedFilesPage({ searchParams }: { searchParams: Promise<{ d?: string }> }) {
-  const token = (await searchParams).d;
-  const bundle = token ? decodeFileBundleToken(token) : null;
+export default async function SharedFilesPage({ searchParams }: { searchParams: Promise<{ d?: string; s?: string }> }) {
+  const params = await searchParams;
+  const bundle = params.s ? await storedBundle(params.s) : params.d ? decodeFileBundleToken(params.d) : null;
   if (!bundle) {
     return <ShareShell title="Link expired or invalid" message="This shared link is no longer valid. Ask the sender to share the files again." />;
   }
@@ -77,4 +77,18 @@ export default async function SharedFilesPage({ searchParams }: { searchParams: 
       </div>
     </main>
   );
+}
+
+async function storedBundle(id: string): Promise<{ ids: string[]; expires: number } | null> {
+  if (!/^[A-Za-z0-9_-]{16}$/.test(id)) return null;
+  const record = await prisma.fileShareBundle.findUnique({
+    where: { id },
+    select: { fileIds: true, expiresAt: true },
+  });
+  if (!record || record.expiresAt.getTime() <= Date.now()) return null;
+  const ids = Array.isArray(record.fileIds)
+    ? record.fileIds.filter((value): value is string => typeof value === "string")
+    : [];
+  if (!ids.length) return null;
+  return { ids, expires: Math.floor(record.expiresAt.getTime() / 1000) };
 }

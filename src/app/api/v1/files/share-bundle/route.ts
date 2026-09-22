@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { apiError, getRequestContext, ok, parseJson } from "@/server/api";
-import { encodeFileBundleToken } from "@/server/file-share";
+import { prisma } from "@/server/db";
+import { createShortFileShareId, splitFileShareIds } from "@/server/file-share";
 import { getFileForDownload } from "@/server/services/files";
 import { publicAppOrigin } from "@/server/public-app-url";
 
@@ -19,10 +20,27 @@ export async function POST(request: NextRequest) {
     const uniqueIds = [...new Set(fileIds)];
     await Promise.all(uniqueIds.map((id) => getFileForDownload(context, id)));
 
-    const token = encodeFileBundleToken(uniqueIds);
-    const url = new URL("/share", publicAppOrigin(request));
-    url.searchParams.set("d", token);
-    return ok({ url: url.toString(), count: uniqueIds.length });
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const groups = splitFileShareIds(uniqueIds);
+    const bundles = groups.map((fileIds) => ({
+      id: createShortFileShareId(),
+      tenantId: context.tenantId,
+      createdById: context.userId,
+      fileIds,
+      expiresAt,
+    }));
+
+    await prisma.$transaction([
+      prisma.fileShareBundle.deleteMany({ where: { expiresAt: { lt: new Date() } } }),
+      ...bundles.map((bundle) => prisma.fileShareBundle.create({ data: bundle })),
+    ]);
+
+    const origin = publicAppOrigin(request);
+    const links = bundles.map((bundle) => ({
+      url: new URL(`/share?s=${encodeURIComponent(bundle.id)}`, origin).toString(),
+      count: bundle.fileIds.length,
+    }));
+    return ok({ url: links[0].url, count: uniqueIds.length, links });
   } catch (error) {
     return apiError(error, { route: "files.share-bundle" });
   }

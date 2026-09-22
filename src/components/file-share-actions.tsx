@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Mail, MessageCircle } from "lucide-react";
-import { createDirectShareLinks, createFileBundleShareLink, openWhatsAppWithLink } from "@/lib/file-sharing";
+import { createFileBundleShareLinks, openWhatsAppWithLink } from "@/lib/file-sharing";
 
 export function FileShareActions({ fileId, fileName }: { fileId: string; fileName: string }) {
   const [loading, setLoading] = useState<"whatsapp" | "email" | null>(null);
@@ -13,12 +13,12 @@ export function FileShareActions({ fileId, fileName }: { fileId: string; fileNam
     setMessage("");
     try {
       const file = { id: fileId, fileName };
+      const [link] = await createFileBundleShareLinks([file]);
+      const text = `${fileName}:\n${link.url}`;
       if (target === "whatsapp") {
-        const url = await createFileBundleShareLink([file]);
-        openWhatsAppWithLink(`${fileName}:\n${url}`);
+        openWhatsAppWithLink(text);
       } else {
-        const [url] = await createDirectShareLinks([file]);
-        window.location.href = `mailto:?subject=${encodeURIComponent(fileName)}&body=${encodeURIComponent(`${fileName}:\n${url}`)}`;
+        window.location.href = `mailto:?subject=${encodeURIComponent(fileName)}&body=${encodeURIComponent(text)}`;
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not create the WhatsApp download link.");

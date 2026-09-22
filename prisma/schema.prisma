@@ -331,6 +331,7 @@ model Tenant {
   projectFileFields     ProjectFileField[]
   letterFieldCategories LetterFieldCategory[]
   archiveDismissals     ArchiveDismissal[]
+  fileShareBundles      FileShareBundle[]
 }
 
 model User {
@@ -361,6 +362,7 @@ model User {
   createdAuditEvents      AuditEvent[]            @relation("AuditActor")
   createdOwnershipRecords OwnershipRecord[]       @relation("OwnershipRecordCreator")
   archiveDismissals       ArchiveDismissal[]      @relation("ArchiveDismissalActor")
+  fileShareBundles        FileShareBundle[]       @relation("FileShareBundleCreator")
 
   @@index([tenantId, role])
   @@index([customRoleId])
@@ -961,6 +963,21 @@ model FileAsset {
   @@index([tenantId, ownerType, ownerId])
   @@index([tenantId, ownerType, ownerId, categoryKey])
   @@index([tenantId, deletedAt])
+}
+
+model FileShareBundle {
+  id          String   @id
+  tenantId    String
+  createdById String?
+  fileIds     Json
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation("FileShareBundleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, expiresAt])
+  @@index([expiresAt])
 }
 
 model DocumentTemplate {

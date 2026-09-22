@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Check, Link2, Mail, MessageCircle, Share2, X } from "lucide-react";
-import { createDirectShareLinks, createFileBundleShareLink, openWhatsAppWithLink } from "@/lib/file-sharing";
+import { createFileBundleShareLinks, formatFileBundleShareMessage, openWhatsAppWithLink } from "@/lib/file-sharing";
 
 type ShareFile = { id: string; fileName: string };
 
@@ -31,17 +31,16 @@ export function MultiFileShare({ files }: { files: ShareFile[] }) {
     setBusy(target);
     setMessage("");
     try {
+      const links = await createFileBundleShareLinks(chosen);
+      const shareMessage = formatFileBundleShareMessage(links, chosen.length);
       if (target === "whatsapp") {
-        const url = await createFileBundleShareLink(chosen);
-        openWhatsAppWithLink(`${chosen.length} file${chosen.length === 1 ? "" : "s"} shared with you:\n${url}`);
+        openWhatsAppWithLink(shareMessage);
       } else if (target === "email") {
-        const urls = await createDirectShareLinks(chosen);
-        const message = `${chosen.length} file${chosen.length === 1 ? "" : "s"} shared with you:\n${urls.join("\n")}`;
-        window.location.href = `mailto:?subject=${encodeURIComponent("Shared files")}&body=${encodeURIComponent(message)}`;
+        window.location.href = `mailto:?subject=${encodeURIComponent("Shared files")}&body=${encodeURIComponent(shareMessage)}`;
       } else {
-        const urls = await createDirectShareLinks(chosen);
-        await navigator.clipboard?.writeText(urls.join("\n"));
-        window.alert("Direct download link copied.");
+        if (!navigator.clipboard) throw new Error("Clipboard access is not available in this browser.");
+        await navigator.clipboard.writeText(shareMessage);
+        window.alert(`${links.length} secure link${links.length === 1 ? "" : "s"} copied.`);
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not prepare files for sharing.");
@@ -68,7 +67,7 @@ export function MultiFileShare({ files }: { files: ShareFile[] }) {
       {open ? (
         <div className="space-y-2 p-3">
           <div className="flex items-center justify-between">
-            <div className="text-xs text-slate-500">WhatsApp opens with one secure download link for all selected files.</div>
+            <div className="text-xs text-slate-500">Files are shared in secure groups of 10. Larger selections are split into multiple short links automatically.</div>
             <button type="button" className="text-xs font-medium text-navy-700 hover:text-navy-900" onClick={selectAll}>
               {selected.size === files.length ? "Clear all" : "Select all"}
             </button>
