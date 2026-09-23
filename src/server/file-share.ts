@@ -5,7 +5,8 @@ const defaultShareTtlSeconds = 60 * 60 * 24 * 30;
 export const fileShareBundleSize = 10;
 
 export function createShortFileShareId() {
-  return randomBytes(12).toString("base64url");
+  // 72 bits keeps the bearer link impractical to guess while producing a compact 12-character id.
+  return randomBytes(9).toString("base64url");
 }
 
 export function splitFileShareIds(fileIds: string[], size = fileShareBundleSize) {

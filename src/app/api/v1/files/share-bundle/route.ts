@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
 
     const origin = publicAppOrigin(request);
     const links = bundles.map((bundle) => ({
-      url: new URL(`/share?s=${encodeURIComponent(bundle.id)}`, origin).toString(),
+      url: new URL(`/s/${encodeURIComponent(bundle.id)}`, origin).toString(),
       count: bundle.fileIds.length,
     }));
     return ok({ url: links[0].url, count: uniqueIds.length, links });

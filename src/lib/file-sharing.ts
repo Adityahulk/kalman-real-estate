@@ -52,13 +52,16 @@ export async function createFileBundleShareLinks(files: ShareableFile[]): Promis
 }
 
 export function formatFileBundleShareMessage(links: FileBundleShareLink[], totalFiles: number) {
-  const fileLabel = `${totalFiles} file${totalFiles === 1 ? "" : "s"} shared with you`;
-  if (links.length === 1) return `${fileLabel}:\n${links[0].url}`;
+  const heading = "WIDESTATE OS | Secure file share";
+  const fileLabel = `${totalFiles} file${totalFiles === 1 ? " is" : "s are"} ready to view`;
+  if (links.length === 1) {
+    return `${heading}\n\n${fileLabel}:\n${links[0].url}\n\nLink expires in 30 days.`;
+  }
 
   const parts = links.map((link, index) => (
-    `Part ${index + 1} (${link.count} file${link.count === 1 ? "" : "s"}): ${link.url}`
+    `${index + 1} of ${links.length} - ${link.count} file${link.count === 1 ? "" : "s"}\n${link.url}`
   ));
-  return `${fileLabel} in ${links.length} secure links:\n${parts.join("\n")}`;
+  return `${heading}\n\n${fileLabel} in ${links.length} links:\n\n${parts.join("\n\n")}\n\nLinks expire in 30 days.`;
 }
 
 /** WhatsApp supports text URLs, not browser-side file attachments. Use this only for public links. */

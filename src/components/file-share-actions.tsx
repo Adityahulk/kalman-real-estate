@@ -14,7 +14,7 @@ export function FileShareActions({ fileId, fileName }: { fileId: string; fileNam
     try {
       const file = { id: fileId, fileName };
       const [link] = await createFileBundleShareLinks([file]);
-      const text = `${fileName}:\n${link.url}`;
+      const text = `WIDESTATE OS | Secure file share\n\n${fileName}\n${link.url}\n\nLink expires in 30 days.`;
       if (target === "whatsapp") {
         openWhatsAppWithLink(text);
       } else {

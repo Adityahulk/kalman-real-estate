@@ -5,8 +5,19 @@ import { createFileShareToken, decodeFileBundleToken } from "@/server/file-share
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "Shared files",
+  title: "Secure File Share",
+  description: "Securely view and download files shared through WIDESTATE OS.",
   robots: { index: false, follow: false, noarchive: true, nosnippet: true },
+  openGraph: {
+    title: "Secure File Share | WIDESTATE OS",
+    description: "Securely view and download files shared through WIDESTATE OS.",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Secure File Share | WIDESTATE OS",
+    description: "Securely view and download files shared through WIDESTATE OS.",
+  },
 };
 
 function publicDownloadHref(fileId: string, expiresAtSeconds: number) {
@@ -80,7 +91,8 @@ export default async function SharedFilesPage({ searchParams }: { searchParams: 
 }
 
 async function storedBundle(id: string): Promise<{ ids: string[]; expires: number } | null> {
-  if (!/^[A-Za-z0-9_-]{16}$/.test(id)) return null;
+  // Accept the former 16-character ids so links created by the previous release stay valid.
+  if (!/^[A-Za-z0-9_-]{12,16}$/.test(id)) return null;
   const record = await prisma.fileShareBundle.findUnique({
     where: { id },
     select: { fileIds: true, expiresAt: true },
