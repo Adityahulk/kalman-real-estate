@@ -55,7 +55,24 @@ jobs:
         run: npm ci
 
       - name: Install Chromium for the PDF renderer
-        run: npx puppeteer browsers install chrome
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_output="$(npx puppeteer browsers install chrome-headless-shell)"
+          printf '%s\n' "$install_output"
+
+          chromium_path="$(printf '%s\n' "$install_output" | awk '/chrome-headless-shell@/ { print $2 }' | tail -1)"
+          if [[ -z "$chromium_path" || ! -x "$chromium_path" ]]; then
+            echo "Could not locate Puppeteer's installed Chrome Headless Shell binary." >&2
+            exit 1
+          fi
+
+          echo "PUPPETEER_EXECUTABLE_PATH=$chromium_path" >> "$GITHUB_ENV"
+          "$chromium_path" \
+            --headless \
+            --no-sandbox \
+            --disable-dev-shm-usage \
+            --dump-dom about:blank >/dev/null
 
       - name: Migrate & seed database
         run: |
